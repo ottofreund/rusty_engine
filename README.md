@@ -1,0 +1,10 @@
+
+
+Reminders:
+ - Lookups to sliding piece arrays are done with **relevant** blocker bitboards, meaning that last square before edge is dismissed. This reduces the combination space greatly with minimal overhead of converting to relevant bb. The values of these lookup tables are naturally stored **with** edges.
+ - Sliding piece lookups are computed with assumption that all blockers are enemy pieces. This assumption is easy to relieve using enemy piece occupation bb mask.
+
+
+Checklist:
+ - Is having eaten piece type necessary in move integer? If no need, can make hot code paths more efficient with changing taken piece type -> piece taken flag
+
