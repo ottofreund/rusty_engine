@@ -1,6 +1,6 @@
 /* Utils for u64 (magic) bitboards  */
 
-use crate::repr::board::{A_FILE, H_FILE, RANK_1, RANK_8};
+use crate::repr::board::{RANKS};
 use crate::repr::move_gen::MoveGen;
 use crate::repr::types::W_ROOK;
 
@@ -33,19 +33,6 @@ pub fn contains_square(bb: u64, sqr: u32) -> bool {
 ///Remove
 pub fn diff(bb: u64, bb_to_exclude: u64) -> u64 {
     return bb & !bb_to_exclude;
-}
-///Get all relevant blockers for blocker mask. This means excluding edge squares on edges that sqr is not on.
-/// scan_cardinal for rook, scan_diag for bishop, both for queen
-/// Very good constant time complexity due to memoization of no-edge bitboards
-pub fn get_relevant_blockers(sqr: u32, blockers: u64, scan_cardinal: bool, scan_diag: bool, move_gen: &MoveGen) -> u64 {
-    let mut res: u64 = 0;
-    if scan_cardinal {
-        res |= move_gen.rook_bbs_no_edges[sqr as usize];
-    }
-    if scan_diag {
-        res |= move_gen.bishop_bbs_no_edges[sqr as usize];
-    }
-    return res & blockers;
 }
 
 pub fn bb_to_string(bb: u64) -> String {

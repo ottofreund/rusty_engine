@@ -40,14 +40,14 @@ impl MoveGen {
             y += 1;
         }
         //initialize magic_bb struct, which contains final magically indexed precomputed slide_bbs
-        let magic_bb: MagicBitboard = MagicBitboard::init_magic(&attack_bbs, &rook_bbs_no_edges, &bishop_bbs_no_edges); 
+        let magic_bb: MagicBitboard = MagicBitboard::init_magic(&attack_bbs, &rook_bbs_no_edges, &bishop_bbs_no_edges, false); 
         return Self { attack_bbs, rook_bbs_no_edges, bishop_bbs_no_edges, magic_bb }
     }
     ///get 'legal' sliding moves at **sqr** with (relevant) blockers **rel_blockers**.
     /// if **cardinal** then adds rook moves
     /// if **diag** then adds bishop moves
     /// for queen moves both flags are set
-    pub fn get_sliding_for(&self, sqr: usize, rel_blockers: u64, cardinal: bool, diag: bool) -> u64 {
+    pub fn get_sliding_for(&self, sqr: usize, rel_blockers: u64, cardinal: bool, diag: bool, own_occupation: u64) -> u64 {
         let mut res: u64 = 0;
         if cardinal {
             res |= self.magic_bb.rook_slide_bbs[sqr][self.magic_bb.get_magic_idx(sqr, rel_blockers, true)];
@@ -55,8 +55,90 @@ impl MoveGen {
         if diag {
             res |= self.magic_bb.bishop_slide_bbs[sqr][self.magic_bb.get_magic_idx(sqr, rel_blockers, false)];
         }
-        return res;
+        return res & !own_occupation; //can't eat own pieces so exclude own_occupation
     }
+
+    ///Get all relevant blockers for blocker mask. This means excluding edge squares on edges that sqr is not on.
+    /// scan_cardinal for rook, scan_diag for bishop, both for queen
+    /// Very good constant time complexity due to memoization of no-edge bitboards
+    pub fn get_relevant_blockers(&self, sqr: usize, blockers: u64, scan_cardinal: bool, scan_diag: bool) -> u64 {
+        let mut res: u64 = 0;
+        if scan_cardinal {
+            res |= self.rook_bbs_no_edges[sqr];
+        }
+        if scan_diag {
+            res |= self.bishop_bbs_no_edges[sqr];
+        }
+        return res & blockers;
+    }
+
+    ///Computes pins on **board** for **side** into its fields ({white/black}_pinned, {white_black}_pinned_restrictions) so that this only needs to be called once after making/unmaking move and after having all needed info in those fields.
+    /// 1. Binary and rook empty board attack bb from king's square with opponent's combined (ORed) queen and rook occupation bbs. Call this the potential pinners bb.
+    /// 2. If potential pinners empty stop and go to 1. but for diagonals.
+    /// 3. Get rook **blocking** attack bb from king's sqr with blockers being opponent's combined (ORed) queen and rook occupation bbs. Call this the RPP bitboard (relevant potential pinned)
+    /// 4. For each potential pinner:
+    ///     4.1. Get the potential pinner sqr_idx from lsb pop
+    ///     4.2. Binary AND RPP with rook **blocking** attack bb from **sqr_idx** with king as the only blocker.  
+    ///          Untoggle sqr_idx from this to get specific RPP.
+    ///     4.3  Binary AND specific RPP with (white_occupation | black_occupation) and get count of ones in result bb.
+    ///     4.4  If count_ones == 1 then we have pinner:
+    ///         4.4.1. Pop the idx of pinner with pop_lsb and set board.pinned bit at idx.
+    ///         4.4.2. Binary OR board.pinned_restrictions[idx] with specific RPP to add this restriction
+    ///         Else no pins for this potential pinner, continue 
+    /// 5. Do same starting from 1. but for diagonals (bishop)
+    pub fn compute_pinned(&self, board: &mut Board, side: Color) {
+        self.pinned_for_specified(false, board, side);
+        self.pinned_for_specified(true, board, side);
+    }
+    ///Perform described algorithm for diagonals or cardinals according to **diag** flag.
+    fn pinned_for_specified(&self, diag: bool, board: &mut Board, side: Color) {
+        //1.
+        let opponent_QaR: u64; //opponent's queen and rook occupation
+        let empty_sliding_from_king: u64; ///empty sliding for rook/bishop from king's square
+        //set color/direction specific vars
+        if side.is_white() {
+            opponent_QaR = board.pieces[9] | board.pieces[10];
+        } else {
+            opponent_QaR = board.pieces[3] | board.pieces[4];
+        }
+        let king_sqr_idx: usize = board.get_king_sqr_idx(side) as usize;
+        if diag {
+            empty_sliding_from_king = self.attack_bbs[2][king_sqr_idx];
+        } else {
+            empty_sliding_from_king = self.attack_bbs[3][king_sqr_idx];
+        }
+        let mut potential_pinners: u64 = opponent_QaR & empty_sliding_from_king;
+        //2.
+        if potential_pinners == 0 { return }; //no potential pinners
+        let own_occupation: u64;
+        if side.is_white() {own_occupation = board.white_occupation} else {own_occupation = board.black_occupation};
+        //3.
+        let rpp: u64 = self.get_sliding_for(king_sqr_idx, self.get_relevant_blockers(king_sqr_idx, opponent_QaR, !diag, diag), !diag, diag, own_occupation);
+        let total_occupation: u64 = board.white_occupation | board.black_occupation;
+        //4.
+        while potential_pinners != 0 {
+            //4.1
+            let pp_sqr_idx: usize = bitboard::pop_lsb(&mut potential_pinners) as usize; //potential pinner sqr idx
+            //4.2
+            let mut specific_rpp: u64 = rpp & self.get_sliding_for(pp_sqr_idx, 1 << king_sqr_idx, !diag, diag, 0); //'own' occupation not that but doesn't matter here
+            bitboard::clear_square(&mut specific_rpp, pp_sqr_idx as u32); //clear pp_sqr_idx
+            //4.3
+            let occupied_rpp: u64 = specific_rpp & total_occupation;
+            //4.4
+            if occupied_rpp.count_ones() == 1 { //we have pinner
+                let pinner_idx: u32 = occupied_rpp.trailing_zeros(); //4.4.1
+                //4.4.2
+                if side.is_white() {
+                    bitboard::set_square(&mut board.white_pinned, pinner_idx);
+                    board.white_pinned_restrictions[pinner_idx as usize] |= specific_rpp;
+                } else {
+                    bitboard::set_square(&mut board.black_pinned, pinner_idx);
+                    board.black_pinned_restrictions[pinner_idx as usize] |= specific_rpp;
+                }
+            }
+        }
+    }
+
 }
 
 ///Compute and add attacking bitboard for all pieces at (x, y)
@@ -167,26 +249,26 @@ pub fn generate_all_blocker_masks(mut full_attack_bb: u64, attack_bb_no_edges: O
 pub fn naive_rook_sliding(sqr: u32, blockers: u64, include_edge: bool) -> u64 {
     let mut possible_slides: u64 = 0;
     //go right
-    possible_slides |= slide_to_dir(sqr, |x| x + 1, H_FILE, blockers, include_edge);
+    possible_slides |= slide_to_dir(sqr, |x| x + 1, FILES[7], blockers, include_edge);
     //go left
-    possible_slides |= slide_to_dir(sqr, |x| x - 1, A_FILE, blockers, include_edge);
+    possible_slides |= slide_to_dir(sqr, |x| x - 1, FILES[0], blockers, include_edge);
     //go down
-    possible_slides |= slide_to_dir(sqr, |x| x - 8, RANK_1, blockers, include_edge);
+    possible_slides |= slide_to_dir(sqr, |x| x - 8, RANKS[0], blockers, include_edge);
     //go up
-    possible_slides |= slide_to_dir(sqr, |x| x + 8, RANK_8, blockers, include_edge);
+    possible_slides |= slide_to_dir(sqr, |x| x + 8, RANKS[7], blockers, include_edge);
     return possible_slides;
 }
 ///Return bb with all possible bishop slides on **sqr** with given **blockers**. **include_edge** flag controls if squares before edge are taken.
 pub fn naive_bishop_sliding(sqr: u32, blockers: u64, include_edge: bool) -> u64 {
     let mut possible_slides: u64 = 0;
     //go NE
-    possible_slides |= slide_to_dir(sqr, |x| x + 9, H_FILE | RANK_8, blockers, include_edge);
+    possible_slides |= slide_to_dir(sqr, |x| x + 9, FILES[7] | RANKS[7], blockers, include_edge);
     //go NW
-    possible_slides |= slide_to_dir(sqr, |x| x + 7, A_FILE | RANK_8, blockers, include_edge);
+    possible_slides |= slide_to_dir(sqr, |x| x + 7, FILES[0] | RANKS[7], blockers, include_edge);
     //go SE
-    possible_slides |= slide_to_dir(sqr, |x| x - 7, H_FILE | RANK_1, blockers, include_edge);
+    possible_slides |= slide_to_dir(sqr, |x| x - 7, FILES[7] | RANKS[0], blockers, include_edge);
     //go SW
-    possible_slides |= slide_to_dir(sqr, |x| x - 9, A_FILE | RANK_1, blockers, include_edge);
+    possible_slides |= slide_to_dir(sqr, |x| x - 9, FILES[0] | RANKS[0], blockers, include_edge);
     return possible_slides;
 }
 
@@ -212,15 +294,15 @@ fn slide_to_dir(sqr: u32, apply_step_f: fn(u32) -> u32, end_sqr_bb: u64, blocker
 ///Used for initialization of attacking bitboards
 ///Computes the attacking squares for **sqr** from white's perspective
 fn pawn_attacks_white_for(sqr: u32) -> u64 {
-    let non_accessible_ranks: u64 = (RANK_2 >> 8) | (RANK_7 << 8); //first and last rank non-accessible
+    let non_accessible_ranks: u64 = RANKS[0] | RANKS[7]; //first and last rank non-accessible
     if bitboard::contains_square(non_accessible_ranks, sqr) { 
         return 0;
     }
     let mut res: u64 = 0;
     //add left attacks, removing overflow to H file
-    res |= bitboard::diff(((1u128 << sqr) << 7) as u64, H_FILE);
+    res |= bitboard::diff(((1u128 << sqr) << 7) as u64, FILES[7]);
     //add right attacks, removing overflow to A file
-    res |= bitboard::diff(((1u128 << sqr) << 9) as u64, A_FILE);
+    res |= bitboard::diff(((1u128 << sqr) << 9) as u64, FILES[0]);
     return res;
 }
 
@@ -287,11 +369,11 @@ pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveG
     let pawn_piece_idx: usize;
     let enemy_occupied: u64;
     if mover.is_white() { 
-        is_promotion = bitboard::contains_square(RANK_7, from);
-        forward = from + 8; forward2 = from + 16; PAWN_START_RANK = RANK_2; pawn_piece_idx = 0; enemy_occupied = board.black_occupation;
+        is_promotion = bitboard::contains_square(RANKS[6], from);
+        forward = from + 8; forward2 = from + 16; PAWN_START_RANK = RANKS[1]; pawn_piece_idx = 0; enemy_occupied = board.black_occupation;
     } else { //for black
-        is_promotion = bitboard::contains_square(RANK_2, from);
-        forward = from - 8; forward2 = from - 16; PAWN_START_RANK = RANK_7; pawn_piece_idx = 6; enemy_occupied = board.white_occupation;
+        is_promotion = bitboard::contains_square(RANKS[1], from);
+        forward = from - 8; forward2 = from - 16; PAWN_START_RANK = RANKS[6]; pawn_piece_idx = 6; enemy_occupied = board.white_occupation;
     }
     //add attacking moves
     let mut characteristic_attacks: u64 = move_gen.attack_bbs[pawn_piece_idx][from as usize]; //bitboard
