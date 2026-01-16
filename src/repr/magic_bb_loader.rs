@@ -2,30 +2,32 @@ use std::collections::HashSet;
 use rand::prelude::*;
 use crate::repr::bitboard;
 use crate::repr::move_gen::{self, naive_rook_sliding, naive_bishop_sliding};
-///MagicBitboard object is initialized on startup and holds all relevant data and methods related to initializing magic bitboards and using them.
+///Contains magically indexed precomputed slide_bbs and is associated with the methods and data needed to compute them
+///Total size roughly a megabyte
 pub struct MagicBitboard {
-    pub rook_slide_bbs: Vec<Vec<u64>>, //'legal' slides magically indexed by **relevant** blocker masks
-    pub bishop_slide_bbs: Vec<Vec<u64>>, //vec because multi-megabyte array too large for stack
-    rook_magics: [u64 ; 64], //rook magic multipliers for each square
-    bishop_magics: [u64 ; 64] //for bishop
+    pub rook_slide_bbs: Vec<Vec<u64>>, //pseudolegal slides magically indexed,
+    pub bishop_slide_bbs: Vec<Vec<u64>>,
+    rook_magics: [u64 ; 64],
+    bishop_magics: [u64 ; 64]
 }
 
 impl MagicBitboard {
-    ///Initializes magic bitboards by finding a working magic number (multiplier and shift amount) for each square. Returns Self which provides API to easily fetch 'legal' slide bbs magically indexed.
-    /// new_magics flag can be toggled if want to compute new magics (startup takes a few more seconds) instead of using the precomputed memoized ones.
+    /// Initializes by finding rook and bishop magics (multipliers) for each square. <br><br>
+    /// if we want **new_magics** startup takes a few more seconds
     pub fn init_magic(empty_board_attack_bbs: &[[u64 ; 64] ; 12], rook_empty_board_attack_bbs_no_edges: &[u64 ; 64], bishop_empty_board_attack_bbs_no_edges: &[u64 ; 64], new_magics: bool) -> Self {
         let mut rook_magics: [u64 ; 64] = ROOK_MAGICS_MEMOIZED;
         let mut bishop_magics: [u64 ; 64] = BISHOP_MAGICS_MEMOIZED;
-        let mut rook_slide_bbs: Vec<Vec<u64>> = Vec::new(); //these are filled "on the fly" square by square so that each square reserves as little space as it actually needs (squares have varying need of nof bits == inner vec len)
+        //squares have greatly varying need of nof bits <==> inner collection len, thus use vectors
+        let mut rook_slide_bbs: Vec<Vec<u64>> = Vec::new(); 
         let mut bishop_slide_bbs: Vec<Vec<u64>> = Vec::new();
 
         let mut rng: ThreadRng = rand::rng();
         for sqr in 0..64 {  
             let rook_empty_board_attack_bb: u64 = empty_board_attack_bbs[3][sqr];
             let rook_empty_board_attack_bb_no_edges: u64 = rook_empty_board_attack_bbs_no_edges[sqr];
-            let bishop_empty_board_attack_bb: u64 = empty_board_attack_bbs[2][sqr as usize];
+            let bishop_empty_board_attack_bb: u64 = empty_board_attack_bbs[2][sqr];
             let bishop_empty_board_attack_bb_no_edges: u64 = bishop_empty_board_attack_bbs_no_edges[sqr];
-            //we don't want edges here with the following, lookups are done with relevant blocker bitboards
+            //we don't want edges here with the block masks, lookups are done with relevant blocker bitboards
             let all_rook_block_masks: Vec<u64> = move_gen::generate_all_blocker_masks(rook_empty_board_attack_bb, Some(rook_empty_board_attack_bb_no_edges));
             let all_bishop_block_masks: Vec<u64> = move_gen::generate_all_blocker_masks(bishop_empty_board_attack_bb, Some(bishop_empty_board_attack_bb_no_edges));
             //look for magics if want new ones
@@ -35,7 +37,7 @@ impl MagicBitboard {
                 //for bishop
                 find_working(sqr as u32, false,  &mut bishop_magics, &all_bishop_block_masks, &mut rng);
             }          
-            //now we can build the inner magic indexed vectors for this sqr with legal slides and push to outer vec
+            //form the magic indexed vector(s) for this sqr with legal slides
             let mut rook_lookup_vec: Vec<u64> = vec![0u64 ; 1 << ROOK_BITS[sqr]];
             for block_mask in all_rook_block_masks { //for rook
                 let magic_idx: usize = ((block_mask.wrapping_mul(rook_magics[sqr])) >> ROOK_SHIFTS[sqr]) as usize;
@@ -46,14 +48,13 @@ impl MagicBitboard {
                 let magic_idx: usize = ((block_mask.wrapping_mul(bishop_magics[sqr])) >> BISHOP_SHIFTS[sqr]) as usize;
                 bishop_lookup_vec[magic_idx] = naive_bishop_sliding(sqr as u32, block_mask, true);
             }
-            rook_slide_bbs.push(rook_lookup_vec); //add this sqr to outer lookup vec
+            rook_slide_bbs.push(rook_lookup_vec);
             bishop_slide_bbs.push(bishop_lookup_vec);
         }
         //now magics computed and 'legal' slide bbs filled magically indexed
         return Self { rook_magics, bishop_magics, rook_slide_bbs, bishop_slide_bbs }
     }
-    ///For piece at **sqr** give blocker bitboard (ONLY RELEVANT BLOCKERS) and get corresponding magic idx with which to lookup from arr.
-    ///Blocker bitboard has to be masked with no_edge bbs to contain only relevant blockers
+    ///Get magic idx for **rook**/bishop with **rel_blockers**
     pub fn get_magic_idx(&self, sqr: usize, rel_blockers: u64, rook: bool) -> usize {
         if rook {
             return ((rel_blockers.wrapping_mul(self.rook_magics[sqr])) >> ROOK_SHIFTS[sqr]) as usize;
@@ -64,7 +65,7 @@ impl MagicBitboard {
 
 }
 
-///Find working magic number for **sqr** and update result to collections.
+///Find working magic number for **sqr** and update **magic_arr**. <br><br>
 /// **all_block_masks** are RELEVANT blocker masks
 fn find_working(sqr: u32, rook: bool, magic_arr: &mut [u64 ; 64], all_block_masks: &Vec<u64>, rng: &mut ThreadRng) {
     let piece_idx: usize;
@@ -100,7 +101,7 @@ fn find_working(sqr: u32, rook: bool, magic_arr: &mut [u64 ; 64], all_block_mask
     return;
 }
 
-///Get random magic number (the multiplier)
+///Low number of 1s u64 for candidate magic 
 fn gen_random_magic(rng: &mut ThreadRng) -> u64 {
     return rng.next_u64() & rng.next_u64() & rng.next_u64();
 }

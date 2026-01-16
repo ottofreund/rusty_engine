@@ -15,15 +15,16 @@ const WL_CASTLING_GAP_BB: u64 = 14; //2^1 + 2^2 + 2^3
 const BS_CASTLING_GAP_BB: u64 = 6917529027641081856; //2^61 + 2^62
 const BL_CASTLING_GAP_BB: u64 = 1008806316530991104; //2^57 + 2^58 + 2^59
 
+///Uses **magic_bb** handle for precomputed slide moves.
 pub struct MoveGen {
-    pub attack_bbs: [[u64 ; 64] ; 12], //for each piece on each square the squares it attacks on an empty board. For pawns doesn't include forward moves, since they aren't attacked by pawns. Doesn't include en passant or castling either.
+    pub attack_bbs: [[u64 ; 64] ; 12], //empty board attack bbs, for pawns doesn't include forward moves, since they aren't attacked by pawns. Doesn't include en passant or castling either.
     pub rook_bbs_no_edges: [u64 ; 64], //slides on empty board without the last square on edge for each direction. Used for block masks since they are optimized by not including edges.
-    pub bishop_bbs_no_edges: [u64 ; 64], //same but for bishops
-    pub magic_bb: MagicBitboard //we hold the MagicBitboard struct privately here to avoid unneccessary passing extra handles
+    pub bishop_bbs_no_edges: [u64 ; 64],
+    pub magic_bb: MagicBitboard
 }
 
 impl MoveGen {
-    ///Initializes MoveGen. Simultaneously initializes magic_bb inside **magic_bb** option wrapping and optionally a testing structure inside **test_structure** wrapping to test slide dictionaries.
+    ///Necessarily also inits magicbbs
     pub fn init() -> Self {
         let mut attack_bbs: [[u64 ; 64] ; 12] = [[0 ; 64] ; 12];
         let mut rook_bbs_no_edges: [u64 ; 64] = [0 ; 64];
@@ -39,54 +40,124 @@ impl MoveGen {
             x = 0;
             y += 1;
         }
-        //initialize magic_bb struct, which contains final magically indexed precomputed slide_bbs
         let magic_bb: MagicBitboard = MagicBitboard::init_magic(&attack_bbs, &rook_bbs_no_edges, &bishop_bbs_no_edges, false); 
         return Self { attack_bbs, rook_bbs_no_edges, bishop_bbs_no_edges, magic_bb }
     }
-    ///get 'legal' sliding moves at **sqr** with (relevant) blockers **rel_blockers**.
-    /// if **cardinal** then adds rook moves
-    /// if **diag** then adds bishop moves
-    /// for queen moves both flags are set
-    pub fn get_sliding_for(&self, sqr: usize, rel_blockers: u64, cardinal: bool, diag: bool, own_occupation: u64) -> u64 {
-        let mut res: u64 = 0;
-        if cardinal {
-            res |= self.magic_bb.rook_slide_bbs[sqr][self.magic_bb.get_magic_idx(sqr, rel_blockers, true)];
+
+
+
+    ///Also updates board.**mover**_attacks for efficiency 
+    pub fn get_all_pseudolegal(&self, board: &mut Board, mover: Color) -> Vec<u32> {
+        let mut res: Vec<u32> = Vec::new();
+        let mut i: usize;
+        let e: usize;
+        if mover.is_white() {i = 0; e = 6;} else {i = 6; e = 12;}
+        while i < e {
+            let mut piece_bb: u64 = board.pieces[i];
+            while piece_bb != 0 {
+                let piece_idx: u32 = bitboard::pop_lsb(&mut piece_bb);
+                self.pseudolegal_for(piece_idx, i as u32, mover, board, &mut res);
+            }
+            i += 1;
         }
-        if diag {
-            res |= self.magic_bb.bishop_slide_bbs[sqr][self.magic_bb.get_magic_idx(sqr, rel_blockers, false)];
-        }
-        return res & !own_occupation; //can't eat own pieces so exclude own_occupation
+        return res;
     }
 
-    ///Get all relevant blockers for blocker mask. This means excluding edge squares on edges that sqr is not on.
-    /// scan_cardinal for rook, scan_diag for bishop, both for queen
+    ///Adds pseudolegal moves for **piece** at **from** to move vector **move_vec**. <br>
+    ///1. If pawn, handle separately <br>
+    ///2. Get target squares (including eating own pieces), sliding gen or simply attack_bb <br>
+    ///3. Binary OR with board.{white/black}_attacks to add these attacks <br>
+    ///4. Remove "eating own piece" moves by binary ANDing with !own_occupation <br>
+    ///5. Remaining are pseudolegals. Pop-lsb 1-by-1 and make move and add to **move_vec** until none left.
+    pub fn pseudolegal_for(&self, from: u32, piece: u32, mover: Color, board: &mut Board, move_vec: &mut Vec<u32>) {
+        if piece == W_PAWN || piece == B_PAWN {
+            //no en passant from this
+            pseudolegal_pawn(from, mover, board, self, move_vec);
+            return;
+        }
+
+        let mut targets: u64 = match piece {
+            W_KNIGHT | B_KNIGHT =>  self.attack_bbs[1][from as usize],
+            W_BISHOP | B_BISHOP =>  {
+                self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, bitboard::with_clear_square(board.total_occupation(), from), false), false)
+            },
+            W_ROOK | B_ROOK =>  {
+                self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, bitboard::with_clear_square(board.total_occupation(), from), true), true)
+            },
+            W_QUEEN | B_QUEEN =>  {
+                let blockers: u64 = bitboard::with_clear_square(board.total_occupation(), from);
+                self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, blockers, true), true)
+                    |
+                self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, blockers, false), false)
+            },
+            W_KING | B_KING => {
+                add_castling(board, mover, move_vec);
+                self.attack_bbs[5][from as usize]
+            }
+            _ => panic!("Couldn't match piece in pseudolegal_for. Reached unreachable case.")    
+        };
+        //3. && 4.
+        let opponent_occupied: u64;
+        if mover.is_white() {
+            board.white_attacks |= targets;
+            targets &= !board.white_occupation;
+            opponent_occupied = board.black_occupation;
+        } else {
+            board.black_attacks |= targets;
+            targets &= !board.black_occupation;
+            opponent_occupied = board.white_occupation;
+        }
+        //5.
+        while targets != 0 {
+            let target_sqr: u32 = bitboard::pop_lsb(&mut targets);
+            let is_take: bool = bitboard::contains_square(opponent_occupied, target_sqr);
+            move_vec.push(_move::create(from, target_sqr, is_take, mover, piece));
+        }
+    }
+
+    ///get pseudolegal sliding moves at **sqr** with **rel_blockers**. <br/><br>
+    /// for queen moves this is called twice, once with **rook** true and once with **rook** false <br/><br>
+    /// does NOT remove own pieces here yet since defended pieces are also of interest.
+    pub fn get_sliding_for(&self, sqr: usize, rel_blockers: u64, rook: bool) -> u64 {
+        if rook {
+            return self.magic_bb.rook_slide_bbs[sqr][self.magic_bb.get_magic_idx(sqr, rel_blockers, true)];
+        } else {
+            return self.magic_bb.bishop_slide_bbs[sqr][self.magic_bb.get_magic_idx(sqr, rel_blockers, false)];
+        }
+    }
+
+    ///Get all relevant blockers for blocker mask. This means excluding edge squares on edges that sqr is not on.<br/>
+    /// scan_cardinal for rook, scan_diag for bishop, both for queen <br/>
     /// Very good constant time complexity due to memoization of no-edge bitboards
-    pub fn get_relevant_blockers(&self, sqr: usize, blockers: u64, scan_cardinal: bool, scan_diag: bool) -> u64 {
-        let mut res: u64 = 0;
-        if scan_cardinal {
-            res |= self.rook_bbs_no_edges[sqr];
+    pub fn get_relevant_blockers(&self, sqr: usize, blockers: u64, cardinal: bool) -> u64 {
+        if cardinal {
+            return blockers & self.rook_bbs_no_edges[sqr];
+        } else {
+            return blockers & self.bishop_bbs_no_edges[sqr];
         }
-        if scan_diag {
-            res |= self.bishop_bbs_no_edges[sqr];
-        }
-        return res & blockers;
     }
 
     ///Computes pins on **board** for **side** into its fields ({white/black}_pinned, {white_black}_pinned_restrictions) so that this only needs to be called once after making/unmaking move and after having all needed info in those fields.
     /// 1. Binary and rook empty board attack bb from king's square with opponent's combined (ORed) queen and rook occupation bbs. Call this the potential pinners bb.
     /// 2. If potential pinners empty stop and go to 1. but for diagonals.
     /// 3. Get rook **blocking** attack bb from king's sqr with blockers being opponent's combined (ORed) queen and rook occupation bbs. Call this the RPP bitboard (relevant potential pinned)
-    /// 4. For each potential pinner:
-    ///     4.1. Get the potential pinner sqr_idx from lsb pop
-    ///     4.2. Binary AND RPP with rook **blocking** attack bb from **sqr_idx** with king as the only blocker.  
-    ///          Untoggle sqr_idx from this to get specific RPP.
-    ///     4.3  Binary AND specific RPP with (white_occupation | black_occupation) and get count of ones in result bb.
-    ///     4.4  If count_ones == 1 then we have pinner:
-    ///         4.4.1. Pop the idx of pinner with pop_lsb and set board.pinned bit at idx.
-    ///         4.4.2. Binary OR board.pinned_restrictions[idx] with specific RPP to add this restriction
-    ///         Else no pins for this potential pinner, continue 
+    /// 4. For each potential pinner:<br/>
+    ///     4.1. Get the potential pinner sqr_idx from lsb pop <br/>
+    ///     4.2. Binary AND RPP with rook **blocking** attack bb from **sqr_idx** with king as the only blocker.  <br/>
+    ///          Untoggle sqr_idx from this to get specific RPP. <br/>
+    ///     4.3  Binary AND specific RPP with (white_occupation | black_occupation) and get count of ones in result bb.<br/>
+    ///     4.4  If count_ones == 1 then we have pinner: <br/>
+    ///         4.4.1. Pop the idx of pinner with pop_lsb and set board.pinned bit at idx. <br/>
+    ///         4.4.2. Binary OR board.pinned_restrictions[idx] with specific RPP to add this restriction <br/>
+    ///         Else no pins for this potential pinner, continue <br/>
     /// 5. Do same starting from 1. but for diagonals (bishop)
     pub fn compute_pinned(&self, board: &mut Board, side: Color) {
+        //first reset bitboards containing previous information
+        board.white_pinned = 0;
+        board.black_pinned = 0;
+        board.white_pinned_restrictions = [0 ; 64];
+        board.black_pinned_restrictions = [0 ; 64];
+        //compute new pins
         self.pinned_for_specified(false, board, side);
         self.pinned_for_specified(true, board, side);
     }
@@ -94,7 +165,7 @@ impl MoveGen {
     fn pinned_for_specified(&self, diag: bool, board: &mut Board, side: Color) {
         //1.
         let opponent_QaR: u64; //opponent's queen and rook occupation
-        let empty_sliding_from_king: u64; ///empty sliding for rook/bishop from king's square
+        let empty_sliding_from_king: u64; //empty sliding for rook/bishop from king's square
         //set color/direction specific vars
         if side.is_white() {
             opponent_QaR = board.pieces[9] | board.pieces[10];
@@ -110,17 +181,15 @@ impl MoveGen {
         let mut potential_pinners: u64 = opponent_QaR & empty_sliding_from_king;
         //2.
         if potential_pinners == 0 { return }; //no potential pinners
-        let own_occupation: u64;
-        if side.is_white() {own_occupation = board.white_occupation} else {own_occupation = board.black_occupation};
         //3.
-        let rpp: u64 = self.get_sliding_for(king_sqr_idx, self.get_relevant_blockers(king_sqr_idx, opponent_QaR, !diag, diag), !diag, diag, own_occupation);
+        let rpp: u64 = self.get_sliding_for(king_sqr_idx, self.get_relevant_blockers(king_sqr_idx, opponent_QaR, !diag), !diag);
         let total_occupation: u64 = board.white_occupation | board.black_occupation;
         //4.
         while potential_pinners != 0 {
             //4.1
             let pp_sqr_idx: usize = bitboard::pop_lsb(&mut potential_pinners) as usize; //potential pinner sqr idx
             //4.2
-            let mut specific_rpp: u64 = rpp & self.get_sliding_for(pp_sqr_idx, 1 << king_sqr_idx, !diag, diag, 0); //'own' occupation not that but doesn't matter here
+            let mut specific_rpp: u64 = rpp & self.get_sliding_for(pp_sqr_idx, 1 << king_sqr_idx, !diag);
             bitboard::clear_square(&mut specific_rpp, pp_sqr_idx as u32); //clear pp_sqr_idx
             //4.3
             let occupied_rpp: u64 = specific_rpp & total_occupation;
@@ -209,19 +278,8 @@ fn process_square(x: u32, y: u32, attack_bbs: &mut[[u64 ; 64] ; 12], rook_bbs_no
     bishop_bbs_no_edges[sqr_idx as usize] = naive_bishop_sliding(sqr_idx, 0, false);
 }
 
-///Precomputes rook sliding moves at square (x, y) for every possible blocking mask to lookup.
-///Adds to the dictionary.
-fn process_rook_sliding(x: u32, y: u32, lookup: &mut HashMap<(u32, u64), u64>, attack_bb: u64, attack_bb_no_edges: u64) {
-    let sqr_idx: u32 = x % 8 + y * 8;
-    let all_masks: Vec<u64> = generate_all_blocker_masks(attack_bb, None); //we want edges included here
-    //iterate through each mask and compute naive sliding moves for it to dictionary
-    for mask in all_masks {
-        //when we insert we REMOVE edges from the key but KEEP the edges in the value
-        lookup.insert((sqr_idx, mask & attack_bb_no_edges), naive_rook_sliding(sqr_idx, mask, true));
-    }
-}
 
-///Returns all variations of blocker masks from **full_attack_bb*.
+///Returns all variations of blocker masks from **full_attack_bb**. <br/>
 ///**attack_bb_no_edges** must be defined if the last square before edge is wished to not be included
 pub fn generate_all_blocker_masks(mut full_attack_bb: u64, attack_bb_no_edges: Option<u64>) -> Vec<u64> {
     let include_edges: bool = attack_bb_no_edges.is_none();
@@ -242,10 +300,10 @@ pub fn generate_all_blocker_masks(mut full_attack_bb: u64, attack_bb_no_edges: O
     return res;
 }
 
-///Returns a bitboard of possible rook sliding moves at sqr with given blockers computed naively. 
-/// The first blocker found is included in the possible slide moves. (Assume that all blockers enemy. This assumption can be relieved later)
-/// take_edge flag controls if the possible edge squares are included in the bb
-/// **blockers** can be either strictly relevant or irrelevant inclusive, since by definition it doesn't matter
+///Returns a bitboard of possible rook sliding moves at sqr with given blockers computed naively.  <br/>
+/// The first blocker found is included in the possible slide moves. (Assume that all blockers enemy. This assumption can be relieved later) <br/>
+/// take_edge flag controls if the possible edge squares are included in the bb  <br/>
+/// **blockers** can be either strictly relevant or irrelevant inclusive, since by definition it doesn't matter  <br/>
 pub fn naive_rook_sliding(sqr: u32, blockers: u64, include_edge: bool) -> u64 {
     let mut possible_slides: u64 = 0;
     //go right
@@ -291,7 +349,7 @@ fn slide_to_dir(sqr: u32, apply_step_f: fn(u32) -> u32, end_sqr_bb: u64, blocker
     return res;
 }
 
-///Used for initialization of attacking bitboards
+///Used for initialization of attacking bitboards  <br/>
 ///Computes the attacking squares for **sqr** from white's perspective
 fn pawn_attacks_white_for(sqr: u32) -> u64 {
     let non_accessible_ranks: u64 = RANKS[0] | RANKS[7]; //first and last rank non-accessible
@@ -306,22 +364,19 @@ fn pawn_attacks_white_for(sqr: u32) -> u64 {
     return res;
 }
 
-
+///This needs to know opponent attacked squares <br>
 ///Adds LEGAL castling moves for **mover** to move vector **move_vec**.
 fn add_castling(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
-    if mover.is_white() {
+    if !board.mover_in_check { //can't castle from check
         let occupation_bb: u64 = board.white_occupation | board.black_occupation;
-        if !board.mover_in_check { //king not checked, necessary for castling
+        if mover.is_white() {
             if board.ws && WS_CASTLING_GAP_BB & occupation_bb == 0 { //short is legal
-            move_vec.push(WHITE_SHORT);
-        }
+                move_vec.push(WHITE_SHORT);
+            }
             if board.wl && WL_CASTLING_GAP_BB & occupation_bb == 0 { //long is legal
                 move_vec.push(WHITE_SHORT);
             }
-        }
-    } else {
-        let occupation_bb: u64 = board.white_occupation | board.black_occupation;
-        if !board.mover_in_check {
+        } else {
             if board.bs && BS_CASTLING_GAP_BB & occupation_bb == 0 { //short is legal
                 move_vec.push(BLACK_SHORT);
             }
@@ -329,37 +384,12 @@ fn add_castling(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
                 move_vec.push(BLACK_LONG);
             }
         }
-    }
-}
-/* 
-///Adds pseudolegal moves for **piece** at **from** to move vector **move_vec**.
-pub fn pseudolegal_for(from: u32, piece: u32, mover: Color, move_gen: &MoveGen, board: &Board, move_vec: &mut Vec<u32>) {
-    match piece {
-        W_PAWN | B_PAWN => pseudolegal_pawn(from, mover, board, move_gen, move_vec),
-        W_KNIGHT | B_KNIGHT =>  pseudolegal_knight(from, mover, board, move_gen, move_vec),
-        W_BISHOP | B_BISHOP => 
-    }
-}
- */
-/// Add all pseudolegal knight moves for knight on square **from** and color **mover** on **board** to **move_vec** .
-fn pseudolegal_knight(from: u32, mover: Color, board: &Board, move_gen: &MoveGen, move_vec: &mut Vec<u32>) {
-    let own_occupied: u64;
-    let knight_idx: u32;
-    if mover.is_white() {own_occupied = board.white_occupation; knight_idx = 1;} else {own_occupied = board.black_occupation; knight_idx = 7;};
-    //add attacking moves
-    let mut characteristics: u64 = move_gen.attack_bbs[1][from as usize]; //bitboard (same for black and white)
-    while characteristics != 0 { //check each characteristic jump
-        let attack_sqr: u32 = bitboard::pop_lsb(&mut characteristics);
-        if !bitboard::contains_square(own_occupied, attack_sqr) { //is pseudolegal (not eating own piece)
-            let takes: Option<u32> = board.lift_piece_type_at(attack_sqr, mover.opposite());
-            move_vec.push(_move::create(from, attack_sqr, takes, mover, knight_idx));
-        }
-    }
-    return;
+    } 
 }
 
-
-/// Add all pseudolegal pawn moves for pawn on square **from** and color **mover** on **board** to **move_vec** . NO EN PASSANT
+/// Add all pseudolegal pawn moves for pawn on square **from** and color **mover** on **board** to **move_vec** . <br>
+/// 
+/// NO EN PASSANT
 pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveGen, move_vec: &mut Vec<u32>)  {
     //following are relative to color:
     let is_promotion: bool;
@@ -380,11 +410,10 @@ pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveG
     while characteristic_attacks != 0 { //check each attack
         let attack_sqr: u32 = bitboard::pop_lsb(&mut characteristic_attacks);
         if bitboard::contains_square(enemy_occupied, attack_sqr) { //is pseudolegal
-            let takes: Option<u32> = Some(board.get_piece_type_at(attack_sqr, mover.opposite()));
             if is_promotion {
-                add_all_promotions(from, attack_sqr, takes, mover, move_vec);
+                add_all_promotions(from, attack_sqr, true, mover, move_vec);
             } else {
-                move_vec.push(_move::create(from, attack_sqr, takes, mover, pawn_piece_idx as u32));
+                move_vec.push(_move::create(from, attack_sqr, true, mover, pawn_piece_idx as u32));
             }
         }
     }
@@ -392,13 +421,13 @@ pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveG
     //can go forward 1 if no piece there
     if !board.is_occupied(forward) {
         if is_promotion {
-            _move::add_all_promotions(from, forward, None, mover, move_vec);
+            _move::add_all_promotions(from, forward, false, mover, move_vec);
         } else {
-            move_vec.push(_move::create(from, forward, None, mover, pawn_piece_idx as u32))
+            move_vec.push(_move::create(from, forward, false, mover, pawn_piece_idx as u32))
         }
         //can go forward 2 if also no piece on forward2 and pawn on PAWN_START_RANK
         if bitboard::contains_square(PAWN_START_RANK, from) && !board.is_occupied(forward2) {
-            move_vec.push(_move::create(from, forward2, None, mover, pawn_piece_idx as u32))
+            move_vec.push(_move::create(from, forward2, false, mover, pawn_piece_idx as u32))
         }
     }
     //NO EN PASSANT FROM THIS

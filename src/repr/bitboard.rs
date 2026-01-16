@@ -16,19 +16,23 @@ pub fn with_pop_lsb(bb: u64) -> u64 {
 }
 ///Set bit at sqr to 1 mutably to passed bb
 pub fn set_square(bb: &mut u64, sqr: u32) {
-    *bb |= 1 << sqr;
+    *bb |= 1u64 << sqr;
 }
 ///Return new bitboard with set bit at sqr
 pub fn with_set_square(bb: u64, sqr: u32) -> u64 {
-    return bb | (1 << sqr);
+    return bb | (1u64 << sqr);
+}
+///Return new bitboard with cleared bit at sqr
+pub fn with_clear_square(bb: u64, sqr: u32) -> u64 {
+    return bb & !(1u64 << sqr);
 }
 ///Clear bit at sqr to 0
 pub fn clear_square(bb: &mut u64, sqr: u32) {
-    *bb &= !(1 << sqr);
+    *bb &= !(1u64 << sqr);
 }
 ///Does bb have sqr toggled?
 pub fn contains_square(bb: u64, sqr: u32) -> bool {
-    return bb & (1 << sqr) != 0;
+    return bb & (1u64 << sqr) != 0;
 }
 ///Remove
 pub fn diff(bb: u64, bb_to_exclude: u64) -> u64 {

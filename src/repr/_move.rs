@@ -3,7 +3,7 @@ use crate::repr::{board::{Board, square_to_string}, types::*};
 //0-5: source square
 //6-11: target square
 //12: is eating move?
-//13-16: eaten piece
+//13-16: free
 //17: castle short?
 //18: castle long?
 //21: is promotion?
@@ -25,16 +25,12 @@ const BLACK_SHORT_CORNER: u32 = 63;
 const BLACK_LONG_CORNER: u32 = 56;
 
 ///Encode move to u32
-pub fn create(from: u32, to: u32, takes: Option<u32>, mover: Color, moved_piece: u32) -> u32 {
+pub fn create(from: u32, to: u32, is_take: bool, mover: Color, moved_piece: u32) -> u32 {
     let mut res: u32 = from;
     res = res | (to << 6);
     res = res | (moved_piece << 26);
-    match takes {
-        Some(piece) => {
-            res = res | 4096; // toggle 12 bit, signal is eating move
-            res = res | (piece << 13) //bits 13 - 16 for distinguishing eaten piece
-        },
-        None => {}
+    if is_take {
+        res = res | 4096; // toggle 12 bit, signal is eating move
     }
     if mover.is_white() {
         res = res | 2147483648; //toggle most significant bit
@@ -59,18 +55,18 @@ pub fn create_castling(mover: Color, is_short: bool) -> u32 {
 }
 
 /// Promotion move creator
-pub fn create_promotion(from: u32, to: u32, takes: Option<u32>, promotion_piece: u32, mover: Color, moved_piece: u32) -> u32 {
-    return (create(from, to, takes, mover, moved_piece) | 524288) | (promotion_piece << 20);
+pub fn create_promotion(from: u32, to: u32, is_take: bool, promotion_piece: u32, mover: Color, moved_piece: u32) -> u32 {
+    return (create(from, to, is_take, mover, moved_piece) | 524288) | (promotion_piece << 20);
 }
 ///Add all promotions for this pawn to a mutably borrowed move vector **vec**. Doesn't validate input, assumes correct usage
-pub fn add_all_promotions(from: u32, to: u32, takes: Option<u32>, mover: Color, moves: &mut Vec<u32>) {
+pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: Color, moves: &mut Vec<u32>) {
     let mut p: u32;
     let e: u32;
     let moved_piece: u32;
     //start and end indices of piece based off color. Also moved piece
     if mover.is_white() { p = 1; e = 6; moved_piece = 0; } else { p = 7; e = 12; moved_piece = 6; }; 
     while p < e {
-        moves.push(create_promotion(from, to, takes, p, mover, moved_piece));
+        moves.push(create_promotion(from, to, is_take, p, mover, moved_piece));
         p += 1
     }
 }
@@ -89,14 +85,6 @@ pub fn get_target(mov: u32) -> u32  {
 ///Get moved piece type
 pub fn get_moved_piece(mov: u32) -> u32 {
     return (mov >> 26) & 0xF;
-}
-
-pub fn eaten_piece(mov: u32) -> Option<u32> {
-    if (mov & 4096) > 0 {
-        return Some((mov >> 13) & 0xF);
-    } else {
-        return None;
-    }
 }
 
 pub fn is_white_move(mov: u32) -> bool {

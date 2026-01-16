@@ -31,6 +31,18 @@ pub struct Board {
 
 impl Board {
 
+    pub fn make_move(&self, mov: u32) {
+        return;
+    }
+
+    pub fn unmake_move(&self, mov: u32) {
+        return;
+    }
+    ///Returns bb with both black and white occupations toggled.
+    pub fn total_occupation(&self) -> u64 {
+        return self.white_occupation | self.black_occupation;
+    }
+
     pub fn is_occupied(&self, sqr: u32) -> bool {
         return self.is_white_occupied(sqr) || self.is_black_occupied(sqr);
     }
@@ -50,14 +62,14 @@ impl Board {
         return (self.black_occupation & (1 << sqr)) != 0;
     }
 
-    /// Gets piece of **owner** color at **sqr**.
-    /// Expects that contains piece, panics if doesn't.
+    /// Gets piece of **owner** color at **sqr**. <br/>
+    /// Expects that contains piece, panics if doesn't. <br/>
     /// Should only be used after checking occupany with is_{color}_occupied -method.
     pub fn get_piece_type_at(&self, sqr: u32, owner: Color) -> u32 {
         return self.lift_piece_type_at(sqr, owner).unwrap();
     }
 
-    /// Lifts piece of **owner** color at **sqr**.
+    /// Lifts piece of **owner** color at **sqr**. <br/>
     /// Some(piece) if exists, None if no piece
     pub fn lift_piece_type_at(&self, sqr: u32, owner: Color) -> Option<u32> {
         //iterate through all piece bitboards of owner until found
