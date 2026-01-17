@@ -82,7 +82,7 @@ pub fn get_target(mov: u32) -> u32  {
     return (mov & 0xFC0) >> 6;
 }
 
-///Get moved piece type
+///Get piece type idx
 pub fn get_moved_piece(mov: u32) -> u32 {
     return (mov >> 26) & 0xF;
 }
@@ -109,6 +109,10 @@ pub fn is_eating(mov: u32) -> bool {
 
 pub fn is_promotion(mov: u32) -> bool {
     return (mov & 2097152) > 0;
+}
+
+pub fn is_en_passant(mov: u32) -> bool {
+    return (mov & 1073741824) > 0;
 }
 //Castling rights updator's are not called for a side after both of their rights have been lost.
 ///Updates white's castling rights directly to board object in accordance with played move **mov**.

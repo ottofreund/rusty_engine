@@ -20,7 +20,7 @@ pub struct MoveGen {
     pub attack_bbs: [[u64 ; 64] ; 12], //empty board attack bbs, for pawns doesn't include forward moves, since they aren't attacked by pawns. Doesn't include en passant or castling either.
     pub rook_bbs_no_edges: [u64 ; 64], //slides on empty board without the last square on edge for each direction. Used for block masks since they are optimized by not including edges.
     pub bishop_bbs_no_edges: [u64 ; 64],
-    pub magic_bb: MagicBitboard
+    pub magic_bb: MagicBitboard,
 }
 
 impl MoveGen {
@@ -44,7 +44,53 @@ impl MoveGen {
         return Self { attack_bbs, rook_bbs_no_edges, bishop_bbs_no_edges, magic_bb }
     }
 
+    ///Called once upon arriving to a new position.
+    ///Not called when reverting move, since just fetched from stack.
+    pub fn get_all_legal(&self, board: &mut Board, mover: Color) -> Vec<u32> {
+        let mut res: Vec<u32> = Vec::new();
+        for mov in self.get_all_pseudolegal(board, mover) {
+            if self.pseudolegal_is_legal(mov, board, mover) {
+                res.push(mov);
+            }
+        }
+        return res;
+    }
 
+    ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares
+    pub fn pseudolegal_is_legal(&self, mov: u32, board: &Board, mover: Color) -> bool {
+        let init: u32 = _move::get_init(mov);
+        let opponent_attacked: u64;
+        let mover_king_piece_idx: u32;
+        let mover_pinned: u64;
+        let mover_pinned_restrictions: u64;
+        if mover.is_white() {
+            opponent_attacked = board.black_attacks; mover_king_piece_idx = 5; 
+            mover_pinned = board.white_pinned; mover_pinned_restrictions = board.white_pinned_restrictions[init as usize];
+        } 
+        else {
+            opponent_attacked = board.white_attacks; mover_king_piece_idx = 11;
+            mover_pinned = board.black_pinned; mover_pinned_restrictions = board.black_pinned_restrictions[init as usize];
+        }
+
+        if _move::is_en_passant(mov) {
+            //edge case where both pawns leave rank exposing pin
+            //TODO
+        } else if _move::get_moved_piece(mov) == mover_king_piece_idx {
+            if bitboard::contains_square(opponent_attacked, _move::get_target(mov)) {
+                return false;
+            } else {
+                return true;
+            }
+        }
+        //now pins
+        if bitboard::contains_square(mover_pinned, init) {
+            let target: u32 = _move::get_target(mov);
+            if !bitboard::contains_square(mover_pinned_restrictions, target) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     ///Also updates board.**mover**_attacks for efficiency 
     pub fn get_all_pseudolegal(&self, board: &mut Board, mover: Color) -> Vec<u32> {
