@@ -1,6 +1,4 @@
 Move generation todo:
- - pinned pieces
- - protected squares (king doesn't eat protected)
  - en passant
 
 Easy improvements:

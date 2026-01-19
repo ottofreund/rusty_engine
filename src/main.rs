@@ -10,7 +10,7 @@ use rand::prelude::*;
 
 fn main() {
     let game: Game = Game::init_default();
-
+    game.legal_moves.iter().for_each(|mov| println!("{}", _move::to_string(*mov)));
 
     /* let mut sqr: u32 = 20;
     println!("Precomputed rook map holds {} entries", gen.rook_slide_bbs.len());

@@ -97,25 +97,40 @@ impl Board {
         }
     }
 
+    ///Called every time move is made/unmade
+    pub fn update_mover_in_check(&mut self) {
+        if self.turn.is_white() {
+            self.mover_in_check = self.black_attacks & self.pieces[5] > 0;
+        } else {
+            self.mover_in_check = self.white_attacks & self.pieces[11] > 0;
+        }
+    }
+
     pub fn default_board(move_gen: &MoveGen) -> Self {
         let pieces: [u64; 12] = [
-            65280, 66, 36, 129, 8, 4, 71776119061217280, 4755801206503243776, 2594073385365405696, 9295429630892703744, 576460752303423488, 1152921504606846976
+            65280, 66, 36, 129, 8, 16, 71776119061217280, 4755801206503243776, 2594073385365405696, 9295429630892703744, 576460752303423488, 1152921504606846976
         ];
         let white_occupation: u64 = 0xFFFF;
         let black_occupation: u64 = 0xFFFF000000000000;
-        let white_attacks: u64 = 0xFFFFFF;
-        let black_attacks: u64 = 0xFFFFFF0000000000;
         let ep_square: Option<u32> = None;
         let (ws, wl, bs, bl) = (true, true, true, true);
         let turn: Color = Color::White;
-        let mover_in_check: bool = false;
-        let white_pinned: u64 = 0;
-        let black_pinned: u64 = 0;
-        let white_pinned_restrictions: [u64 ; 64] = [0 ; 64];
-        let black_pinned_restrictions: [u64 ; 64] = [0 ; 64];
-        return Self {
-            pieces, white_occupation, black_occupation, white_attacks, black_attacks, ep_square, ws, wl, bs, bl, turn, mover_in_check, white_pinned, black_pinned, white_pinned_restrictions, black_pinned_restrictions
-        }
+        return Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, move_gen)
+    }
+
+    pub fn board_with(
+        pieces: [u64; 12], white_occupation: u64, black_occupation: u64, turn: Color, 
+        ws: bool, wl: bool, bs: bool, bl: bool, ep_square: Option<u32>, move_gen: &MoveGen
+    ) -> Self {
+        let mut res: Board = Self {
+            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, mover_in_check: false, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64]
+        }; //set computable to some defaults and compute now
+        move_gen.get_all_legal(&mut res, turn.opposite());
+        move_gen.get_all_legal(&mut res, turn);
+        move_gen.compute_pinned(&mut res, turn);
+        res.update_mover_in_check();
+        //now in valid state
+        return res;
     }
 
 }
@@ -124,7 +139,7 @@ impl Board {
 
 } */
 
-const file_chars: [&str; 8] = ["a", "b", "c", "d", "e", "f", "g", "h"];
+pub const file_chars: [&str; 8] = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
 pub fn square_to_string(sqr_idx: u32) -> String {
     let mut res: String = String::new();
