@@ -1,4 +1,4 @@
-use crate::repr::{move_gen::MoveGen, types::Color};
+use crate::repr::{move_gen::MoveGen, types::{B_KING, Color, W_KING}};
 
 pub const FILES: [u64 ; 8] = [
     72340172838076673, 144680345676153346, 289360691352306692, 578721382704613384, 1157442765409226768, 2314885530818453536, 4629771061636907072, 0x8080808080808080
@@ -31,13 +31,6 @@ pub struct Board {
 
 impl Board {
 
-    pub fn make_move(&self, mov: u32) {
-        return;
-    }
-
-    pub fn unmake_move(&self, mov: u32) {
-        return;
-    }
     ///Returns bb with both black and white occupations toggled.
     pub fn total_occupation(&self) -> u64 {
         return self.white_occupation | self.black_occupation;
@@ -106,6 +99,34 @@ impl Board {
         }
     }
 
+    ///called when making/unmaking move
+    pub fn update_castling_rights(&mut self, from: u32, to: u32, is_white_turn: bool, moved_piece: u32) {
+        let short_right: &mut bool;
+        let short_corner_idx: u32;
+        let long_right: &mut bool;
+        let long_corner_idx: u32;
+        let king_piece_idx: u32;
+        if is_white_turn { 
+            short_right = &mut self.ws; long_right = &mut self.wl; short_corner_idx = 7; long_corner_idx = 0; king_piece_idx = W_KING;
+        } else {
+            short_right = &mut self.bs; long_right = &mut self.bl; short_corner_idx = 63; long_corner_idx = 56; king_piece_idx = B_KING;
+        }
+        if moved_piece == king_piece_idx {
+            *short_right = false;
+            *long_right = false;
+            return;
+        }
+        //check if from or to corresponding corner
+        if *short_right && (from == short_corner_idx || to == short_corner_idx) {
+            *short_right = false;
+        }
+        if *long_right && (from == long_corner_idx || to == long_corner_idx) {
+            *long_right = false;
+        }
+        return;
+    }
+
+
     pub fn default_board(move_gen: &MoveGen) -> Self {
         let pieces: [u64; 12] = [
             65280, 66, 36, 129, 8, 16, 71776119061217280, 4755801206503243776, 2594073385365405696, 9295429630892703744, 576460752303423488, 1152921504606846976
@@ -148,62 +169,3 @@ pub fn square_to_string(sqr_idx: u32) -> String {
     res.push_str(&rank.to_string());
     return res;
 }
-
-macro_rules! fill_rank_val {
-    ($val: expr, $r: expr, $res: expr) => {
-        let mut i: usize = 0;
-        while i < 8 {
-            $res[($r as usize) * 8 + i] = $val;
-            i += 1;
-        }
-    }
-}
-
-macro_rules! fill_file_val {
-    ($val: expr, $file: expr, $res: expr) => {
-        let mut i: usize = 0;
-        while i < 8 {
-            $res[($file as usize) % 8 + i * 8] = $val;
-            i += 1;
-        }
-    }
-}
-
-const fn ranks(higher: bool) -> [u64 ; 64] {
-    let mut res: [u64 ; 64] = [0 ; 64];
-    let mut cur: u64 = 0;
-    let mut r: i32 = 7;
-    //if higher {r = 7} else {r = 0};
-    while r >= 0 {
-        let fill_rank: i32;
-        if higher {fill_rank = r} else {fill_rank = 7 - r};
-        fill_rank_val!(cur, fill_rank, res);
-        cur |= RANKS[fill_rank as usize]; //next one has current rank
-        //if higher {r -= 1} else {r += 1};
-        r -= 1;
-    }
-    return res;
-}
-
-const fn files(higher: bool) -> [u64 ; 64] {
-    let mut res: [u64 ; 64] = [0 ; 64];
-    let mut cur: u64 = 0;
-    let mut f: i32 = 7;
-    while f >= 0 {
-        let fill_file: i32;
-        if higher {fill_file = f} else {fill_file = 7 - f};
-        fill_file_val!(cur, fill_file, res);
-        cur |= FILES[fill_file as usize]; //next one has current rank
-        //if higher {r -= 1} else {r += 1};
-        f -= 1;
-    }
-    return res;
-}
-//Get bitboards with all higher/lower ranks/files than that of square_idx toggled. Used in pin computations
-pub const HIGHER_RANKS: [u64 ; 64] = ranks(true);
-
-pub const LOWER_RANKS: [u64 ; 64] = ranks(false);
-
-pub const HIGHER_FILES: [u64 ; 64] = files(true);
-
-pub const LOWER_FILES: [u64 ; 64] = files(false);

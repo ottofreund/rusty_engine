@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::ptr::null;
 
 use crate::repr::_move;
 use crate::repr::_move::*;
@@ -46,7 +46,7 @@ impl MoveGen {
 
     ///Called once upon arriving to a new position.
     ///Not called when reverting move, since just fetched from stack.
-    pub fn get_all_legal(&self, board: &mut Board, mover: Color) -> Vec<u32> {
+    pub fn get_all_legal(&self, board: &Board, mover: Color) -> Vec<u32> {
         let mut res: Vec<u32> = Vec::new();
         for mov in self.get_all_pseudolegal(board, mover) {
             if self.pseudolegal_is_legal(mov, board, mover) {
@@ -93,7 +93,7 @@ impl MoveGen {
     }
 
     ///Also updates board.**mover**_attacks for efficiency 
-    pub fn get_all_pseudolegal(&self, board: &mut Board, mover: Color) -> Vec<u32> {
+    pub fn get_all_pseudolegal(&self, board: &Board, mover: Color) -> Vec<u32> {
         let mut res: Vec<u32> = Vec::new();
         let mut i: usize;
         let e: usize;
@@ -102,7 +102,7 @@ impl MoveGen {
             let mut piece_bb: u64 = board.pieces[i];
             while piece_bb != 0 {
                 let piece_idx: u32 = bitboard::pop_lsb(&mut piece_bb);
-                self.pseudolegal_for(piece_idx, i as u32, mover, board, &mut res);
+                self.pseudolegal_for(piece_idx, i as u32, mover, board, &mut res, false, false);
             }
             i += 1;
         }
@@ -112,14 +112,14 @@ impl MoveGen {
     ///Adds pseudolegal moves for **piece** at **from** to move vector **move_vec**. <br>
     ///1. If pawn, handle separately <br>
     ///2. Get target squares (including eating own pieces), sliding gen or simply attack_bb <br>
-    ///3. Binary OR with board.{white/black}_attacks to add these attacks <br>
-    ///4. Remove "eating own piece" moves by binary ANDing with !own_occupation <br>
-    ///5. Remaining are pseudolegals. Pop-lsb 1-by-1 and make move and add to **move_vec** until none left.
-    pub fn pseudolegal_for(&self, from: u32, piece: u32, mover: Color, board: &mut Board, move_vec: &mut Vec<u32>) {
+    ///3. If !**keep_protected**, remove "eating own piece" moves by binary ANDing with !own_occupation <br>
+    ///4. If **targets_only** just return targets bitboard.
+    ///5. Else Pop-lsb 1-by-1 and make move and add to **move_vec** until none left.
+    pub fn pseudolegal_for(&self, from: u32, piece: u32, mover: Color, board: &Board, move_vec: &mut Vec<u32>, keep_protected: bool, targets_only: bool) -> u64 {
         if piece == W_PAWN || piece == B_PAWN {
             //no en passant from this
             pseudolegal_pawn(from, mover, board, self, move_vec);
-            return;
+            return 0;
         }
 
         let mut targets: u64 = match piece {
@@ -142,22 +142,28 @@ impl MoveGen {
             }
             _ => panic!("Couldn't match piece in pseudolegal_for. Reached unreachable case.")    
         };
-        //3. && 4.
+        //3.
         let opponent_occupied: u64;
         if mover.is_white() {
-            board.white_attacks |= targets;
-            targets &= !board.white_occupation;
+            if !keep_protected {
+                targets &= !board.white_occupation;
+            }
             opponent_occupied = board.black_occupation;
         } else {
-            board.black_attacks |= targets;
-            targets &= !board.black_occupation;
+            if !keep_protected {
+                targets &= !board.black_occupation;
+            }
             opponent_occupied = board.white_occupation;
         }
-        //5.
-        while targets != 0 {
-            let target_sqr: u32 = bitboard::pop_lsb(&mut targets);
-            let is_take: bool = bitboard::contains_square(opponent_occupied, target_sqr);
-            move_vec.push(_move::create(from, target_sqr, is_take, mover, piece));
+        if targets_only { //4.
+            return targets;
+        } else { //5.
+            while targets != 0 { 
+                let target_sqr: u32 = bitboard::pop_lsb(&mut targets);
+                let is_take: bool = bitboard::contains_square(opponent_occupied, target_sqr);
+                move_vec.push(_move::create(from, target_sqr, is_take, mover, piece));
+            }
+            return 0;
         }
     }
 
@@ -252,6 +258,25 @@ impl MoveGen {
                 }
             }
         }
+    }
+
+    ///attacked squares change after moving piece. <br>
+    ///we call this after moving to get the attacked squares <br>
+    ///this means we compute targets twice, but the alternative implementations seem even worse
+    pub fn compute_attacked(&self, board: &Board, side: Color) -> u64 {
+        let mut res: u64 = pawn_attacked(board, side);
+        let mut i: usize;
+        let e: usize;
+        if side.is_white() {i = 1; e = 6;} else {i = 7; e = 12;} //no pawns
+        while i < e {
+            let mut piece_bb: u64 = board.pieces[i];
+            while piece_bb != 0 {
+                let piece_idx: u32 = bitboard::pop_lsb(&mut piece_bb);
+                res |= self.pseudolegal_for(piece_idx, i as u32, side, board, &mut Vec::new(), true, true);
+            }
+            i += 1;
+        }
+        return res;
     }
 
 }
@@ -410,23 +435,27 @@ fn pawn_attacks_white_for(sqr: u32) -> u64 {
     return res;
 }
 
-///This needs to know opponent attacked squares <br>
-///Adds LEGAL castling moves for **mover** to move vector **move_vec**.
+///Adds LEGAL castling moves for **mover** to **move_vec**.
 fn add_castling(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
     if !board.mover_in_check { //can't castle from check
-        let occupation_bb: u64 = board.white_occupation | board.black_occupation;
+        let preventing_bb: u64;
+        let opponent_attacks: u64;
         if mover.is_white() {
-            if board.ws && WS_CASTLING_GAP_BB & occupation_bb == 0 { //short is legal
+            opponent_attacks = board.black_attacks;
+            preventing_bb = board.white_occupation | board.black_occupation | opponent_attacks;
+            if board.ws && WS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
                 move_vec.push(WHITE_SHORT);
             }
-            if board.wl && WL_CASTLING_GAP_BB & occupation_bb == 0 { //long is legal
+            if board.wl && WL_CASTLING_GAP_BB & preventing_bb == 0 { //long is legal
                 move_vec.push(WHITE_SHORT);
             }
         } else {
-            if board.bs && BS_CASTLING_GAP_BB & occupation_bb == 0 { //short is legal
+            opponent_attacks = board.white_attacks;
+            preventing_bb = board.white_occupation | board.black_occupation | opponent_attacks;
+            if board.bs && BS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
                 move_vec.push(BLACK_SHORT);
             }
-            if board.bl && BL_CASTLING_GAP_BB & occupation_bb == 0 { //long is legal
+            if board.bl && BL_CASTLING_GAP_BB & preventing_bb == 0 { //long is legal
                 move_vec.push(BLACK_LONG);
             }
         }
@@ -480,8 +509,19 @@ pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveG
     return;
 }
 
-///Test some critical temporary data computed on initialization.  
-pub struct TestMoveGen {
-    pub dictionary_rook_slide_bbs: HashMap<(u32, u64), u64>,
-    pub dictionary_bishop_slide_bbs: HashMap<(u32, u64), u64>
+///All pawn attacking moves for **side**
+pub fn pawn_attacked(board: &Board, side: Color) -> u64 {
+    let pawn_occupation: u64;
+    let left_attack_shift: u32;
+    let right_attack_shift: u32;
+    let shift_op: fn(u64, u32) -> u64;
+    let mut res: u64 = 0;
+    if side.is_white() {
+        pawn_occupation = board.pieces[0]; left_attack_shift = 7; right_attack_shift = 9; shift_op = |x, n| x << n;
+    } else {
+        pawn_occupation = board.pieces[6]; left_attack_shift = 9; right_attack_shift = 7; shift_op = |x, n| x >> n;
+    };
+    res |= shift_op(pawn_occupation & !FILES[0], left_attack_shift);
+    res |= shift_op(pawn_occupation & !FILES[7], right_attack_shift);
+    return res;
 }
