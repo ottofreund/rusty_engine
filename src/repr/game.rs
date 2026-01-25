@@ -10,8 +10,8 @@ pub struct Game {
     pub legal_moves: Vec<u32>
 }
 
-impl Game {
-    pub fn init_default() -> Game {
+impl Default for Game {
+    fn default() -> Game {
         let move_gen: MoveGen = MoveGen::init();
         let mut board: Board = Board::default_board(&move_gen);
         let turn: Color = board.turn.clone();
@@ -20,6 +20,9 @@ impl Game {
             board, move_gen, legal_moves
         }
     }
+}
+
+impl Game {
     ///Public api ease of use and safety method
     pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32) -> Result<u32, Error> {
         let mov: Option<u32> = self.legal_moves.iter().copied().find(|mov| 
