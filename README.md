@@ -1,6 +1,6 @@
-#Rusty Engine, Chess Engine with a GUI Chess Game on top
+# Rusty Engine, Chess Engine with a GUI Chess Game on top
 
-##**Rusty Engine** is a W.I.P. chess engine implementation in Rust using bitboard representation for board state and move generation. The project focuses on efficient move generation using magic bitboard lookups.
+## **Rusty Engine** is a W.I.P. chess engine implementation in Rust using bitboard representation for board state and move generation. The project focuses on efficient move generation using magic bitboard lookups.
 
 
 ### Core Components
