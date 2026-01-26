@@ -21,7 +21,8 @@ pub struct Board {
     pub bs: bool,
     pub bl: bool,
     pub turn: Color,
-    pub mover_in_check: bool,
+    pub nof_checkers: u32, //if > 1, has to move king
+    pub check_block_sqrs: u64, //bitboard for squares that block the check, only applies if nof_checkers <= 1
     pub white_pinned: u64, //bitboard of white's pinned pieces
     pub black_pinned: u64,
     //IF white_pinned[sqr], then white_pinned_restrictions[sqr] contains target squares that don't break the pin i.e. stay on the pin ray (diagonal or cardinal). else is garbage and shouldn't be looked at. This 
@@ -90,15 +91,6 @@ impl Board {
         }
     }
 
-    ///Called every time move is made/unmade
-    pub fn update_mover_in_check(&mut self) {
-        if self.turn.is_white() {
-            self.mover_in_check = self.black_attacks & self.pieces[5] > 0;
-        } else {
-            self.mover_in_check = self.white_attacks & self.pieces[11] > 0;
-        }
-    }
-
     ///called when making/unmaking move
     pub fn update_castling_rights(&mut self, from: u32, to: u32, is_white_turn: bool, moved_piece: u32) {
         let short_right: &mut bool;
@@ -144,12 +136,11 @@ impl Board {
         ws: bool, wl: bool, bs: bool, bl: bool, ep_square: Option<u32>, move_gen: &MoveGen
     ) -> Self {
         let mut res: Board = Self {
-            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, mover_in_check: false, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64]
+            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0
         }; //set computable to some defaults and compute now
-        move_gen.get_all_legal(&mut res, turn.opposite());
-        move_gen.get_all_legal(&mut res, turn);
+        move_gen.compute_attacked(&mut res, turn.opposite());
         move_gen.compute_pinned(&mut res, turn);
-        res.update_mover_in_check();
+        move_gen.get_all_legal(&mut res, turn);
         //now in valid state
         return res;
     }

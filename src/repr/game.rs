@@ -100,16 +100,18 @@ impl Game {
         }
 
         self.board.update_castling_rights(from, to, is_white_turn, moved_piece as u32);
-        //1. update current mover attacked
+
+        self.board.nof_checkers = 0;
+        //1. update current mover attacked, also sets nof_checkers
         if is_white_turn {
-            self.board.white_attacks = self.move_gen.compute_attacked(&self.board, Color::White)
+            self.board.white_attacks = self.move_gen.compute_attacked(&mut self.board, Color::White)
         } else {
-            self.board.black_attacks = self.move_gen.compute_attacked(&self.board, Color::Black)
+            self.board.black_attacks = self.move_gen.compute_attacked(&mut self.board, Color::Black)
         }
         
         self.board.turn = self.board.turn.opposite();
-        self.board.update_mover_in_check();
-        //2. compute pinned
+
+        //2. compute pinned, also finds check_block_sqrs
         let turn: Color = self.board.turn.clone();
         self.move_gen.compute_pinned(&mut self.board, turn);
         //3. compute legal moves
