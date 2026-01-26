@@ -1,17 +1,27 @@
-Move generation todo:
- - en passant
+#Rusty Engine, Chess Engine with a GUI Chess Game on top
 
-Easy improvements:
- - flatten rook_slide_bbs and bishop_slide_bbs to 1D
+##**Rusty Engine** is a W.I.P. chess engine implementation in Rust using bitboard representation for board state and move generation. The project focuses on efficient move generation using magic bitboard lookups.
 
 
-Reminders:
- - en passant edge case to self discovered check
- - Attacked squares and protected squares actually don't have to be distinguished. Attacked squares, that are generated from pseudolegals, can simply be allowed to contain "eat own piece / protect" moves and thus when moving king we just have to check that these pseudolegal targets <==> attacked/protected squares don't contain the king target.
- - Lookups to sliding piece arrays are done with **relevant** blocker bitboards, meaning that last square before edge is dismissed. This reduces the combination space greatly with minimal overhead of converting to relevant bb. The values of these lookup tables are naturally stored **with** edges.
- - Sliding piece lookups are computed with assumption that all blockers are enemy pieces. This assumption is easy to relieve using enemy piece occupation bb mask.
+### Core Components
+
+1. **`repr` Module** - Board representation and game logic
+   - **`types.rs`**: Defines piece constants (W_PAWN=0...B_KING=11) and `Color` enum
+   - **`board.rs`**: `Board` struct with occupation bitboards (`white_occupation`, `black_occupation`) and piece placement
+   - **`_move.rs`**: Move encoding as 32-bit integers with bit fields
+   - **`bitboard.rs`**: Utility functions for u64 bitboard manipulation (`pop_lsb`, `set_square`, `contains_square`, `bb_to_string` for debugging)
+   - **`move_gen.rs`**: `MoveGen` struct with precomputed magic bitboard lookup tables for sliding pieces; methods like `get_all_legal()`, `get_relevant_blockers()`, `get_sliding_for()`
+   - **`game.rs`**: `Game` struct tracking board state, move generator, and legal moves; `try_make_move(init_sqr, target_sqr)` updates board and regenerates legal moves
+   - **`magic_bb_loader.rs`**: Finds 'magic numbers' for sliding pieces, and stores them in `MagicBitboard` struct. Also contains precomputed magics for faster startup.
+
+2. **`ui` Module** - GUI layer (using `iced` crate for UI framework)
+
+3. **`utils` Module** - Helper utilities (FEN parsing, etc.)
 
 
-Checklist:
- - Is having eaten piece type necessary in move integer? If no need, can make hot code paths more efficient with changing taken piece type -> piece taken flag
+### Dependencies
+- `iced 0.14.0` - GUI framework
+- `rand 0.9.2` - Random number generation
+- Rust 2021 edition
 
+![alt text](https://github.com/ottofreund/rusty_engine/blob/main/.github/board_demo_img.png "App demo")

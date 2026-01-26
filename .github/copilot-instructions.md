@@ -10,8 +10,7 @@
 1. **`repr` Module** - Board representation and game logic
    - **`types.rs`**: Defines piece constants (W_PAWN=0...B_KING=11) and `Color` enum
    - **`board.rs`**: `Board` struct with occupation bitboards (`white_occupation`, `black_occupation`) and piece placement
-   - **`_move.rs`**: Move encoding as 32-bit integers with bit fields:
-     - Bits 0-5: source square, 6-11: target square, 12: is eating, 17: castle short, 18: castle long, 21: promotion, 22-25: promotion piece, 26-29: moved piece, 30: en passant, 31: white to move
+   - **`_move.rs`**: Move encoding as 32-bit integers with bit fields
    - **`bitboard.rs`**: Utility functions for u64 bitboard manipulation (`pop_lsb`, `set_square`, `contains_square`, `bb_to_string` for debugging)
    - **`move_gen.rs`**: `MoveGen` struct with precomputed magic bitboard lookup tables for sliding pieces; methods like `get_all_legal()`, `get_relevant_blockers()`, `get_sliding_for()`
    - **`game.rs`**: `Game` struct tracking board state, move generator, and legal moves; `try_make_move(init_sqr, target_sqr)` updates board and regenerates legal moves
