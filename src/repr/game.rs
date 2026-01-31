@@ -30,7 +30,7 @@ impl Game {
         );
         match mov {
             Some(m) => {
-                println!("Successfully moved!");
+                println!("Successfully moved: {}", _move::to_string(m));
                 self.make_move(m);
                 return Ok(m);
             },
@@ -50,6 +50,8 @@ impl Game {
         let moved_piece: usize = _move::get_moved_piece(mov) as usize;
         let is_eating: bool = _move::is_eating(mov);
         let is_castle: bool = _move::is_castle(mov);
+        let is_double_push: bool = _move::is_double_push(mov);
+        let is_en_passant: bool = _move::is_en_passant(mov);
         let own_occupation: &mut u64;
         let opponent_occupation: &mut u64;
         if is_white_turn {
@@ -58,7 +60,7 @@ impl Game {
             own_occupation = &mut self.board.black_occupation; opponent_occupation = &mut self.board.white_occupation;
         }
         
-        if is_eating { //clear eaten piece
+        if is_eating && !is_en_passant { //clear eaten piece, en passant has clearing logic
             let mut s: usize;
             let e: usize;
             let eaten_bb: u64 = 1u64 << to;
@@ -99,6 +101,22 @@ impl Game {
             bitboard::set_square(&mut self.board.pieces[rook_piece_idx], rook_to);
             bitboard::clear_square(own_occupation, rook_from);
             bitboard::set_square(own_occupation, rook_to);
+        }
+
+        if is_en_passant { //clear ep_square
+            let opponent_pawns: &mut u64;
+            let offset: i32;
+            if is_white_turn {opponent_pawns = &mut self.board.pieces[6]; offset = -8} else {opponent_pawns = &mut self.board.pieces[0]; offset = 8;}
+            let eating_sqr: u32 = (self.board.ep_square.expect("Made en passant, but ep_square was none") as i32 + offset) as u32;
+            bitboard::clear_square(opponent_pawns, eating_sqr);
+            bitboard::clear_square(opponent_occupation, eating_sqr);
+        }
+
+        if is_double_push {
+            if is_white_turn {self.board.ep_square = Some(to - 8);} else {self.board.ep_square = Some(to + 8);}
+            println!("Ep square at {} !", board::square_to_string(self.board.ep_square.unwrap()));
+        } else {
+            self.board.ep_square = None;
         }
 
         self.board.update_castling_rights(from, to, is_white_turn, moved_piece as u32);

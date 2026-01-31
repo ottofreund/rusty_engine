@@ -114,8 +114,6 @@ impl AppState {
 
 
 pub fn update(state: &mut AppState, msg: Message) {
-    println!("Got update!");
-    println!("Selected square is none: {}", state.selected_square.is_none());
     match msg {
       Message::Reset => {
         println!("Got to reset handler");
@@ -130,11 +128,9 @@ pub fn update(state: &mut AppState, msg: Message) {
                 } else { //move from selected_sqr to sqr
                     match state.game.try_make_move(selected_sqr, sqr) {
                         Ok(mov) => {
-                            println!("Made move {}", _move::to_string(mov));
                             state.selected_square = None;
                         },
                         Err(e) => {
-                            println!("That move is illegal.");
                             state.selected_square = None;
                         }
                     }

@@ -1,7 +1,5 @@
 Move generation todo:
  - en passant
- - fix king move 'behind itself' from sliding check, because it's a 'blocker', 
-   probably just unset king sqr from blocker bb
 
 Easy improvements:
  - flatten rook_slide_bbs and bishop_slide_bbs to 1D

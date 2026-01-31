@@ -3,7 +3,8 @@ use crate::repr::{board::{Board, square_to_string}, types::*};
 //0-5: source square
 //6-11: target square
 //12: is eating move?
-//13-16: free
+//13: is pawn double push?
+//14-16: free
 //17: castle short?
 //18: castle long?
 //21: is promotion?
@@ -52,6 +53,17 @@ pub fn create_castling(mover: Color, is_short: bool) -> u32 {
             return BLACK_LONG;
         }
     }
+}
+
+///Pawn double push move
+pub fn create_double_push(from: u32, to: u32, mover: Color, moved_piece: u32) -> u32 {
+    return create(from, to, false, mover, moved_piece) | 8192; // | 2^13
+}
+
+
+///**to** is the ep_square the pawn ends up on, eaten pawn must be cleared in make_move with some extra logic
+pub fn create_en_passant(from: u32, to: u32, mover: Color, moved_piece: u32) -> u32 {
+    return create(from, to, true, mover, moved_piece) | 1073741824; // | 2^30
 }
 
 /// Promotion move creator
@@ -116,7 +128,11 @@ pub fn is_promotion(mov: u32) -> bool {
 }
 
 pub fn is_en_passant(mov: u32) -> bool {
-    return (mov & 1073741824) > 0;
+    return (mov & 1073741824) > 0; //2^30
+}
+
+pub fn is_double_push(mov: u32) -> bool {
+    return (mov & 8192) > 0
 }
 //Castling rights updator's are not called for a side after both of their rights have been lost.
 ///Updates white's castling rights directly to board object in accordance with played move **mov**.

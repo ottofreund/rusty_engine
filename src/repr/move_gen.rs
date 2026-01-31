@@ -129,6 +129,8 @@ impl MoveGen {
             }
             i += 1;
         }
+        add_en_passant(board, mover, &mut res);
+        add_castling(board, mover, &mut res);
         return res;
     }
 
@@ -159,10 +161,7 @@ impl MoveGen {
                     |
                 self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, blockers, false), false)
             },
-            W_KING | B_KING => {
-                add_castling(board, mover, move_vec);
-                self.attack_bbs[5][from as usize]
-            }
+            W_KING | B_KING => self.attack_bbs[5][from as usize],
             _ => panic!("Couldn't match piece in pseudolegal_for. Reached unreachable case.")    
         };
         //3.
@@ -509,6 +508,27 @@ fn add_castling(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
     } 
 }
 
+///Adds **pseudolegal** en passants to move_vec
+fn add_en_passant(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
+    if let Some(ep_square) = board.ep_square {
+        let mover_pawns: u64;
+        let l_sqr: u32;
+        let r_sqr: u32;
+        let pawn_piece_idx: u32;
+        if mover.is_white() {
+            mover_pawns = board.pieces[0]; l_sqr = ep_square - 9; r_sqr = ep_square - 7; pawn_piece_idx = 0;
+        } else {
+            mover_pawns = board.pieces[6]; l_sqr = ep_square + 7; r_sqr = ep_square + 9; pawn_piece_idx = 6;
+        }
+        if bitboard::contains_square(mover_pawns, l_sqr) {
+            move_vec.push(_move::create_en_passant(l_sqr, ep_square, mover, pawn_piece_idx))
+        }
+        if bitboard::contains_square(mover_pawns, r_sqr) {
+            move_vec.push(_move::create_en_passant(r_sqr, ep_square, mover, pawn_piece_idx))
+        }
+    }
+}
+
 /// Add all pseudolegal pawn moves for pawn on square **from** and color **mover** on **board** to **move_vec** . <br>
 /// 
 /// NO EN PASSANT
@@ -549,7 +569,7 @@ pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveG
         }
         //can go forward 2 if also no piece on forward2 and pawn on PAWN_START_RANK
         if bitboard::contains_square(PAWN_START_RANK, from) && !board.is_occupied(forward2) {
-            move_vec.push(_move::create(from, forward2, false, mover, pawn_piece_idx as u32))
+            move_vec.push(_move::create_double_push(from, forward2, mover, pawn_piece_idx as u32))
         }
     }
     //NO EN PASSANT FROM THIS
