@@ -97,11 +97,14 @@ impl Game {
             }
             bitboard::clear_square(&mut self.board.pieces[rook_piece_idx], rook_from);
             bitboard::set_square(&mut self.board.pieces[rook_piece_idx], rook_to);
+            bitboard::clear_square(own_occupation, rook_from);
+            bitboard::set_square(own_occupation, rook_to);
         }
 
         self.board.update_castling_rights(from, to, is_white_turn, moved_piece as u32);
 
         self.board.nof_checkers = 0;
+        self.board.check_block_sqrs = 0;
         //1. update current mover attacked, also sets nof_checkers
         if is_white_turn {
             self.board.white_attacks = self.move_gen.compute_attacked(&mut self.board, Color::White)

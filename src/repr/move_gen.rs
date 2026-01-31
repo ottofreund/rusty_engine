@@ -78,7 +78,7 @@ impl MoveGen {
             if board.nof_checkers == 1 {
                 let target: u32 = _move::get_target(mov);
                 let blocked_check: bool = bitboard::contains_square(board.check_block_sqrs, target);
-                //if one checker, can either move king to safe square or block
+                //if one checker, can either move king to safe square or block (including eat)
                 if !moved_king && !blocked_check {
                     return false; 
                 } //if moved king, next section checks that king's target is legal
@@ -225,12 +225,11 @@ impl MoveGen {
     ///         Else no pins for this potential pinner, continue <br/>
     /// 5. Do same starting from 1. but for diagonals (bishop)
     pub fn compute_pinned(&self, board: &mut Board, side: Color) {
-        //first reset bitboards containing previous information
+        //first reset bitboards containing previous pinned info
         board.white_pinned = 0;
         board.black_pinned = 0;
         board.white_pinned_restrictions = [0 ; 64];
         board.black_pinned_restrictions = [0 ; 64];
-        board.check_block_sqrs = 0;
         //compute new pins
         self.pinned_for_specified(false, board, side);
         self.pinned_for_specified(true, board, side);
@@ -312,6 +311,7 @@ impl MoveGen {
                 let targets: u64 = self.pseudolegal_for(piece_idx, i as u32, side, board, &mut Vec::new(), true, true);
                 if bitboard::contains_square(targets, opponent_king_sqr) { //see if checker
                     board.nof_checkers += 1;
+                    bitboard::set_square(&mut board.check_block_sqrs, piece_idx);
                 }
                 res |= targets;
             }

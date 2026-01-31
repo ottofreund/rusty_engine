@@ -14,10 +14,10 @@ use crate::repr::{board::{Board, square_to_string}, types::*};
 //this file contains utility methods for using them
 
 //castling moves:
-pub const WHITE_SHORT: u32 = 2147615108; //1 0010100 0000 0 0 1 0000 0 000110 000100
-pub const WHITE_LONG: u32 = 2147745924; //1 0010100 0000 0 1 0 0000 0 000010 000100
-pub const BLACK_SHORT: u32 = 135100; //0 0101100 0000 0 0 1 0000 0 111110 111100
-pub const BLACK_LONG: u32 = 265916; //0 0101100 0000 0 1 0 0000 0 111010 111100
+pub const WHITE_SHORT: u32 = 2483159428; //1 0010100 0000 0 0 1 0000 0 000110 000100
+pub const WHITE_LONG: u32 = 2483290244; //1 0010100 0000 0 1 0 0000 0 000010 000100
+pub const BLACK_SHORT: u32 = 738332604; //0 0101100 0000 0 0 1 0000 0 111110 111100
+pub const BLACK_LONG: u32 = 738463420; //0 0101100 0000 0 1 0 0000 0 111010 111100
 //corner square indices:
 const WHITE_SHORT_CORNER: u32 = 7;
 const WHITE_LONG_CORNER: u32 = 0;
