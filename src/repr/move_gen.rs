@@ -97,7 +97,9 @@ impl MoveGen {
             //edge case where both pawns leave rank exposing pin
             //TODO
         } else if moved_piece == mover_king_piece_idx {
-            if bitboard::contains_square(opponent_attacked, _move::get_target(mov)) {
+            let target: u32 = _move::get_target(mov);
+            if bitboard::contains_square(opponent_attacked, target)
+                || bitboard::contains_square(board.meta_attacks, target) {
                 return false;
             } else {
                 return true;
@@ -230,6 +232,7 @@ impl MoveGen {
         board.black_pinned = 0;
         board.white_pinned_restrictions = [0 ; 64];
         board.black_pinned_restrictions = [0 ; 64];
+        board.meta_attacks = 0;
         //compute new pins
         self.pinned_for_specified(false, board, side);
         self.pinned_for_specified(true, board, side);
@@ -270,8 +273,7 @@ impl MoveGen {
             //4.1
             let pp_sqr_idx: usize = bitboard::pop_lsb(&mut potential_pinners) as usize; //potential pinner sqr idx
             //4.2
-            let mut specific_rpp: u64 = rpp & self.get_sliding_for(pp_sqr_idx, 1 << king_sqr_idx, !diag);
-            bitboard::clear_square(&mut specific_rpp, pp_sqr_idx as u32); //clear pp_sqr_idx
+            let specific_rpp: u64 = rpp & self.get_sliding_for(pp_sqr_idx, 1 << king_sqr_idx, !diag);
             //4.3
             let occupied_rpp: u64 = specific_rpp & total_occupation;
             //4.4
@@ -287,6 +289,10 @@ impl MoveGen {
                 }
             } else if occupied_rpp.count_ones() == 0 { //we have a sliding checker, set the check_block_sqrs
                 board.check_block_sqrs |= bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat checker so set pp_sqr_idx
+                //with sliding check we have a meta-attack behind king
+                let empty_board_slides: u64;
+                if diag { empty_board_slides = self.attack_bbs[2][pp_sqr_idx]; } else { empty_board_slides = self.attack_bbs[3][pp_sqr_idx]; }
+                board.meta_attacks |= self.attack_bbs[5][king_sqr_idx] & empty_board_slides & !specific_rpp & !(1 << king_sqr_idx);
             }
         }
     }

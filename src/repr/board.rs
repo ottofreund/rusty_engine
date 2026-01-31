@@ -27,7 +27,8 @@ pub struct Board {
     pub black_pinned: u64,
     //IF white_pinned[sqr], then white_pinned_restrictions[sqr] contains target squares that don't break the pin i.e. stay on the pin ray (diagonal or cardinal). else is garbage and shouldn't be looked at. This 
     pub white_pinned_restrictions: [u64 ; 64],
-    pub black_pinned_restrictions: [u64 ; 64]
+    pub black_pinned_restrictions: [u64 ; 64],
+    pub meta_attacks: u64, //'meta attacks' posed by the non-moving player, these refer to squares behind king on sliding piece ray, since the king can't move there, but it's not actually attacked 
 }
 
 impl Board {
@@ -136,7 +137,7 @@ impl Board {
         ws: bool, wl: bool, bs: bool, bl: bool, ep_square: Option<u32>, move_gen: &MoveGen
     ) -> Self {
         let mut res: Board = Self {
-            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0
+            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0
         }; //set computable to some defaults and compute now
         move_gen.compute_attacked(&mut res, turn.opposite());
         move_gen.compute_pinned(&mut res, turn);
