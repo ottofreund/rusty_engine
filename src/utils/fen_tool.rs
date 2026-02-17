@@ -1,67 +1,11 @@
-use crate::repr::{bitboard, board::Board, move_gen::MoveGen, types::Color};
-
-
 
 const valid_piece_chars: [char ; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
 const valid_mover_chars: [char ; 2] = ['w', 'b'];
 const valid_castling_chars: [char ; 4] = ['K', 'Q', 'k', 'q'];
 const file_chars: [char; 8] = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
-pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Option<Board> {
-    if !is_valid_fen(&fen) {
-        return None;
-    }
-    let mut pieces: [u64; 12] = [0 ; 12];
-    let mut white_occupation: u64 = 0;
-    let mut black_occupation: u64 = 0;
-    let mut sections = fen.split(' ');
-    let piece_str: &str = sections.next().expect("Was long enough but iterator ended.");
-    let rows = piece_str.split('/');
-    let mut sqr_idx: i32 = 56;
-    for row in rows.clone() {
-        for c in row.chars() {
-            if c.is_alphabetic() {
-                let piece_type: usize = valid_piece_chars.iter().position(|p| *p == c).expect("Was valid fen but unknown piece type");
-                bitboard::set_square(&mut pieces[piece_type], sqr_idx as u32);
-                if c.is_uppercase() { //white
-                    bitboard::set_square(&mut white_occupation, sqr_idx as u32);
-                } else { //black
-                    bitboard::set_square(&mut black_occupation, sqr_idx as u32);
-                }
-                sqr_idx += 1;
-            } else { //empty for c spaces
-                let spaces: u32 = c.to_digit(10).expect("Was valid fen but invalid space count");
-                sqr_idx += spaces as i32;
-            }
-        }
-        sqr_idx -= 16
-    }
-    let turn: Color = match sections.next().expect("Was valid but sections ran out") {
-        "w" => Color::White,
-        "b" => Color::Black,
-        _ => panic!("Turn was not 'w' or 'b' in fen that was valid.")
-    };
-    let castling_string: &str = sections.next().expect("Was valid but sections ran out");
-    let ws: bool = castling_string.contains('K');
-    let wl: bool = castling_string.contains('Q');
-    let bs: bool = castling_string.contains('k');
-    let bl: bool = castling_string.contains('q');
 
-    let ep_string: &str = sections.next().expect("Was valid but sections ran out");
-    let ep_square: Option<u32>;
-    if ep_string == "-" {
-        ep_square = None;
-    } else {
-        let mut char_iter = ep_string.chars();
-        let file: char = char_iter.next().expect("ep wasn't valid");
-        let rank: u32 = char_iter.next().expect("ep wasn't valid") as u32 - 1;
-        ep_square = Some(file as u32 - 'a' as u32 + 8 * rank); 
-    }
-
-    return Some(Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, move_gen));
-}
-
-fn is_valid_fen(fen: &String) -> bool {
+pub fn is_valid_fen(fen: &String) -> bool {
     let mut sections = fen.split(' ');
     let sec_count: usize = sections.clone().count();
     if sec_count < 4 || sec_count > 6 {
@@ -123,7 +67,7 @@ fn is_valid_fen(fen: &String) -> bool {
 }
 
 
-fn is_legal_piece_row(row: &str) -> bool {
+pub fn is_legal_piece_row(row: &str) -> bool {
     let mut piece_count: u32 = 0;
 
     for c in row.chars() {
@@ -140,3 +84,33 @@ fn is_legal_piece_row(row: &str) -> bool {
     }
     return true;
 }
+
+
+pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: &mut u64, black_occupation: &mut u64) {
+    let rows = piece_str.split('/');
+    let mut sqr_idx: i32 = 56;
+    for row in rows.clone() {
+        for c in row.chars() {
+            if c.is_alphabetic() {
+                let piece_type: usize = valid_piece_chars.iter().position(|p| *p == c).expect("Was valid fen but unknown piece type");
+                //bitboard::set_square(&mut pieces[piece_type], sqr_idx as u32);
+                pieces[piece_type] |= 1 << sqr_idx;
+                if c.is_uppercase() { //white
+                    //bitboard::set_square(white_occupation, sqr_idx as u32);
+                    *white_occupation |= 1 << sqr_idx;
+                } else { //black
+                    //bitboard::set_square(black_occupation, sqr_idx as u32);
+                    *black_occupation |= 1 << sqr_idx;
+                }
+                sqr_idx += 1;
+            } else { //empty for c spaces
+                let spaces: u32 = c.to_digit(10).expect("Was valid fen but invalid space count");
+                sqr_idx += spaces as i32;
+            }
+        }
+        sqr_idx -= 16
+    }
+    return;
+}
+
+pub const DEFAULT_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";

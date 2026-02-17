@@ -1,5 +1,3 @@
-use std::ptr::null;
-
 use crate::repr::_move;
 use crate::repr::_move::*;
 use crate::repr::board::*;

@@ -3,6 +3,8 @@ use std::fmt::Error;
 use crate::repr::{board::Board, move_gen::MoveGen, types::Color};
 use crate::repr::*;
 
+//use crate::utils::fen_tool::*;
+
 
 pub struct Game {
     pub board: Board,
@@ -23,6 +25,20 @@ impl Default for Game {
 }
 
 impl Game {
+    
+    pub fn game_with(fen: &str) -> Result<Self, &str> {
+        let move_gen: MoveGen = MoveGen::init();
+        let board: Board;
+        match Board::fen_to_board(fen.to_string(), &move_gen) {
+            Ok(b) => board = b,
+            Err(fe) => return Err("Fen error")
+        }
+        let legal_moves: Vec<u32> = move_gen.get_all_legal(&board, board.turn.clone());
+        return Ok(Self {
+            board, move_gen, legal_moves
+        })
+    }
+
     ///Public api ease of use and safety method
     pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32) -> Result<u32, Error> {
         let mov: Option<u32> = self.legal_moves.iter().copied().find(|mov| 

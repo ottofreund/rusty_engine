@@ -1,6 +1,3 @@
-Move generation todo:
- - en passant
-
 Easy improvements:
  - flatten rook_slide_bbs and bishop_slide_bbs to 1D
 
