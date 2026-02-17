@@ -119,7 +119,7 @@ pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: 
 ///Ok(board) with board being filled in valid state board, if fen valid <br>
 ///Else Err(FenError)
 pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
-    if is_valid_fen(&fen) {
+    if !is_valid_fen(&fen) {
         return Err("Fen error");
     }
     let mut pieces: [u64; 12] = [0 ; 12];

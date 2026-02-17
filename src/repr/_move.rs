@@ -4,9 +4,8 @@ use crate::repr::{board::{Board, square_to_string}, types::*};
 //6-11: target square
 //12: is eating move?
 //13: is pawn double push?
-//14-16: free
-//17: castle short?
-//18: castle long?
+//14-17: eaten piece
+//18: free
 //21: is promotion?
 //22-25: promotion piece
 //26-29: moved piece
@@ -25,7 +24,8 @@ const WHITE_LONG_CORNER: u32 = 0;
 const BLACK_SHORT_CORNER: u32 = 63;
 const BLACK_LONG_CORNER: u32 = 56;
 
-///Encode move to u32
+///Encode move to u32 <br>
+///taken piece idx is found and added after checking pseudolegal is legal to save compute
 pub fn create(from: u32, to: u32, is_take: bool, mover: Color, moved_piece: u32) -> u32 {
     let mut res: u32 = from;
     res = res | (to << 6);
@@ -108,11 +108,11 @@ pub fn is_white_move(mov: u32) -> bool {
 }
 
 pub fn is_short_castle(mov: u32) -> bool {
-    return (mov & 131072) > 0;
+    return mov == WHITE_SHORT || mov == BLACK_SHORT;
 }
 
 pub fn is_long_castle(mov: u32) -> bool {
-    return (mov & 262144) > 0;
+    return mov == WHITE_LONG || mov == BLACK_LONG;
 }
 
 pub fn is_castle(mov: u32) -> bool {
@@ -134,6 +134,16 @@ pub fn is_en_passant(mov: u32) -> bool {
 pub fn is_double_push(mov: u32) -> bool {
     return (mov & 8192) > 0
 }
+
+///Assumes that is_eating is checked to be true, undefined else
+pub fn eaten_piece(mov: u32) -> u32 {
+    return (mov >> 14) & 0xF;
+}
+
+pub fn with_eaten_piece(mov: u32, eaten: u32) -> u32 {
+    return mov | (eaten << 14);
+}
+
 //Castling rights updator's are not called for a side after both of their rights have been lost.
 ///Updates white's castling rights directly to board object in accordance with played move **mov**.
 pub fn update_white_castling(mov: u32, board: &mut Board) {

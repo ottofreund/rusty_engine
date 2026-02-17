@@ -7,6 +7,14 @@ use crate::types::Color;
 
 #[test]
 fn default_pos_perft_correct() {
-    //let game: Game = Game::game_with(DEFAULT_FEN).unwrap();
+    let game: Game = Game::game_with(DEFAULT_FEN).unwrap();
     
+}
+
+fn go_perft(depth: u32, game: &mut Game, expected: u32) -> bool {
+    let mut found: u32 = 0;
+    fn inner(d: u32) {
+        
+    }
+    return found == expected;
 }

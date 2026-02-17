@@ -3,7 +3,7 @@ use std::fmt::Error;
 use crate::repr::{board::Board, move_gen::MoveGen, types::Color};
 use crate::repr::*;
 
-//use crate::utils::fen_tool::*;
+use crate::utils::fen_tool::fen_to_board;
 
 
 pub struct Game {
@@ -29,7 +29,7 @@ impl Game {
     pub fn game_with(fen: &str) -> Result<Self, &str> {
         let move_gen: MoveGen = MoveGen::init();
         let board: Board;
-        match Board::fen_to_board(fen.to_string(), &move_gen) {
+        match fen_to_board(fen.to_string(), &move_gen) {
             Ok(b) => board = b,
             Err(fe) => return Err("Fen error")
         }
@@ -157,7 +157,23 @@ impl Game {
         return;
     }
 
-    pub fn unmake_move(&self, mov: u32) {
+    pub fn unmake_move(&mut self, mov: u32) {
+        let unmaking_white_move: bool = !self.board.turn.is_white();
+        let is_promotion: bool = _move::is_promotion(mov);
+        let from: u32 = _move::get_init(mov);
+        let to: u32 = _move::get_target(mov);
+        let moved_piece: usize = _move::get_moved_piece(mov) as usize;
+        let is_eating: bool = _move::is_eating(mov);
+        let is_castle: bool = _move::is_castle(mov);
+        let is_double_push: bool = _move::is_double_push(mov);
+        let is_en_passant: bool = _move::is_en_passant(mov);
+        let own_occupation: &mut u64;
+        let opponent_occupation: &mut u64;
+        if unmaking_white_move {
+            own_occupation = &mut self.board.white_occupation; opponent_occupation = &mut self.board.black_occupation;
+        } else {
+            own_occupation = &mut self.board.black_occupation; opponent_occupation = &mut self.board.white_occupation;
+        }
         return;
     }
 

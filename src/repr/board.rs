@@ -63,7 +63,7 @@ impl Board {
     /// Expects that contains piece, panics if doesn't. <br/>
     /// Should only be used after checking occupany with is_{color}_occupied -method.
     pub fn get_piece_type_at(&self, sqr: u32, owner: Color) -> u32 {
-        return self.lift_piece_type_at(sqr, owner).unwrap();
+        return self.lift_piece_type_at(sqr, owner).expect("sqr wasn't occupied although expected");
     }
 
     /// Lifts piece of **owner** color at **sqr**. <br/>

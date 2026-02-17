@@ -42,13 +42,27 @@ impl MoveGen {
         return Self { attack_bbs, rook_bbs_no_edges, bishop_bbs_no_edges, magic_bb }
     }
 
-    ///Called once upon arriving to a new position.
+    ///Called once upon arriving to a new position. <br>
     ///Not called when reverting move, since just fetched from stack.
     pub fn get_all_legal(&self, board: &Board, mover: Color) -> Vec<u32> {
         let mut res: Vec<u32> = Vec::new();
         for mov in self.get_all_pseudolegal(board, mover) {
             if self.pseudolegal_is_legal(mov, board, mover) {
-                res.push(mov);
+                //add taken piece idx to move (if eating) now, since it is necessary
+                let m: u32;
+                if _move::is_en_passant(mov) {
+                    if mover.is_white() {
+                        m = _move::with_eaten_piece(mov, 6);
+                    } else {
+                        m = mov; //white pawn is 0 so do nothing
+                    }   
+                } else if _move::is_eating(mov) {
+                    let eaten_piece: u32 = board.get_piece_type_at(_move::get_target(mov), mover.opposite());
+                    m = _move::with_eaten_piece(mov, eaten_piece);
+                } else {
+                    m = mov;
+                }
+                res.push(m);
             }
         }
         return res;
