@@ -149,43 +149,6 @@ impl Board {
         return res;
     }
 
-    ///Ok(board) with board being filled in valid state board, if fen valid <br>
-    ///Else Err(FenError)
-    pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
-        if fen_tool::is_valid_fen(&fen) {
-            return Err("Fen error");
-        }
-        let mut pieces: [u64; 12] = [0 ; 12];
-        let mut white_occupation: u64 = 0;
-        let mut black_occupation: u64 = 0;
-        let mut sections = fen.split(' ');
-        let piece_str: &str = sections.next().expect("Was long enough but iterator ended.");
-        fen_tool::parse_pieces(piece_str, &mut pieces, &mut white_occupation, &mut black_occupation);
-        let turn: Color = match sections.next().expect("Was valid but sections ran out") {
-            "w" => Color::White,
-            "b" => Color::Black,
-            _ => panic!("Turn was not 'w' or 'b' in fen that was valid.")
-        };
-        let castling_string: &str = sections.next().expect("Was valid but sections ran out");
-        let ws: bool = castling_string.contains('K');
-        let wl: bool = castling_string.contains('Q');
-        let bs: bool = castling_string.contains('k');
-        let bl: bool = castling_string.contains('q');
-
-        let ep_string: &str = sections.next().expect("Was valid but sections ran out");
-        let ep_square: Option<u32>;
-        if ep_string == "-" {
-            ep_square = None;
-        } else {
-            let mut char_iter = ep_string.chars();
-            let file: char = char_iter.next().expect("ep wasn't valid");
-            let rank: u32 = char_iter.next().expect("ep wasn't valid") as u32 - 1;
-            ep_square = Some(file as u32 - 'a' as u32 + 8 * rank); 
-        }
-
-        return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, move_gen));
-    }
-
 }
 
 /* impl std::fmt::Display for Board {
