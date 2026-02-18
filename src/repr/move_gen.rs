@@ -105,9 +105,45 @@ impl MoveGen {
             
         }
 
-        if _move::is_en_passant(mov) {
-            //edge case where both pawns leave rank exposing pin
-            //TODO
+        if _move::is_en_passant(mov) && board.get_king_sqr_idx(mover) / 8 == init / 8 {
+            //check edge case where both pawns leave rank exposing pin on same rank king
+            let opponent_horizontal_sliding: u64;
+            let ep_rank: u64;
+            if mover.is_white() {
+                opponent_horizontal_sliding = board.pieces[9] | board.pieces[10];
+                ep_rank = RANKS[4];
+            } else {
+                opponent_horizontal_sliding = board.pieces[3] | board.pieces[4];
+                ep_rank = RANKS[3];
+            }
+            if ep_rank & opponent_horizontal_sliding > 0 {
+                let scan_right: bool = board.get_king_sqr_idx(mover) < init;
+                let ep_dir_right: bool = _move::get_target(mov) % 8 > init % 8;
+                let scan_start_sqr: u32;
+                let apply_step_f: fn(u32) -> u32;
+                let end_sqr_bb: u64;
+                if scan_right {
+                    apply_step_f = |x: u32| x + 1;
+                    end_sqr_bb = FILES[7];
+                    if ep_dir_right {
+                        scan_start_sqr = init + 1;
+                    } else {
+                        scan_start_sqr = init;
+                    }
+                } else {
+                    apply_step_f = |x: u32| x - 1;
+                    end_sqr_bb = FILES[0];
+                    if ep_dir_right {
+                        scan_start_sqr = init;
+                    } else {
+                        scan_start_sqr = init - 1;
+                    }
+                }
+                let slide_bb: u64 = slide_to_dir(scan_start_sqr, apply_step_f, end_sqr_bb, board.total_occupation(), true);
+                if slide_bb & opponent_horizontal_sliding > 0 {
+                    return false;
+                }
+            }
         } else if moved_piece == mover_king_piece_idx {
             let target: u32 = _move::get_target(mov);
             if bitboard::contains_square(opponent_attacked, target)
