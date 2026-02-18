@@ -293,10 +293,10 @@ impl MoveGen {
                 //4.4.2
                 if side.is_white() {
                     bitboard::set_square(&mut board.white_pinned, pinner_idx);
-                    board.white_pinned_restrictions[pinner_idx as usize] |= specific_rpp;
+                    board.white_pinned_restrictions[pinner_idx as usize] |= bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat pinner;
                 } else {
                     bitboard::set_square(&mut board.black_pinned, pinner_idx);
-                    board.black_pinned_restrictions[pinner_idx as usize] |= specific_rpp;
+                    board.black_pinned_restrictions[pinner_idx as usize] |= bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat pinner;
                 }
             } else if occupied_rpp.count_ones() == 0 { //we have a sliding checker, set the check_block_sqrs
                 board.check_block_sqrs |= bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat checker so set pp_sqr_idx
