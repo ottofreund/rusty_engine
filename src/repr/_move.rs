@@ -135,44 +135,16 @@ pub fn is_double_push(mov: u32) -> bool {
     return (mov & 8192) > 0
 }
 
-///Assumes that is_eating is checked to be true, undefined else
-pub fn eaten_piece(mov: u32) -> u32 {
-    return (mov >> 14) & 0xF;
+pub fn eaten_piece(mov: u32) -> Option<u32> {
+    if is_eating(mov) {
+        return Some((mov >> 14) & 0xF);
+    } else {
+        return None;
+    }
 }
 
 pub fn with_eaten_piece(mov: u32, eaten: u32) -> u32 {
     return mov | (eaten << 14);
-}
-
-//Castling rights updator's are not called for a side after both of their rights have been lost.
-///Updates white's castling rights directly to board object in accordance with played move **mov**.
-pub fn update_white_castling(mov: u32, board: &mut Board) {
-    let init: u32 = get_init(mov);
-    let target: u32 = get_target(mov);
-    let moved_piece: u32 = get_moved_piece(mov);
-    if moved_piece == W_KING { //remove all white castling rights
-        board.ws = false;
-        board.wl = false;
-    } else if init == WHITE_SHORT_CORNER || target == WHITE_SHORT_CORNER { //short corner rook has moved or is eaten
-        board.ws = false;
-    } else if init == WHITE_LONG_CORNER || target == WHITE_LONG_CORNER {
-        board.wl = false;
-    }
-    
-}
-///Updates black's castling rights directly to board object in accordance with played move **mov**.
-pub fn update_black_castling(mov: u32, board: &mut Board) {
-    let init: u32 = get_init(mov);
-    let target: u32 = get_target(mov);
-    let moved_piece: u32 = get_moved_piece(mov);
-    if moved_piece == B_KING { //remove all white castling rights
-        board.bs = false;
-        board.bl = false;
-    } else if init == BLACK_SHORT_CORNER || target == BLACK_SHORT_CORNER { //short corner rook has moved or is eaten
-        board.bs = false;
-    } else if init == BLACK_LONG_CORNER || target == BLACK_LONG_CORNER {
-        board.bl = false;
-    }
 }
 
 const piece_chars: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];

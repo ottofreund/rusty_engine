@@ -1,12 +1,21 @@
+use iced::keyboard::{self, Key, key};
 use iced::widget::image::Handle;
+use iced::widget::text_editor::KeyPress;
 use iced::widget::{Image, button, column, container, image, row, stack, text};
-use iced::{Application, Element, Program, Settings, alignment, run};
+use iced::{Application, Element, Program, Settings, Subscription, alignment, run};
+use iced::event::{self, Event};
 use crate::repr::game::Game;
 use crate::repr::board::square_to_string;
 use crate::repr::{_move, bitboard, types::*};
 
 use crate::ui::image_handle::ImageHandle;
 use crate::ui::messages::*;
+
+pub fn run_fr() -> iced::Result {
+    iced::application(|| AppState::default(), update, view)
+        .subscription(|s| AppState::subscription())
+        .run()
+}
 
 #[derive(Default)]
 pub struct AppState {
@@ -99,7 +108,7 @@ impl AppState {
         match self.selected_square {
             Some(sqr) => {
                 self.selection_target_sqrs.clear();
-                self.game.legal_moves.iter().for_each(|mov| {
+                self.game.legal_moves().iter().for_each(|mov| {
                     if _move::get_init(*mov) == sqr {
                         self.selection_target_sqrs.push(_move::get_target(*mov));
                     }
@@ -107,6 +116,10 @@ impl AppState {
             },
             None => {}
         }
+    }
+
+    pub fn subscription() -> Subscription<Message> {
+        return event::listen().map(Message::Event);
     }
 
 }
@@ -129,6 +142,7 @@ pub fn update(state: &mut AppState, msg: Message) {
                     match state.game.try_make_move(selected_sqr, sqr) {
                         Ok(mov) => {
                             state.selected_square = None;
+                            println!("Played moves stack:\n{:?}", state.game.played_moves_stack);
                         },
                         Err(e) => {
                             state.selected_square = None;
@@ -150,6 +164,17 @@ pub fn update(state: &mut AppState, msg: Message) {
             }
         }
       }
+      Message::Event(event) => match event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character(c), ..
+        }) => {
+            if c.len() == 1 && c.contains('r') {
+                state.game.try_unmake_move();
+                println!("Played moves stack:\n{:?}", state.game.played_moves_stack);
+            }
+        }
+        _ => {}
+      }
       _ => {
         println!("Unrecognized message");
       }
@@ -161,9 +186,9 @@ pub fn view(state: &AppState) -> Element<Message> {
     return state.render_board();
 }
 
-pub fn run_fr() -> iced::Result {
+/* pub fn run_fr() -> iced::Result {
     return run(update, view);
-}
+} */
 
 const LIGHT_SQR_COLOR: iced::Color = iced::Color::from_rgb(0.94, 0.90, 0.86);
 const DARK_SQR_COLOR: iced::Color = iced::Color::from_rgb(0.47, 0.40, 0.30);

@@ -537,19 +537,19 @@ fn add_castling(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
         if mover.is_white() {
             opponent_attacks = board.black_attacks;
             preventing_bb = board.white_occupation | board.black_occupation | opponent_attacks;
-            if board.ws && WS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
+            if board.ws() && WS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
                 move_vec.push(WHITE_SHORT);
             }
-            if board.wl && WL_CASTLING_GAP_BB & preventing_bb == 0 { //long is legal
+            if board.wl() && WL_CASTLING_GAP_BB & preventing_bb == 0 { //long is legal
                 move_vec.push(WHITE_SHORT);
             }
         } else {
             opponent_attacks = board.white_attacks;
             preventing_bb = board.white_occupation | board.black_occupation | opponent_attacks;
-            if board.bs && BS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
+            if board.bs() && BS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
                 move_vec.push(BLACK_SHORT);
             }
-            if board.bl && BL_CASTLING_GAP_BB & preventing_bb == 0 { //long is legal
+            if board.bl() && BL_CASTLING_GAP_BB & preventing_bb == 0 { //long is legal
                 move_vec.push(BLACK_LONG);
             }
         }

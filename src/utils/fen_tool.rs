@@ -150,7 +150,7 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
         ep_square = Some(file as u32 - 'a' as u32 + 8 * rank); 
     }
 
-    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, move_gen));
+    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, move_gen));
 }
 
 pub const DEFAULT_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";

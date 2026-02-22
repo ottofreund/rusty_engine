@@ -18,10 +18,6 @@ pub struct Board {
     pub white_attacks: u64, //what squares are "seen" by white pieces, including squares with own color pieces "protected"
     pub black_attacks: u64,
     pub ep_square: Option<u32>, //if either moves pawn 2 up, resulting square comes here
-    pub ws: bool, //white short castling right
-    pub wl: bool,
-    pub bs: bool,
-    pub bl: bool,
     pub turn: Color,
     pub nof_checkers: u32, //if > 1, has to move king
     pub check_block_sqrs: u64, //bitboard for squares that block the check, only applies if nof_checkers <= 1
@@ -31,6 +27,10 @@ pub struct Board {
     pub white_pinned_restrictions: [u64 ; 64],
     pub black_pinned_restrictions: [u64 ; 64],
     pub meta_attacks: u64, //'meta attacks' posed by the non-moving player, these refer to squares behind king on sliding piece ray, since the king can't move there, but it's not actually attacked 
+    ws: u32, //white short castling right distance
+    wl: u32, //semaphore-like usage or "castling distance"
+    bs: u32, //if 0, then has right else, num tells how many moves ago you had the right
+    bl: u32
 }
 
 impl Board {
@@ -94,33 +94,42 @@ impl Board {
         }
     }
 
-    ///called when making/unmaking move
-    pub fn update_castling_rights(&mut self, from: u32, to: u32, is_white_turn: bool, moved_piece: u32) {
-        let short_right: &mut bool;
+    ///called when making a move
+    pub fn update_castling_rights_make(&mut self, from: u32, to: u32, is_white_turn: bool, moved_piece: u32) {
+        let short_dist: &mut u32;
         let short_corner_idx: u32;
-        let long_right: &mut bool;
+        let long_dist: &mut u32;
         let long_corner_idx: u32;
         let king_piece_idx: u32;
         if is_white_turn { 
-            short_right = &mut self.ws; long_right = &mut self.wl; short_corner_idx = 7; long_corner_idx = 0; king_piece_idx = W_KING;
+            short_dist = &mut self.ws; long_dist = &mut self.wl; short_corner_idx = 7; long_corner_idx = 0; king_piece_idx = W_KING;
         } else {
-            short_right = &mut self.bs; long_right = &mut self.bl; short_corner_idx = 63; long_corner_idx = 56; king_piece_idx = B_KING;
+            short_dist = &mut self.bs; long_dist = &mut self.bl; short_corner_idx = 63; long_corner_idx = 56; king_piece_idx = B_KING;
         }
+        let short_right: bool = *short_dist == 0;
+        let long_right: bool = *long_dist == 0;
         if moved_piece == king_piece_idx {
-            *short_right = false;
-            *long_right = false;
-            return;
-        }
-        //check if from or to corresponding corner
-        if *short_right && (from == short_corner_idx || to == short_corner_idx) {
-            *short_right = false;
-        }
-        if *long_right && (from == long_corner_idx || to == long_corner_idx) {
-            *long_right = false;
-        }
+            *short_dist += 1;
+            *long_dist += 1;
+        } else { //check individual rights
+            if !short_right || from == short_corner_idx || to == short_corner_idx { //check if from or to corresponding corner or already lost short right
+                *short_dist += 1;
+            }
+            if !long_right || from == long_corner_idx || to == long_corner_idx {
+                *long_dist += 1;
+            }
+        }   
         return;
     }
 
+    ///Called when unmaking a move
+    pub fn update_castling_rights_unmake(&mut self) {
+        if self.ws != 0 {self.ws -= 1;}
+        if self.wl != 0 {self.wl -= 1;}
+        if self.bs != 0 {self.bs -= 1;}
+        if self.bl != 0 {self.bl -= 1;}
+        return;
+    }
 
     pub fn default_board(move_gen: &MoveGen) -> Self {
         let pieces: [u64; 12] = [
@@ -129,7 +138,7 @@ impl Board {
         let white_occupation: u64 = 0xFFFF;
         let black_occupation: u64 = 0xFFFF000000000000;
         let ep_square: Option<u32> = None;
-        let (ws, wl, bs, bl) = (true, true, true, true);
+        let (ws, wl, bs, bl) = (0, 0, 0, 0);
         let turn: Color = Color::White;
         return Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, move_gen)
     }
@@ -137,7 +146,7 @@ impl Board {
     ///Returns filled in valid state board after taking minimal positional information.
     pub fn board_with(
         pieces: [u64; 12], white_occupation: u64, black_occupation: u64, turn: Color, 
-        ws: bool, wl: bool, bs: bool, bl: bool, ep_square: Option<u32>, move_gen: &MoveGen
+        ws: u32, wl: u32, bs: u32, bl: u32, ep_square: Option<u32>, move_gen: &MoveGen
     ) -> Self {
         let mut res: Board = Self {
             pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0
@@ -147,6 +156,23 @@ impl Board {
         move_gen.get_all_legal(&mut res, turn);
         //now in valid state
         return res;
+    }
+
+    ///white has short castle right
+    pub fn ws(&self) -> bool {
+        return self.ws == 0;
+    }
+    ///white has long castle right
+    pub fn wl(&self) -> bool {
+        return self.wl == 0;
+    }
+    ///black has short castle right
+    pub fn bs(&self) -> bool {
+        return self.bs == 0;
+    }
+    ///black has long castle right
+    pub fn bl(&self) -> bool {
+        return self.bl == 0;
     }
 
 }
