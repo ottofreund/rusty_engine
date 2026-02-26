@@ -274,7 +274,7 @@ impl Game {
             let opponent_pawns: &mut u64;
             let offset: i32;
             if unmaking_white_move {opponent_pawns = &mut self.board.pieces[6]; offset = -8} else {opponent_pawns = &mut self.board.pieces[0]; offset = 8;}
-            let eating_sqr: u32 = (self.board.ep_square.expect("Made en passant, but ep_square was none") as i32 + offset) as u32;
+            let eating_sqr: u32 = (to as i32 + offset) as u32;
             bitboard::set_square(opponent_pawns, eating_sqr);
             bitboard::set_square(opponent_occupation, eating_sqr);
         }
