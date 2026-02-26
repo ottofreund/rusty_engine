@@ -67,6 +67,7 @@ impl Game {
         })
     }
 
+    ///Returns current legal moves from stack
     pub fn legal_moves(&self) -> &Vec<u32> {
         return self.legal_moves_stack.last().expect("legal move stack was empty, shouldn't happen");
     }
@@ -105,8 +106,8 @@ impl Game {
         }
     }
 
-    ///Board state is modified and legal_moves is updated
-    fn make_move(&mut self, mov: u32) {
+    ///Board state is modified and legal_moves is updated, assumes mov is legal
+    pub fn make_move(&mut self, mov: u32) {
         let is_white_turn: bool = self.board.turn.is_white();
         let is_promotion: bool = _move::is_promotion(mov);
         let from: u32 = _move::get_init(mov);
@@ -173,7 +174,7 @@ impl Game {
             self.ep_stack.push(None);
         }
         self.update_ep_sqr(); //update to board.ep_square as well
-        println!("Ep square: {:?}", self.board.ep_square);
+        //println!("Ep square: {:?}", self.board.ep_square);
 
         self.board.update_castling_rights_make(from, to, is_white_turn, moved_piece as u32);
 
@@ -216,11 +217,7 @@ impl Game {
     }
 
     /// Unmakes move, resulting that the state of board and game is equivalent as to before moving.
-    /// 
-    /// Pop legal moves from stack
-    /// Pop opponent attacked bitboard from stack (also set nof checkers)
-    /// Pop pinned bitboards from stack
-    /// Fetch castling rights from semaphore-like counter
+    /// assumes mov was last made
     pub fn unmake_move(&mut self, mov: u32) {
         let unmaking_white_move: bool = !self.board.turn.is_white();
         let from: u32 = _move::get_init(mov);

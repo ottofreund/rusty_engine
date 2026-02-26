@@ -57,6 +57,7 @@ impl MoveGen {
                         m = mov; //white pawn is 0 so do nothing
                     }   
                 } else if _move::is_eating(mov) {
+                    //println!("looking for eaten for: {}", _move::to_string(mov));
                     let eaten_piece: u32 = board.get_piece_type_at(_move::get_target(mov), mover.opposite());
                     m = _move::with_eaten_piece(mov, eaten_piece);
                 } else {
@@ -568,10 +569,10 @@ fn add_en_passant(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
         } else {
             mover_pawns = board.pieces[6]; l_sqr = ep_square + 7; r_sqr = ep_square + 9; pawn_piece_idx = 6;
         }
-        if bitboard::contains_square(mover_pawns, l_sqr) {
+        if !bitboard::contains_square(FILES[0], ep_square) && bitboard::contains_square(mover_pawns, l_sqr) {
             move_vec.push(_move::create_en_passant(l_sqr, ep_square, mover, pawn_piece_idx))
         }
-        if bitboard::contains_square(mover_pawns, r_sqr) {
+        if !bitboard::contains_square(FILES[7], ep_square) && bitboard::contains_square(mover_pawns, r_sqr) {
             move_vec.push(_move::create_en_passant(r_sqr, ep_square, mover, pawn_piece_idx))
         }
     }

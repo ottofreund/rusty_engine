@@ -7,14 +7,64 @@ use crate::types::Color;
 
 #[test]
 fn default_pos_perft_correct() {
-    let game: Game = Game::game_with(DEFAULT_FEN).unwrap();
-    
+    let mut game: Game = Game::game_with(DEFAULT_FEN).unwrap();
+    //assert_eq!(go_perft(2, &mut game), 400);
+    //assert_eq!(go_perft(3, &mut game), 8902)
+    //assert_eq!(go_perft(4, &mut game), 197281)
+    assert_eq!(go_perft(5, &mut game), 4865609)
+    //perft_logger(3, &mut game);
 }
 
-fn go_perft(depth: u32, game: &mut Game, expected: u32) -> bool {
-    let mut found: u32 = 0;
-    fn inner(d: u32) {
-        
+fn go_perft(target_depth: u32, game: &mut Game) -> u32 {
+    assert!(target_depth > 1);
+    let mut found: usize = 0;
+    let mut move_stack: Vec<u32> = game.legal_moves().clone();
+    let mut made_moves_stack: Vec<u32> = Vec::new();
+
+    while !move_stack.is_empty() {
+        //println!("Made moves:\n{:?}", made_moves_stack.iter().map(|m| _move::to_string(*m)).collect::<Vec<String>>()); 
+        if made_moves_stack.len() == target_depth as usize - 1 {
+            found += game.legal_moves().len();
+            let last_made_move: Option<u32> = made_moves_stack.last().copied();
+            while move_stack.pop() != last_made_move {}; //pop all counted moves and last made move
+            //now unmake last made on board and pop from made moves 
+            game.unmake_move(made_moves_stack.pop().expect("made moves stack was empty"));
+        } else if made_moves_stack.last().copied() == move_stack.last().copied() { //covered all subvariations after this move to desired depth, unmake move
+            move_stack.pop();
+            game.unmake_move(made_moves_stack.pop().expect("made moves stack was empty"));
+        } else { //make move that is on top of stack
+            let next_mov: u32 = move_stack.last().copied().expect("move stack never empty here");
+            //println!("now playing: {}", _move::to_string(next_mov));
+            game.make_move(next_mov);
+            made_moves_stack.push(next_mov);
+            //add all legal moves of resulting position to move stack
+            game.legal_moves().iter().copied().for_each(|mov| {
+                move_stack.push(mov);
+            });
+        }
     }
-    return found == expected;
+    //println!("Found {}", found);
+    return found as u32;
 }
+
+///Helper for debugging to show distribution of moves one move deeper
+fn perft_logger(depth: u32, game: &mut Game) -> u32 {
+    let found: u32;
+    fn inner(d: u32, g: &mut Game) -> u32 {
+        if d == 0 {
+            return 1;
+        } else {
+            let mut perft_from_here: u32 = 0;
+            g.legal_moves().to_vec().iter().for_each(|mov| {
+                g.make_move(*mov);
+                perft_from_here += inner(d - 1, g);
+                g.unmake_move(*mov);
+            });
+            println!("After {:?} found {} positions\n", g.played_moves_stack.iter().map(|m| _move::to_string(*m)).collect::<Vec<String>>(), perft_from_here);
+            return perft_from_here;
+        }
+    }
+    found = inner(depth, game);
+    return found;
+}
+
