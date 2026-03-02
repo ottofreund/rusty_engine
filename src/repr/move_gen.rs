@@ -321,7 +321,7 @@ impl MoveGen {
             //4.1
             let pp_sqr_idx: usize = bitboard::pop_lsb(&mut potential_pinners) as usize; //potential pinner sqr idx
             //4.2
-            let specific_rpp: u64 = rpp & self.get_sliding_for(pp_sqr_idx, 1 << king_sqr_idx, !diag);
+            let specific_rpp: u64 = rpp & self.get_sliding_for(pp_sqr_idx, self.get_relevant_blockers(pp_sqr_idx, 1 << king_sqr_idx, !diag), !diag);
             //4.3
             let occupied_rpp: u64 = specific_rpp & total_occupation;
             //4.4
@@ -352,8 +352,21 @@ impl MoveGen {
     pub fn compute_attacked(&self, board: &mut Board, side: Color) -> u64 {
         let mut res: u64 = pawn_attacked(board, side);
         let opponent_king_sqr: u32 = board.get_king_sqr_idx(side.opposite());
-        if bitboard::contains_square(res, opponent_king_sqr) {
-            board.nof_checkers += 1; //pawn checks now covered
+        if bitboard::contains_square(res, opponent_king_sqr) { //pawn checker
+            board.nof_checkers += 1;
+            //set pawn check block sqr
+            let mover_pawns: u64; let l_offset: i32; let r_offset: i32;
+            if side.is_white() 
+            {mover_pawns = board.pieces[0]; l_offset = -9; r_offset = -7;} else 
+            {mover_pawns = board.pieces[6]; l_offset = 7; r_offset = 9;}
+            //possible left pawn checker
+            if !bitboard::contains_square(FILES[0], opponent_king_sqr) {
+                board.check_block_sqrs |= mover_pawns & (1 << (opponent_king_sqr as i32 + l_offset));
+            }
+            //possible right pawn checker
+            if !bitboard::contains_square(FILES[7], opponent_king_sqr) {
+                board.check_block_sqrs |= mover_pawns & (1 << (opponent_king_sqr as i32 + r_offset));
+            }
         }
         let mut i: usize;
         let e: usize;

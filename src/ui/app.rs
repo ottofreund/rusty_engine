@@ -142,7 +142,6 @@ pub fn update(state: &mut AppState, msg: Message) {
                     match state.game.try_make_move(selected_sqr, sqr) {
                         Ok(mov) => {
                             state.selected_square = None;
-                            println!("Played moves stack:\n{:?}", state.game.played_moves_stack);
                         },
                         Err(e) => {
                             state.selected_square = None;
@@ -170,7 +169,6 @@ pub fn update(state: &mut AppState, msg: Message) {
         }) => {
             if c.len() == 1 && c.contains('r') {
                 state.game.try_unmake_move();
-                println!("Played moves stack:\n{:?}", state.game.played_moves_stack);
             }
         }
         _ => {}

@@ -79,7 +79,7 @@ impl Game {
         );
         match mov {
             Some(m) => {
-                println!("Successfully moved: {}", _move::to_string(m));
+                //println!("Successfully moved: {}", _move::to_string(m));
                 self.make_move(m);
                 return Ok(m);
             },
