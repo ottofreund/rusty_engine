@@ -1,8 +1,7 @@
-use iced::keyboard::{self, Key, key};
+use iced::keyboard::{self};
 use iced::widget::image::Handle;
-use iced::widget::text_editor::KeyPress;
-use iced::widget::{Image, button, column, container, image, row, stack, text};
-use iced::{Application, Element, Program, Settings, Subscription, alignment, run};
+use iced::widget::{Image, button, column, container, row, stack, text};
+use iced::{Element, Size, Subscription};
 use iced::event::{self, Event};
 use crate::repr::game::Game;
 use crate::repr::board::square_to_string;
@@ -13,7 +12,9 @@ use crate::ui::messages::*;
 
 pub fn run_fr() -> iced::Result {
     iced::application(|| AppState::default(), update, view)
-        .subscription(|s| AppState::subscription())
+        .subscription(|_| AppState::subscription())
+        .resizable(false)
+        .window_size(Size::new(1300.0, 700.0))
         .run()
 }
 
@@ -22,13 +23,18 @@ pub struct AppState {
     selected_square: Option<u32>,
     game: Game,
     image_handle: ImageHandle,
-    selection_target_sqrs: Vec<u32>,
-    previous_moved_src: u32,
-    previous_moved_target: u32,
+    selection_target_sqrs: Vec<u32>
 }
 
 impl AppState {
     
+    fn render_main_container(&self) -> Element<'static, Message, iced::Theme, iced::Renderer> {
+        let mut columns = row!();
+        columns = columns.push(self.render_board());
+        //rows
+        return columns.width(1200).height(900).into();
+    }
+
     fn render_board(&self) -> Element<'static, Message, iced::Theme, iced::Renderer> {
         let mut rows = column!();
         for i in (0..8).rev() {
@@ -181,7 +187,7 @@ pub fn update(state: &mut AppState, msg: Message) {
 }
 
 pub fn view(state: &AppState) -> Element<Message> {
-    return state.render_board();
+    return state.render_main_container();
 }
 
 /* pub fn run_fr() -> iced::Result {

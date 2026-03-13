@@ -1,7 +1,5 @@
-use rusty_engine::repr::board::EDGES;
 use rusty_engine::repr::move_gen::*;
 use rusty_engine::repr::*;
-use crate::types::Color;
 
 #[test]
 fn naive_slide_gen_works() {

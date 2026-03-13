@@ -1,4 +1,4 @@
-use iced::widget::{Image, image::{self, Handle}};
+use iced::widget::{image::{Handle}};
 
 pub struct ImageHandle {
     pub img_handles: [Handle ; 12],

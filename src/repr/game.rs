@@ -43,7 +43,7 @@ impl Game {
         let board: Board;
         match fen_to_board(fen.to_string(), &move_gen) {
             Ok(b) => board = b,
-            Err(fe) => return Err("Fen error")
+            Err(_) => return Err("Fen error")
         }
         let legal_moves: Vec<u32> = move_gen.get_all_legal(&board, board.turn.clone());
         let legal_moves_stack: Vec<Vec<u32>> = vec![legal_moves];
@@ -226,7 +226,6 @@ impl Game {
         let eaten_piece: Option<u32> = _move::eaten_piece(mov);
         let is_castle: bool = _move::is_castle(mov);
         let is_promotion: bool = _move::is_promotion(mov);
-        let is_double_push: bool = _move::is_double_push(mov);
         let is_en_passant: bool = _move::is_en_passant(mov);
         let own_occupation: &mut u64;
         let opponent_occupation: &mut u64;

@@ -1,4 +1,4 @@
-use crate::repr::{board::{Board, square_to_string}, types::*};
+use crate::repr::{board::{square_to_string}, types::*};
 //moves are represented with 32 bit integers
 //0-5: source square
 //6-11: target square
@@ -18,11 +18,7 @@ pub const WHITE_SHORT: u32 = 2483159428; //1 0010100 0000 0 0 1 0000 0 000110 00
 pub const WHITE_LONG: u32 = 2483290244; //1 0010100 0000 0 1 0 0000 0 000010 000100
 pub const BLACK_SHORT: u32 = 738332604; //0 0101100 0000 0 0 1 0000 0 111110 111100
 pub const BLACK_LONG: u32 = 738463420; //0 0101100 0000 0 1 0 0000 0 111010 111100
-//corner square indices:
-const WHITE_SHORT_CORNER: u32 = 7;
-const WHITE_LONG_CORNER: u32 = 0;
-const BLACK_SHORT_CORNER: u32 = 63;
-const BLACK_LONG_CORNER: u32 = 56;
+
 
 ///Encode move to u32 <br>
 ///taken piece idx is found and added after checking pseudolegal is legal to save compute
@@ -147,12 +143,12 @@ pub fn with_eaten_piece(mov: u32, eaten: u32) -> u32 {
     return mov | (eaten << 14);
 }
 
-const piece_chars: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
+const PIECE_CHARS: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
 
 pub fn to_string(mov: u32) -> String {
     let mut res = String::new();
     let piece: usize = get_moved_piece(mov) as usize;
-    res.push_str(piece_chars[piece]);
+    res.push_str(PIECE_CHARS[piece]);
     res.push('(');
     res.push_str(&square_to_string(get_init(mov)));
     res.push(')');

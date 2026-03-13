@@ -1,6 +1,4 @@
-use std::collections::HashSet;
 use rand::prelude::*;
-use crate::repr::bitboard;
 use crate::repr::move_gen::{self, naive_rook_sliding, naive_bishop_sliding};
 ///Contains magically indexed precomputed slide_bbs and is associated with the methods and data needed to compute them
 ///Total size roughly a megabyte
@@ -68,9 +66,8 @@ impl MagicBitboard {
 ///Find working magic number for **sqr** and update **magic_arr**. <br><br>
 /// **all_block_masks** are RELEVANT blocker masks
 fn find_working(sqr: u32, rook: bool, magic_arr: &mut [u64 ; 64], all_block_masks: &Vec<u64>, rng: &mut ThreadRng) {
-    let piece_idx: usize;
     let bits_needed: u32;
-    if rook {piece_idx = 3; bits_needed = ROOK_BITS[sqr as usize];} else {piece_idx = 2; bits_needed = BISHOP_BITS[sqr as usize];}
+    if rook {bits_needed = ROOK_BITS[sqr as usize];} else {bits_needed = BISHOP_BITS[sqr as usize];}
     let shift_amount: u32 = 64 - bits_needed;
     //now try different random magic numbers until find one that works for all masks
     let mut iterations = 0;

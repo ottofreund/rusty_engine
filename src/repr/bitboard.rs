@@ -1,8 +1,5 @@
 /* Utils for u64 (magic) bitboards  */
 
-use crate::repr::board::{RANKS};
-use crate::repr::move_gen::MoveGen;
-use crate::repr::types::W_ROOK;
 
 ///returns idx of toggled lsb and toggles off that square for the passed mutable reference
 pub fn pop_lsb(bb: &mut u64) -> u32 {

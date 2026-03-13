@@ -1,5 +1,4 @@
 use crate::repr::{move_gen::MoveGen, types::{B_KING, Color, W_KING}};
-use crate::utils::fen_tool;
 
 
 pub const FILES: [u64 ; 8] = [
@@ -181,11 +180,11 @@ impl Board {
 
 } */
 
-pub const file_chars: [&str; 8] = ["a", "b", "c", "d", "e", "f", "g", "h"];
+pub const FILE_CHARS: [&str; 8] = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
 pub fn square_to_string(sqr_idx: u32) -> String {
     let mut res: String = String::new();
-    res.push_str(file_chars[(sqr_idx % 8) as usize]);
+    res.push_str(FILE_CHARS[(sqr_idx % 8) as usize]);
     let rank: u32 = sqr_idx / 8 + 1;
     res.push_str(&rank.to_string());
     return res;

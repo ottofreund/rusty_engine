@@ -12,6 +12,8 @@ const WS_CASTLING_GAP_BB: u64 = 96; //2^5 + 2^6
 const WL_CASTLING_GAP_BB: u64 = 14; //2^1 + 2^2 + 2^3
 const BS_CASTLING_GAP_BB: u64 = 6917529027641081856; //2^61 + 2^62
 const BL_CASTLING_GAP_BB: u64 = 1008806316530991104; //2^57 + 2^58 + 2^59
+const MAX_MOVES: usize = 218; //max moves in any pos
+const MAX_PSEUDO: usize = 250; //guess for max pseudo moves in any pos
 
 ///Uses **magic_bb** handle for precomputed slide moves.
 pub struct MoveGen {
@@ -45,7 +47,7 @@ impl MoveGen {
     ///Called once upon arriving to a new position. <br>
     ///Not called when reverting move, since just fetched from stack.
     pub fn get_all_legal(&self, board: &Board, mover: Color) -> Vec<u32> {
-        let mut res: Vec<u32> = Vec::new();
+        let mut res: Vec<u32> = Vec::with_capacity(MAX_MOVES);
         for mov in self.get_all_pseudolegal(board, mover) {
             if self.pseudolegal_is_legal(mov, board, mover) {
                 //add taken piece idx to move (if eating) now, since it is necessary
@@ -166,7 +168,7 @@ impl MoveGen {
 
     ///Also updates board.nof_checkers for non-sliding pieces (sliding checkers found at pinned computation) 
     pub fn get_all_pseudolegal(&self, board: &Board, mover: Color) -> Vec<u32> {
-        let mut res: Vec<u32> = Vec::new();
+        let mut res: Vec<u32> = Vec::with_capacity(MAX_PSEUDO);
         let mut i: usize;
         let e: usize;
         if mover.is_white() {i = 0; e = 6;} else {i = 6; e = 12;}

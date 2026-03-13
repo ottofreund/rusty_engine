@@ -2,10 +2,10 @@ use crate::repr::types::Color;
 use crate::repr::move_gen::MoveGen;
 use crate::repr::board::Board;
 
-const valid_piece_chars: [char ; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
-const valid_mover_chars: [char ; 2] = ['w', 'b'];
-const valid_castling_chars: [char ; 4] = ['K', 'Q', 'k', 'q'];
-const file_chars: [char; 8] = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+const VALID_PIECE_CHARS: [char ; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
+const VALID_MOVER_CHARS: [char ; 2] = ['w', 'b'];
+const VALID_CASTLING_CHARS: [char ; 4] = ['K', 'Q', 'k', 'q'];
+const FILE_CHARS: [char; 8] = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
 
 pub fn is_valid_fen(fen: &String) -> bool {
@@ -34,7 +34,7 @@ pub fn is_valid_fen(fen: &String) -> bool {
     }
     //second section is mover
     let mover: &str = sections.next().expect("Was long enough but iterator ended.");
-    if mover.len() != 1 || !valid_mover_chars.contains(&mover.chars().collect::<Vec<char>>()[0]) {
+    if mover.len() != 1 || !VALID_MOVER_CHARS.contains(&mover.chars().collect::<Vec<char>>()[0]) {
         return false;
     }
     //third section castling rights
@@ -45,7 +45,7 @@ pub fn is_valid_fen(fen: &String) -> bool {
         }
         let mut lowercase_seen: bool = false;
         for c in castling_rights.chars() {
-            if (c.is_uppercase() && lowercase_seen) || !valid_castling_chars.contains(&c) {
+            if (c.is_uppercase() && lowercase_seen) || !VALID_CASTLING_CHARS.contains(&c) {
                 return false;
             }
             if c.is_lowercase() {lowercase_seen = true;}
@@ -58,7 +58,7 @@ pub fn is_valid_fen(fen: &String) -> bool {
             return false;
         }
         let chars: Vec<char> = ep.chars().collect::<Vec<char>>();
-        if !file_chars.contains(&chars[0]) || !chars[1].is_digit(10) {
+        if !FILE_CHARS.contains(&chars[0]) || !chars[1].is_digit(10) {
             return false;
         }
         let rank: u32 = chars[1].to_digit(10).expect("Checked is_digit, wasn't");
@@ -76,7 +76,7 @@ pub fn is_legal_piece_row(row: &str) -> bool {
     for c in row.chars() {
         if c.is_digit(10) { //empty spaces
             piece_count += c.to_digit(10).expect("Checked is_digit but wasn't");
-        } else if valid_piece_chars.contains(&c) {
+        } else if VALID_PIECE_CHARS.contains(&c) {
             piece_count += 1;
         } else {
             return false;
@@ -95,7 +95,7 @@ pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: 
     for row in rows.clone() {
         for c in row.chars() {
             if c.is_alphabetic() {
-                let piece_type: usize = valid_piece_chars.iter().position(|p| *p == c).expect("Was valid fen but unknown piece type");
+                let piece_type: usize = VALID_PIECE_CHARS.iter().position(|p| *p == c).expect("Was valid fen but unknown piece type");
                 //bitboard::set_square(&mut pieces[piece_type], sqr_idx as u32);
                 pieces[piece_type] |= 1 << sqr_idx;
                 if c.is_uppercase() { //white
