@@ -1,4 +1,4 @@
-use crate::repr::{move_gen::MoveGen, types::{B_KING, Color, W_KING}};
+use crate::repr::{move_gen::MoveGen, types::{B_KING, BLACK, W_KING, WHITE, opposite_turn}};
 
 
 pub const FILES: [u64 ; 8] = [
@@ -17,7 +17,7 @@ pub struct Board {
     pub white_attacks: u64, //what squares are "seen" by white pieces, including squares with own color pieces "protected"
     pub black_attacks: u64,
     pub ep_square: Option<u32>, //if either moves pawn 2 up, resulting square comes here
-    pub turn: Color,
+    pub turn: u32,
     pub nof_checkers: u32, //if > 1, has to move king
     pub check_block_sqrs: u64, //bitboard for squares that block the check, only applies if nof_checkers <= 1
     pub white_pinned: u64, //bitboard of white's pinned pieces
@@ -43,10 +43,11 @@ impl Board {
         return self.is_white_occupied(sqr) || self.is_black_occupied(sqr);
     }
 
-    pub fn is_occupied_by(&self, sqr: u32, by: Color) -> bool {
-        match by {
-            Color::White => return self.is_white_occupied(sqr),
-            Color::Black => return self.is_black_occupied(sqr)
+    pub fn is_occupied_by(&self, sqr: u32, by: u32) -> bool {
+        if by == WHITE {
+            return self.is_white_occupied(sqr);
+        } else {
+            return self.is_black_occupied(sqr);
         }
     }
 
@@ -61,17 +62,17 @@ impl Board {
     /// Gets piece of **owner** color at **sqr**. <br/>
     /// Expects that contains piece, panics if doesn't. <br/>
     /// Should only be used after checking occupany with is_{color}_occupied -method.
-    pub fn get_piece_type_at(&self, sqr: u32, owner: Color) -> u32 {
+    pub fn get_piece_type_at(&self, sqr: u32, owner: u32) -> u32 {
         return self.lift_piece_type_at(sqr, owner).expect("sqr wasn't occupied although expected");
     }
 
     /// Lifts piece of **owner** color at **sqr**. <br/>
     /// Some(piece) if exists, None if no piece
-    pub fn lift_piece_type_at(&self, sqr: u32, owner: Color) -> Option<u32> {
+    pub fn lift_piece_type_at(&self, sqr: u32, owner: u32) -> Option<u32> {
         //iterate through all piece bitboards of owner until found
         let mut p: u32;
         let e: u32;
-        if owner.is_white() { p = 0; e = 6; } else { p = 6; e = 12; }
+        if owner == WHITE { p = 0; e = 6; } else { p = 6; e = 12; }
         while p < e {
             if self.pieces[p as usize] & (1 << sqr) != 0 { //found
                 break;
@@ -85,8 +86,8 @@ impl Board {
         }
     }
     ///Gets the idx of king's square for **side**.
-    pub fn get_king_sqr_idx(&self, side: Color) -> u32 {
-        if side.is_white() {
+    pub fn get_king_sqr_idx(&self, side: u32) -> u32 {
+        if side == WHITE {
             return self.pieces[5].trailing_zeros();
         } else {
             return self.pieces[11].trailing_zeros();
@@ -138,19 +139,19 @@ impl Board {
         let black_occupation: u64 = 0xFFFF000000000000;
         let ep_square: Option<u32> = None;
         let (ws, wl, bs, bl) = (0, 0, 0, 0);
-        let turn: Color = Color::White;
+        let turn: u32 = WHITE;
         return Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, move_gen)
     }
 
     ///Returns filled in valid state board after taking minimal positional information.
     pub fn board_with(
-        pieces: [u64; 12], white_occupation: u64, black_occupation: u64, turn: Color, 
+        pieces: [u64; 12], white_occupation: u64, black_occupation: u64, turn: u32, 
         ws: u32, wl: u32, bs: u32, bl: u32, ep_square: Option<u32>, move_gen: &MoveGen
     ) -> Self {
         let mut res: Board = Self {
             pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0
         }; //set computable to some defaults and compute now
-        move_gen.compute_attacked(&mut res, turn.opposite());
+        move_gen.compute_attacked(&mut res, opposite_turn(turn));
         move_gen.compute_pinned(&mut res, turn);
         move_gen.get_all_legal(&mut res, turn);
         //now in valid state

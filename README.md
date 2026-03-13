@@ -6,7 +6,7 @@
 ### Core Components
 
 1. **`repr` Module** - Board representation and game logic
-   - **`types.rs`**: Defines piece constants (W_PAWN=0...B_KING=11) and `Color` enum
+   - **`types.rs`**: Defines piece constants (W_PAWN=0...B_KING=11) and Color constants (WHITE = 0, BLACK = 1)
    - **`board.rs`**: `Board` struct with occupation bitboards (`white_occupation`, `black_occupation`) and piece placement
    - **`_move.rs`**: Move encoding as 32-bit integers with bit fields
    - **`bitboard.rs`**: Utility functions for u64 bitboard manipulation (`pop_lsb`, `set_square`, `contains_square`, `bb_to_string` for debugging)

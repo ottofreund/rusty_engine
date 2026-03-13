@@ -1,6 +1,6 @@
 use std::fmt::Error;
 
-use crate::repr::{board::Board, move_gen::MoveGen, types::Color};
+use crate::repr::{board::Board, move_gen::MoveGen, types::WHITE, types::BLACK};
 use crate::repr::*;
 
 use crate::utils::fen_tool::fen_to_board;
@@ -22,7 +22,7 @@ impl Default for Game {
     fn default() -> Game {
         let move_gen: MoveGen = MoveGen::init();
         let mut board: Board = Board::default_board(&move_gen);
-        let turn: Color = board.turn.clone();
+        let turn: u32 = board.turn;
         let legal_moves: Vec<u32> = move_gen.get_all_legal(&mut board, turn);
         let legal_moves_stack: Vec<Vec<u32>> = vec![legal_moves];
         let ep_stack: Vec<Option<u32>> = vec![None];
@@ -45,7 +45,7 @@ impl Game {
             Ok(b) => board = b,
             Err(_) => return Err("Fen error")
         }
-        let legal_moves: Vec<u32> = move_gen.get_all_legal(&board, board.turn.clone());
+        let legal_moves: Vec<u32> = move_gen.get_all_legal(&board, board.turn);
         let legal_moves_stack: Vec<Vec<u32>> = vec![legal_moves];
         let ep_sqr: Option<u32> = board.ep_square;
         let ep_stack: Vec<Option<u32>> = vec![ep_sqr];
@@ -53,13 +53,13 @@ impl Game {
         let check_block_sqrs: u64 = board.check_block_sqrs;
         let mover_pinned: u64;
         let mover_pinned_restrictions: [u64 ; 64];
-        if board.turn.is_white() {mover_pinned = board.white_pinned; mover_pinned_restrictions = board.white_pinned_restrictions;} else {mover_pinned = board.black_pinned; mover_pinned_restrictions = board.black_pinned_restrictions;}
+        if board.turn == WHITE {mover_pinned = board.white_pinned; mover_pinned_restrictions = board.white_pinned_restrictions;} else {mover_pinned = board.black_pinned; mover_pinned_restrictions = board.black_pinned_restrictions;}
         let meta_attacks: u64 = board.meta_attacks;
         let pinned_info_stack: Vec<(u32, u64, u64, [u64; 64], u64)> = vec![
             (nof_checkers, check_block_sqrs, mover_pinned, mover_pinned_restrictions, meta_attacks)
             ];
         let opponent_attacked: u64;
-        if board.turn.is_white() {opponent_attacked = board.black_attacks;} else {opponent_attacked = board.white_attacks;}
+        if board.turn == WHITE {opponent_attacked = board.black_attacks;} else {opponent_attacked = board.white_attacks;}
         let opponent_attacked_stack: Vec<u64> = vec![opponent_attacked];
         let played_moves_stack: Vec<u32> = Vec::new();
         return Ok(Self {
@@ -108,7 +108,7 @@ impl Game {
 
     ///Board state is modified and legal_moves is updated, assumes mov is legal
     pub fn make_move(&mut self, mov: u32) {
-        let is_white_turn: bool = self.board.turn.is_white();
+        let is_white_turn: bool = self.board.turn == WHITE;
         let is_promotion: bool = _move::is_promotion(mov);
         let from: u32 = _move::get_init(mov);
         let to: u32 = _move::get_target(mov);
@@ -184,19 +184,18 @@ impl Game {
         //1. update current mover attacked, also sets nof_checkers
         //also push opponent attacked to stack
         if is_white_turn {
-            self.board.white_attacks = self.move_gen.compute_attacked(&mut self.board, Color::White);
+            self.board.white_attacks = self.move_gen.compute_attacked(&mut self.board, WHITE);
             self.opponent_attacked_stack.push(self.board.white_attacks);
         } else {
-            self.board.black_attacks = self.move_gen.compute_attacked(&mut self.board, Color::Black);
+            self.board.black_attacks = self.move_gen.compute_attacked(&mut self.board, BLACK);
             self.opponent_attacked_stack.push(self.board.black_attacks);
         }
         
-        self.board.turn = self.board.turn.opposite();
-
+        self.board.turn = self.board.turn ^ 1;
+        let turn: u32 = self.board.turn;
         
         //2. compute pinned
         //in board updates check_block_sqrs, moved_pinned, mover_pinned_restrictions and meta_attacks
-        let turn: Color = self.board.turn.clone();
         self.move_gen.compute_pinned(&mut self.board, turn);
         //3. push current pinned info to stack now after updating
         let mover_pinned: u64;
@@ -219,7 +218,7 @@ impl Game {
     /// Unmakes move, resulting that the state of board and game is equivalent as to before moving.
     /// assumes mov was last made
     pub fn unmake_move(&mut self, mov: u32) {
-        let unmaking_white_move: bool = !self.board.turn.is_white();
+        let unmaking_white_move: bool = !(self.board.turn == WHITE);
         let from: u32 = _move::get_init(mov);
         let to: u32 = _move::get_target(mov);
         let moved_piece: usize = _move::get_moved_piece(mov) as usize;
@@ -300,7 +299,7 @@ impl Game {
             self.board.black_attacks = self.opponent_attacked_stack.last().copied().expect("opp attacked stack was empty");
         }
         //update turn
-        self.board.turn = self.board.turn.opposite();
+        self.board.turn = self.board.turn ^ 1;
         //3. pop cur legal moves from stack, so previous on top
         self.legal_moves_stack.pop().expect("legal_moves_stack was empty");
         //assert!(!self.legal_moves_stack.is_empty());

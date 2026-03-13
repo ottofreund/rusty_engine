@@ -11,23 +11,9 @@ pub const B_ROOK: u32 = 9;
 pub const B_QUEEN: u32 = 10;
 pub const B_KING: u32 = 11;
 
-#[derive(PartialEq, Copy, Clone, Debug)]
-pub enum Color {
-    White,
-    Black
+pub const WHITE: u32 = 0;
+pub const BLACK: u32 = 1;
+
+pub fn opposite_turn(color: u32) -> u32 {
+    return color ^ 1;
 }
-
-impl Color {
-    pub fn opposite(self) -> Self {
-        match self {
-            Color::White => Color::Black,
-            Color::Black => Color::White
-        }
-    }
-
-    pub fn is_white(self) -> bool {
-        return self == Color::White;
-    }
-
-}
-

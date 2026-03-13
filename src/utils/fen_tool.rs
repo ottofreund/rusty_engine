@@ -1,6 +1,6 @@
-use crate::repr::types::Color;
 use crate::repr::move_gen::MoveGen;
 use crate::repr::board::Board;
+use crate::repr::types::{BLACK, WHITE};
 
 const VALID_PIECE_CHARS: [char ; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
 const VALID_MOVER_CHARS: [char ; 2] = ['w', 'b'];
@@ -128,9 +128,9 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
     let mut sections = fen.split(' ');
     let piece_str: &str = sections.next().expect("Was long enough but iterator ended.");
     parse_pieces(piece_str, &mut pieces, &mut white_occupation, &mut black_occupation);
-    let turn: Color = match sections.next().expect("Was valid but sections ran out") {
-        "w" => Color::White,
-        "b" => Color::Black,
+    let turn: u32 = match sections.next().expect("Was valid but sections ran out") {
+        "w" => WHITE,
+        "b" => BLACK,
         _ => panic!("Turn was not 'w' or 'b' in fen that was valid.")
     };
     let castling_string: &str = sections.next().expect("Was valid but sections ran out");

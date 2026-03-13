@@ -22,21 +22,21 @@ pub const BLACK_LONG: u32 = 738463420; //0 0101100 0000 0 1 0 0000 0 111010 1111
 
 ///Encode move to u32 <br>
 ///taken piece idx is found and added after checking pseudolegal is legal to save compute
-pub fn create(from: u32, to: u32, is_take: bool, mover: Color, moved_piece: u32) -> u32 {
+pub fn create(from: u32, to: u32, is_take: bool, mover: u32, moved_piece: u32) -> u32 {
     let mut res: u32 = from;
     res = res | (to << 6);
     res = res | (moved_piece << 26);
     if is_take {
         res = res | 4096; // toggle 12 bit, signal is eating move
     }
-    if mover.is_white() {
+    if mover == WHITE {
         res = res | 2147483648; //toggle most significant bit
     }
     return res;
 }
 ///Castling move creator
-pub fn create_castling(mover: Color, is_short: bool) -> u32 {
-    if mover.is_white() {
+pub fn create_castling(mover: u32, is_short: bool) -> u32 {
+    if mover == WHITE {
         if is_short {
             return WHITE_SHORT;
         } else {
@@ -52,27 +52,27 @@ pub fn create_castling(mover: Color, is_short: bool) -> u32 {
 }
 
 ///Pawn double push move
-pub fn create_double_push(from: u32, to: u32, mover: Color, moved_piece: u32) -> u32 {
+pub fn create_double_push(from: u32, to: u32, mover: u32, moved_piece: u32) -> u32 {
     return create(from, to, false, mover, moved_piece) | 8192; // | 2^13
 }
 
 
 ///**to** is the ep_square the pawn ends up on, eaten pawn must be cleared in make_move with some extra logic
-pub fn create_en_passant(from: u32, to: u32, mover: Color, moved_piece: u32) -> u32 {
+pub fn create_en_passant(from: u32, to: u32, mover: u32, moved_piece: u32) -> u32 {
     return create(from, to, true, mover, moved_piece) | 1073741824; // | 2^30
 }
 
 /// Promotion move creator
-pub fn create_promotion(from: u32, to: u32, is_take: bool, promotion_piece: u32, mover: Color, moved_piece: u32) -> u32 {
+pub fn create_promotion(from: u32, to: u32, is_take: bool, promotion_piece: u32, mover: u32, moved_piece: u32) -> u32 {
     return (create(from, to, is_take, mover, moved_piece) | 524288) | (promotion_piece << 20);
 }
 ///Add all promotions for this pawn to a mutably borrowed move vector **vec**. Doesn't validate input, assumes correct usage
-pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: Color, moves: &mut Vec<u32>) {
+pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: &mut Vec<u32>) {
     let mut p: u32;
     let e: u32;
     let moved_piece: u32;
     //start and end indices of piece based off color. Also moved piece
-    if mover.is_white() { p = 1; e = 6; moved_piece = 0; } else { p = 7; e = 12; moved_piece = 6; }; 
+    if mover == WHITE { p = 1; e = 6; moved_piece = 0; } else { p = 7; e = 12; moved_piece = 6; }; 
     while p < e {
         moves.push(create_promotion(from, to, is_take, p, mover, moved_piece));
         p += 1

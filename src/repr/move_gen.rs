@@ -46,21 +46,21 @@ impl MoveGen {
 
     ///Called once upon arriving to a new position. <br>
     ///Not called when reverting move, since just fetched from stack.
-    pub fn get_all_legal(&self, board: &Board, mover: Color) -> Vec<u32> {
+    pub fn get_all_legal(&self, board: &Board, mover: u32) -> Vec<u32> {
         let mut res: Vec<u32> = Vec::with_capacity(MAX_MOVES);
         for mov in self.get_all_pseudolegal(board, mover) {
             if self.pseudolegal_is_legal(mov, board, mover) {
                 //add taken piece idx to move (if eating) now, since it is necessary
                 let m: u32;
                 if _move::is_en_passant(mov) {
-                    if mover.is_white() {
+                    if mover == WHITE {
                         m = _move::with_eaten_piece(mov, 6);
                     } else {
                         m = mov; //white pawn is 0 so do nothing
                     }   
                 } else if _move::is_eating(mov) {
                     //println!("looking for eaten for: {}", _move::to_string(mov));
-                    let eaten_piece: u32 = board.get_piece_type_at(_move::get_target(mov), mover.opposite());
+                    let eaten_piece: u32 = board.get_piece_type_at(_move::get_target(mov), mover ^ 1);
                     m = _move::with_eaten_piece(mov, eaten_piece);
                 } else {
                     m = mov;
@@ -72,14 +72,14 @@ impl MoveGen {
     }
 
     ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares
-    pub fn pseudolegal_is_legal(&self, mov: u32, board: &Board, mover: Color) -> bool {
+    pub fn pseudolegal_is_legal(&self, mov: u32, board: &Board, mover: u32) -> bool {
         let init: u32 = _move::get_init(mov);
         let moved_piece: u32 = _move::get_moved_piece(mov);
         let opponent_attacked: u64;
         let mover_king_piece_idx: u32;
         let mover_pinned: u64;
         let mover_pinned_restrictions: u64;
-        if mover.is_white() {
+        if mover == WHITE {
             opponent_attacked = board.black_attacks; mover_king_piece_idx = 5; 
             mover_pinned = board.white_pinned; mover_pinned_restrictions = board.white_pinned_restrictions[init as usize];
         } 
@@ -112,7 +112,7 @@ impl MoveGen {
             //check edge case where both pawns leave rank exposing pin on same rank king
             let opponent_horizontal_sliding: u64;
             let ep_rank: u64;
-            if mover.is_white() {
+            if mover == WHITE {
                 opponent_horizontal_sliding = board.pieces[9] | board.pieces[10];
                 ep_rank = RANKS[4];
             } else {
@@ -167,11 +167,11 @@ impl MoveGen {
     }
 
     ///Also updates board.nof_checkers for non-sliding pieces (sliding checkers found at pinned computation) 
-    pub fn get_all_pseudolegal(&self, board: &Board, mover: Color) -> Vec<u32> {
+    pub fn get_all_pseudolegal(&self, board: &Board, mover: u32) -> Vec<u32> {
         let mut res: Vec<u32> = Vec::with_capacity(MAX_PSEUDO);
         let mut i: usize;
         let e: usize;
-        if mover.is_white() {i = 0; e = 6;} else {i = 6; e = 12;}
+        if mover == WHITE {i = 0; e = 6;} else {i = 6; e = 12;}
         while i < e {
             let mut piece_bb: u64 = board.pieces[i];
             while piece_bb != 0 {
@@ -191,7 +191,7 @@ impl MoveGen {
     ///3. If !**keep_protected**, remove "eating own piece" moves by binary ANDing with !own_occupation <br>
     ///4. If **targets_only** just return targets bitboard.
     ///5. Else Pop-lsb 1-by-1 and make move and add to **move_vec** until none left.
-    pub fn pseudolegal_for(&self, from: u32, piece: u32, mover: Color, board: &Board, move_vec: &mut Vec<u32>, keep_protected: bool, targets_only: bool) -> u64 {
+    pub fn pseudolegal_for(&self, from: u32, piece: u32, mover: u32, board: &Board, move_vec: &mut Vec<u32>, keep_protected: bool, targets_only: bool) -> u64 {
         if piece == W_PAWN || piece == B_PAWN {
             //no en passant from this
             pseudolegal_pawn(from, mover, board, self, move_vec);
@@ -217,7 +217,7 @@ impl MoveGen {
         };
         //3.
         let opponent_occupied: u64;
-        if mover.is_white() {
+        if mover == WHITE {
             if !keep_protected {
                 targets &= !board.white_occupation;
             }
@@ -276,7 +276,7 @@ impl MoveGen {
     ///         4.4.2. Binary OR board.pinned_restrictions[idx] with specific RPP to add this restriction <br/>
     ///         Else no pins for this potential pinner, continue <br/>
     /// 5. Do same starting from 1. but for diagonals (bishop)
-    pub fn compute_pinned(&self, board: &mut Board, side: Color) {
+    pub fn compute_pinned(&self, board: &mut Board, side: u32) {
         //first reset bitboards containing previous pinned info
         board.white_pinned = 0;
         board.black_pinned = 0;
@@ -288,13 +288,13 @@ impl MoveGen {
         self.pinned_for_specified(true, board, side);
     }
     ///Perform described algorithm for diagonals or cardinals according to **diag** flag.
-    fn pinned_for_specified(&self, diag: bool, board: &mut Board, side: Color) {
+    fn pinned_for_specified(&self, diag: bool, board: &mut Board, side: u32) {
         //1.
         let opponent_sliding: u64; //opponent's queen, rook || bishop occupation
         let empty_sliding_from_king: u64; //empty sliding for rook/bishop from king's square
         let king_sqr_idx: usize = board.get_king_sqr_idx(side) as usize;
         //set color/direction specific vars
-        if side.is_white() {
+        if side == WHITE {
             if diag {
                 opponent_sliding = board.pieces[10] | board.pieces[8];
                 empty_sliding_from_king = self.attack_bbs[2][king_sqr_idx];
@@ -330,7 +330,7 @@ impl MoveGen {
             if occupied_rpp.count_ones() == 1 { //we have pinner
                 let pinner_idx: u32 = occupied_rpp.trailing_zeros(); //4.4.1
                 //4.4.2
-                if side.is_white() {
+                if side == WHITE {
                     bitboard::set_square(&mut board.white_pinned, pinner_idx);
                     board.white_pinned_restrictions[pinner_idx as usize] |= bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat pinner;
                 } else {
@@ -351,14 +351,14 @@ impl MoveGen {
     ///we call this after moving to get the updated attacked squares <br>
     ///this means we compute targets twice, but the alternative implementations seem even worse <br><br>
     ///given we compute this, we also easily get nof_checkers
-    pub fn compute_attacked(&self, board: &mut Board, side: Color) -> u64 {
+    pub fn compute_attacked(&self, board: &mut Board, side: u32) -> u64 {
         let mut res: u64 = pawn_attacked(board, side);
-        let opponent_king_sqr: u32 = board.get_king_sqr_idx(side.opposite());
+        let opponent_king_sqr: u32 = board.get_king_sqr_idx(side ^ 1);
         if bitboard::contains_square(res, opponent_king_sqr) { //pawn checker
             board.nof_checkers += 1;
             //set pawn check block sqr
             let mover_pawns: u64; let l_offset: i32; let r_offset: i32;
-            if side.is_white() 
+            if side == WHITE
             {mover_pawns = board.pieces[0]; l_offset = -9; r_offset = -7;} else 
             {mover_pawns = board.pieces[6]; l_offset = 7; r_offset = 9;}
             //possible left pawn checker
@@ -372,7 +372,7 @@ impl MoveGen {
         }
         let mut i: usize;
         let e: usize;
-        if side.is_white() {i = 1; e = 6;} else {i = 7; e = 12;} //no pawns
+        if side == WHITE {i = 1; e = 6;} else {i = 7; e = 12;} //no pawns
         while i < e {
             let mut piece_bb: u64 = board.pieces[i];
             while piece_bb != 0 {
@@ -546,11 +546,11 @@ fn pawn_attacks_white_for(sqr: u32) -> u64 {
 }
 
 ///Adds LEGAL castling moves for **mover** to **move_vec**.
-fn add_castling(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
+fn add_castling(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
     if board.nof_checkers == 0 { //can't castle from check
         let preventing_bb: u64;
         let opponent_attacks: u64;
-        if mover.is_white() {
+        if mover == WHITE {
             opponent_attacks = board.black_attacks;
             preventing_bb = board.white_occupation | board.black_occupation | opponent_attacks;
             if board.ws() && WS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
@@ -573,13 +573,13 @@ fn add_castling(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
 }
 
 ///Adds **pseudolegal** en passants to move_vec
-fn add_en_passant(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
+fn add_en_passant(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
     if let Some(ep_square) = board.ep_square {
         let mover_pawns: u64;
         let l_sqr: u32;
         let r_sqr: u32;
         let pawn_piece_idx: u32;
-        if mover.is_white() {
+        if mover == WHITE {
             mover_pawns = board.pieces[0]; l_sqr = ep_square - 9; r_sqr = ep_square - 7; pawn_piece_idx = 0;
         } else {
             mover_pawns = board.pieces[6]; l_sqr = ep_square + 7; r_sqr = ep_square + 9; pawn_piece_idx = 6;
@@ -596,7 +596,7 @@ fn add_en_passant(board: &Board, mover: Color, move_vec: &mut Vec<u32>) {
 /// Add all pseudolegal pawn moves for pawn on square **from** and color **mover** on **board** to **move_vec** . <br>
 /// 
 /// NO EN PASSANT
-pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveGen, move_vec: &mut Vec<u32>)  {
+pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen, move_vec: &mut Vec<u32>)  {
     //following are relative to color:
     let is_promotion: bool;
     let forward: u32;
@@ -604,7 +604,7 @@ pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveG
     let PAWN_START_RANK: u64;
     let pawn_piece_idx: usize;
     let enemy_occupied: u64;
-    if mover.is_white() { 
+    if mover == WHITE { 
         is_promotion = bitboard::contains_square(RANKS[6], from);
         forward = from + 8; forward2 = from + 16; PAWN_START_RANK = RANKS[1]; pawn_piece_idx = 0; enemy_occupied = board.black_occupation;
     } else { //for black
@@ -641,13 +641,13 @@ pub fn pseudolegal_pawn(from: u32, mover: Color, board: &Board, move_gen: &MoveG
 }
 
 ///All pawn attacking moves for **side**
-pub fn pawn_attacked(board: &Board, side: Color) -> u64 {
+pub fn pawn_attacked(board: &Board, side: u32) -> u64 {
     let pawn_occupation: u64;
     let left_attack_shift: u32;
     let right_attack_shift: u32;
     let shift_op: fn(u64, u32) -> u64;
     let mut res: u64 = 0;
-    if side.is_white() {
+    if side == WHITE {
         pawn_occupation = board.pieces[0]; left_attack_shift = 7; right_attack_shift = 9; shift_op = |x, n| x << n;
     } else {
         pawn_occupation = board.pieces[6]; left_attack_shift = 9; right_attack_shift = 7; shift_op = |x, n| x >> n;

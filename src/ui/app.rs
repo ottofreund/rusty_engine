@@ -81,7 +81,7 @@ impl AppState {
             
         let content: Element<'static, Message, iced::Theme, iced::Renderer>;
         if is_targeted {
-            if self.game.board.is_occupied_by(square, self.game.board.turn.opposite()) {
+            if self.game.board.is_occupied_by(square, self.game.board.turn ^ 1) {
                 let handle: Handle = self.image_handle.target_circle_handle.clone();
                 content = stack!(btn, Image::new(handle).width(SQR_SIZE).height(SQR_SIZE)).into();
             } else {
@@ -98,11 +98,11 @@ impl AppState {
     }
 
     fn get_img_for_square(&self, sqr: u32) -> Option<Handle> {
-        let owner: Color;
+        let owner: u32;
         if self.game.board.is_white_occupied(sqr) {
-            owner = Color::White;
+            owner = WHITE;
         } else if self.game.board.is_black_occupied(sqr) {
-            owner = Color::Black;
+            owner = BLACK;
         } else {
             return None;
         }
@@ -157,7 +157,7 @@ pub fn update(state: &mut AppState, msg: Message) {
             },
             None => {
                 let mover_occupied: u64;
-                if state.game.board.turn.is_white() {
+                if state.game.board.turn == WHITE {
                     mover_occupied = state.game.board.white_occupation;
                 } else {
                     mover_occupied = state.game.board.black_occupation;
