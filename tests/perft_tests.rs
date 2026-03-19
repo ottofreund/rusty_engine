@@ -10,11 +10,11 @@ fn default_pos_perft_correct() {
     //assert_eq!(go_perft(2, &mut game), 400);
     //assert_eq!(go_perft(3, &mut game), 8902)
     //assert_eq!(go_perft(4, &mut game), 197281);
-    //assert_eq!(go_perft(5, &mut game), 4865609)
+    assert_eq!(go_perft(5, &mut game), 4865609)
     //assert_eq!(go_perft(6, &mut game), 119060324)
     
     //perft_benchmark(|| {go_perft_better(4, &mut game);});
-    perft_benchmark(|| {go_perft(5, &mut game);});
+    //perft_benchmark(|| {go_perft(5, &mut game);});
 }
 
 #[test]
@@ -23,13 +23,34 @@ fn kiwipete_edge_case_perft() {
 
 }
 
-fn go_perft(target_depth: u32, game: &mut Game) -> u32 {
+fn go_perft(target_depth: usize, game: &mut Game) -> u32 {
     assert!(target_depth > 1);
     let mut found: usize = 0;
-    let mut move_stack: Vec<u32> = game.legal_moves().clone();
-    let mut made_moves_stack: Vec<u32> = Vec::new();
+    //"pointer" to cur move idx of each ply, when higher ply covered increment lower ply
+    let mut per_ply_idx: Vec<usize> = vec![0; target_depth]; 
+    let mut cur_ply: usize = 0;
+    let mut reached_last_ply: bool = false;
 
-    while !move_stack.is_empty() {
+    for i in 0..=target_depth {
+        if game.move_arr_idx.len() < i {
+            
+        }
+    }
+
+    while per_ply_idx[0] < 1 {
+
+        while !reached_last_ply {
+
+            
+
+            if cur_ply == target_depth {
+                reached_last_ply = true;
+            } else {
+                cur_ply += 1;
+            }
+        }
+
+
         //println!("Made moves:\n{:?}", made_moves_stack.iter().map(|m| _move::to_string(*m)).collect::<Vec<String>>()); 
         if made_moves_stack.len() == target_depth as usize - 1 {
             found += game.legal_moves().len();
@@ -53,67 +74,6 @@ fn go_perft(target_depth: u32, game: &mut Game) -> u32 {
     }
     //println!("Found {}", found);
     return found as u32;
-}
-
-fn go_perft_better(target_depth: u32, game: &mut Game) -> u64 {
-    assert!(target_depth > 0);
-    let max_ply = target_depth as usize;
-
-    // per-ply move buffers and indices, preallocated once
-    let mut move_lists: Vec<Vec<u32>> = (0..=max_ply).map(|_| Vec::new()).collect();
-    let mut indices: Vec<usize> = vec![0; max_ply + 1];
-    let mut ply: usize = 0;
-
-    // prepare root moves (reserve helpful if you know typical branching)
-    move_lists[0].clear();
-    move_lists[0].extend(game.legal_moves().iter().copied());
-    indices[0] = 0;
-
-    let mut made_moves: Vec<u32> = Vec::with_capacity(max_ply); // stack of made moves
-    let mut found: u64 = 0;
-
-    loop {
-        if ply == max_ply {
-            // we've made target_depth moves; count the leaf
-            found += 1;
-            // unmake last move and backtrack one ply
-            let last = made_moves.pop().expect("made_moves empty at leaf");
-            game.unmake_move(last);
-            ply -= 1;
-            continue;
-        }
-
-        // If no more moves at this ply, backtrack
-        if indices[ply] >= move_lists[ply].len() {
-            if ply == 0 {
-                break; // done searching root
-            }
-            // backtrack: unmake last move and pop to previous ply
-            let last = made_moves.pop().expect("made_moves empty on backtrack");
-            game.unmake_move(last);
-            indices[ply] = 0;             // reset for future visits
-            move_lists[ply].clear();      // clear reused buffer so capacity remains
-            ply -= 1;
-            continue;
-        }
-
-        // take next move at this ply
-        let mv = move_lists[ply][indices[ply]];
-        indices[ply] += 1;
-
-        // make move and push it on made_moves
-        game.make_move(mv);
-        made_moves.push(mv);
-
-        // generate moves for next ply: reuse buffer at ply+1
-        // Important: we clear and fill -- capacity will be reused across nodes
-        move_lists[ply + 1].clear();
-        move_lists[ply + 1].extend(game.legal_moves().iter().copied());
-        indices[ply + 1] = 0;
-        // advance to next ply
-        ply += 1;
-    }
-    found
 }
 
 ///Helper for debugging to show distribution of moves one move deeper

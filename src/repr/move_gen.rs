@@ -4,10 +4,13 @@ use crate::repr::board::*;
 use crate::repr::magic_bb_loader::MagicBitboard;
 use crate::repr::types::*;
 use crate::repr::bitboard;
+use crate::repr::game::MOVE_ARR_SIZE;
 
 pub const KNIGHT_JUMPS: [(i32, i32); 8] = [(1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)]; //in format (dx, dy), used for precomputing attack_bbs
 pub const DIAG_STEPS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, -1), (-1, 1)];
 pub const CARDINAL_STEPS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
+pub const AVG_BRANCH_FAC: usize = 35;
+
 const WS_CASTLING_GAP_BB: u64 = 96; //2^5 + 2^6
 const WL_CASTLING_GAP_BB: u64 = 14; //2^1 + 2^2 + 2^3
 const BS_CASTLING_GAP_BB: u64 = 6917529027641081856; //2^61 + 2^62
@@ -46,9 +49,10 @@ impl MoveGen {
 
     ///Called once upon arriving to a new position. <br>
     ///Not called when reverting move, since just fetched from stack.
-    pub fn get_all_legal(&self, board: &Board, mover: u32) -> Vec<u32> {
-        let mut res: Vec<u32> = Vec::with_capacity(MAX_MOVES);
-        for mov in self.get_all_pseudolegal(board, mover) {
+    ///Returns how many moves generated
+    pub fn generate_legal(&self, board: &Board, mover: u32, move_arr: &mut [u32 ; MOVE_ARR_SIZE], move_arr_s_idx: usize) -> usize {
+        let mut generated: usize = 0;
+        for mov in self.generate_pseudolegal(board, mover) {
             if self.pseudolegal_is_legal(mov, board, mover) {
                 //add taken piece idx to move (if eating) now, since it is necessary
                 let m: u32;
@@ -65,10 +69,11 @@ impl MoveGen {
                 } else {
                     m = mov;
                 }
-                res.push(m);
+                move_arr[move_arr_s_idx + generated] = m;
+                generated += 1;
             }
         }
-        return res;
+        return generated;
     }
 
     ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares
@@ -166,8 +171,7 @@ impl MoveGen {
         return true;
     }
 
-    ///Also updates board.nof_checkers for non-sliding pieces (sliding checkers found at pinned computation) 
-    pub fn get_all_pseudolegal(&self, board: &Board, mover: u32) -> Vec<u32> {
+    pub fn generate_pseudolegal(&self, board: &Board, mover: u32) -> Vec<u32> {
         let mut res: Vec<u32> = Vec::with_capacity(MAX_PSEUDO);
         let mut i: usize;
         let e: usize;

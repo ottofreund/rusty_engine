@@ -1,5 +1,6 @@
 Easy improvements:
  - flatten rook_slide_bbs and bishop_slide_bbs to 1D
+ - when searching only generate promotions to queen and knight
 
 
 Reminders:
