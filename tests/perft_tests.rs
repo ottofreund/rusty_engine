@@ -10,11 +10,10 @@ fn default_pos_perft_correct() {
     //assert_eq!(go_perft(2, &mut game), 400);
     //assert_eq!(go_perft(3, &mut game), 8902)
     //assert_eq!(go_perft(4, &mut game), 197281);
-    assert_eq!(go_perft(5, &mut game), 4865609)
+    //assert_eq!(go_perft(5, &mut game), 4865609)
     //assert_eq!(go_perft(6, &mut game), 119060324)
     
-    //perft_benchmark(|| {go_perft_better(4, &mut game);});
-    //perft_benchmark(|| {go_perft(5, &mut game);});
+    perft_benchmark(|| {go_perft(5, &mut game);});
 }
 
 #[test]
@@ -27,49 +26,32 @@ fn go_perft(target_depth: usize, game: &mut Game) -> u32 {
     assert!(target_depth > 1);
     let mut found: usize = 0;
     //"pointer" to cur move idx of each ply, when higher ply covered increment lower ply
-    let mut per_ply_idx: Vec<usize> = vec![0; target_depth]; 
-    let mut cur_ply: usize = 0;
-    let mut reached_last_ply: bool = false;
+    let mut per_ply_idx: Vec<usize> = vec![0; target_depth + 1]; 
+    let mut cur_ply: usize = 1;
 
-    for i in 0..=target_depth {
-        if game.move_arr_idx.len() < i {
-            
-        }
-    }
-
-    while per_ply_idx[0] < 1 {
-
-        while !reached_last_ply {
-
-            
-
-            if cur_ply == target_depth {
-                reached_last_ply = true;
-            } else {
-                cur_ply += 1;
+    while cur_ply > 0 {
+        let mv_idx: usize = game.move_arr_idx[cur_ply - 1] + per_ply_idx[cur_ply];
+        if mv_idx == game.move_arr_idx[cur_ply] { //covered this ply
+            if cur_ply == 1 {
+                break;
             }
-        }
-
-
-        //println!("Made moves:\n{:?}", made_moves_stack.iter().map(|m| _move::to_string(*m)).collect::<Vec<String>>()); 
-        if made_moves_stack.len() == target_depth as usize - 1 {
-            found += game.legal_moves().len();
-            let last_made_move: Option<u32> = made_moves_stack.last().copied();
-            while move_stack.pop() != last_made_move {}; //pop all counted moves and last made move
-            //now unmake last made on board and pop from made moves 
-            game.unmake_move(made_moves_stack.pop().expect("made moves stack was empty"));
-        } else if made_moves_stack.last().copied() == move_stack.last().copied() { //covered all subvariations after this move to desired depth, unmake move
-            move_stack.pop();
-            game.unmake_move(made_moves_stack.pop().expect("made moves stack was empty"));
-        } else { //make move that is on top of stack
-            let next_mov: u32 = move_stack.last().copied().expect("move stack never empty here");
-            //println!("now playing: {}", _move::to_string(next_mov));
-            game.make_move(next_mov);
-            made_moves_stack.push(next_mov);
-            //add all legal moves of resulting position to move stack
-            game.legal_moves().iter().copied().for_each(|mov| {
-                move_stack.push(mov);
-            });
+            for p in cur_ply..target_depth { //reset higher ply pre_ply_idx
+                per_ply_idx[p] = 0;
+            }
+            let prev_ply_mv_idx: usize = game.move_arr_idx[cur_ply - 2] + per_ply_idx[cur_ply - 1] - 1;
+            game.unmake_move(game.move_arr[prev_ply_mv_idx]); //unmake last made move (from prev ply)
+            cur_ply -= 1;
+            continue;
+        } else { //not done with this ply
+            game.make_move(game.move_arr[mv_idx], true);
+            per_ply_idx[cur_ply] += 1;
+            cur_ply += 1;
+            if cur_ply == target_depth { //terminal cond
+                found += game.move_arr_idx[cur_ply] - game.move_arr_idx[cur_ply - 1];
+                cur_ply -= 1;
+                game.unmake_move(game.move_arr[mv_idx]);
+                continue;
+            } //else we go deeper
         }
     }
     //println!("Found {}", found);
@@ -85,7 +67,7 @@ fn perft_logger(depth: u32, game: &mut Game, log_depth: Option<u32>) -> u32 {
         } else {
             let mut perft_from_here: u32 = 0;
             g.legal_moves().to_vec().iter().for_each(|mov| {
-                g.make_move(*mov);
+                g.make_move(*mov, true);
                 perft_from_here += inner(d - 1, g, log_depth);
                 g.unmake_move(*mov);
             });

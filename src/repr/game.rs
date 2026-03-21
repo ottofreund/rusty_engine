@@ -27,7 +27,7 @@ impl Default for Game {
         let turn: u32 = board.turn;
         let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
         let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0);
-        let move_arr_idx: Vec<usize> = vec![generated];
+        let move_arr_idx: Vec<usize> = vec![0, generated];
         let ep_stack: Vec<Option<u32>> = vec![None];
         let pinned_info_stack: Vec<(u32, u64, u64, [u64; 64], u64)> = vec![(0, 0, 0, [0u64 ; 64], 0)];
         let opponent_attacked: u64 = board.black_attacks;
@@ -50,7 +50,7 @@ impl Game {
         }
         let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
         let generated: usize = move_gen.generate_legal(&board, board.turn, &mut move_arr, 0);
-        let move_arr_idx: Vec<usize> = vec![generated];
+        let move_arr_idx: Vec<usize> = vec![0, generated];
         let ep_sqr: Option<u32> = board.ep_square;
         let ep_stack: Vec<Option<u32>> = vec![ep_sqr];
         let nof_checkers: u32 = board.nof_checkers;
@@ -71,9 +71,9 @@ impl Game {
         })
     }
 
-    ///Returns slice to current legal moves
+    ///Returns slice to current legal moves (ply 1)
     pub fn legal_moves(&self) -> &[u32] {
-        let end: usize = self.move_arr_idx[0];
+        let end: usize = self.move_arr_idx[1];
         return &self.move_arr[0..end];
     }
 
@@ -219,6 +219,7 @@ impl Game {
         } else { //root shifts
             move_arr_s_idx = 0;
             self.move_arr_idx.clear();
+            self.move_arr_idx.push(0); // 0 ply ends at 0 (exclusive)
         }
         let generated: usize = self.move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx);
         self.move_arr_idx.push(move_arr_s_idx + generated);
