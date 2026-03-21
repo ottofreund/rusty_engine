@@ -1,4 +1,4 @@
-use crate::repr::{move_gen::MoveGen, types::{B_KING, BLACK, W_KING, WHITE, opposite_turn}};
+use crate::repr::{game::MOVE_ARR_SIZE, move_gen::MoveGen, types::{B_KING, BLACK, W_KING, WHITE, opposite_turn}};
 
 
 pub const FILES: [u64 ; 8] = [
@@ -150,10 +150,9 @@ impl Board {
     ) -> Self {
         let mut res: Board = Self {
             pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0
-        }; //set computable to some defaults and compute now
+        }; //set computable to some defaults and compute now to get correct vals
         move_gen.compute_attacked(&mut res, opposite_turn(turn));
         move_gen.compute_pinned(&mut res, turn);
-        move_gen.get_all_legal(&mut res, turn);
         //now in valid state
         return res;
     }

@@ -1,37 +1,40 @@
 use std::fmt::Error;
 
-use crate::repr::{board::Board, move_gen::MoveGen, types::WHITE, types::BLACK};
+use crate::repr::{board::Board, move_gen::{MoveGen, AVG_BRANCH_FAC}, types::WHITE, types::BLACK};
 use crate::repr::*;
 
 use crate::utils::fen_tool::fen_to_board;
 
+pub const MOVE_ARR_SIZE: usize = AVG_BRANCH_FAC * 40; //supports 40 ply deep search
 
 ///pinned_info_stack tuple order:
 ///0: nof_checkers, 1: check_block_sqrs, 2: mover_pinned, 3: mover_pinned_restrictions, 4: meta_attacks
 pub struct Game {
     pub board: Board,
     pub move_gen: MoveGen,
+    pub move_arr: [u32 ; AVG_BRANCH_FAC * 40],
+    pub move_arr_idx: Vec<usize>, //move_arr end idx by ply, so e.g. 0..move_arr_idx[0] is first ply idx range (idx is exclusive)
     ep_stack: Vec<Option<u32>>,
     pinned_info_stack: Vec<(u32, u64, u64, [u64; 64], u64)>,
     opponent_attacked_stack: Vec<u64>,
-    legal_moves_stack: Vec<Vec<u32>>,
     pub played_moves_stack: Vec<u32>
 }
 
 impl Default for Game {
     fn default() -> Game {
         let move_gen: MoveGen = MoveGen::init();
-        let mut board: Board = Board::default_board(&move_gen);
+        let board: Board = Board::default_board(&move_gen);
         let turn: u32 = board.turn;
-        let legal_moves: Vec<u32> = move_gen.get_all_legal(&mut board, turn);
-        let legal_moves_stack: Vec<Vec<u32>> = vec![legal_moves];
+        let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
+        let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0);
+        let move_arr_idx: Vec<usize> = vec![0, generated];
         let ep_stack: Vec<Option<u32>> = vec![None];
         let pinned_info_stack: Vec<(u32, u64, u64, [u64; 64], u64)> = vec![(0, 0, 0, [0u64 ; 64], 0)];
         let opponent_attacked: u64 = board.black_attacks;
         let opponent_attacked_stack: Vec<u64> = vec![opponent_attacked];
         let played_moves_stack: Vec<u32> = Vec::new();
         return Self {
-            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, legal_moves_stack, played_moves_stack
+            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx
         }
     }
 }
@@ -45,8 +48,9 @@ impl Game {
             Ok(b) => board = b,
             Err(_) => return Err("Fen error")
         }
-        let legal_moves: Vec<u32> = move_gen.get_all_legal(&board, board.turn);
-        let legal_moves_stack: Vec<Vec<u32>> = vec![legal_moves];
+        let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
+        let generated: usize = move_gen.generate_legal(&board, board.turn, &mut move_arr, 0);
+        let move_arr_idx: Vec<usize> = vec![0, generated];
         let ep_sqr: Option<u32> = board.ep_square;
         let ep_stack: Vec<Option<u32>> = vec![ep_sqr];
         let nof_checkers: u32 = board.nof_checkers;
@@ -63,16 +67,17 @@ impl Game {
         let opponent_attacked_stack: Vec<u64> = vec![opponent_attacked];
         let played_moves_stack: Vec<u32> = Vec::new();
         return Ok(Self {
-            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, legal_moves_stack, played_moves_stack
+            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx
         })
     }
 
-    ///Returns current legal moves from stack
-    pub fn legal_moves(&self) -> &Vec<u32> {
-        return self.legal_moves_stack.last().expect("legal move stack was empty, shouldn't happen");
+    ///Returns slice to current legal moves (ply 1)
+    pub fn legal_moves(&self) -> &[u32] {
+        let end: usize = self.move_arr_idx[1];
+        return &self.move_arr[0..end];
     }
 
-    ///Public api ease of use and safety method
+    ///Public api ease of use and safety method, not called in search
     pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32) -> Result<u32, Error> {
         let mov: Option<u32> = self.legal_moves().iter().copied().find(|mov| 
             _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr
@@ -80,11 +85,10 @@ impl Game {
         match mov {
             Some(m) => {
                 //println!("Successfully moved: {}", _move::to_string(m));
-                self.make_move(m);
+                self.make_move(m, false);
                 return Ok(m);
             },
             None => {
-                println!("Tried to make illegal move");
                 return Err(Error::default())
             }
         }
@@ -107,7 +111,7 @@ impl Game {
     }
 
     ///Board state is modified and legal_moves is updated, assumes mov is legal
-    pub fn make_move(&mut self, mov: u32) {
+    pub fn make_move(&mut self, mov: u32, in_search: bool) {
         let is_white_turn: bool = self.board.turn == WHITE;
         let is_promotion: bool = _move::is_promotion(mov);
         let from: u32 = _move::get_init(mov);
@@ -208,8 +212,17 @@ impl Game {
         self.pinned_info_stack.push(
             (self.board.nof_checkers, self.board.check_block_sqrs, mover_pinned, mover_pinned_restrictions, self.board.meta_attacks)
         );
-        //4. compute legal moves
-        self.legal_moves_stack.push(self.move_gen.get_all_legal(&self.board, turn));
+        //4. generate legal moves to move_stack
+        let move_arr_s_idx: usize;
+        if in_search {
+            move_arr_s_idx = self.move_arr_idx.last().copied().expect("move_arr_idx was empty");
+        } else { //root shifts
+            move_arr_s_idx = 0;
+            self.move_arr_idx.clear();
+            self.move_arr_idx.push(0); // 0 ply ends at 0 (exclusive)
+        }
+        let generated: usize = self.move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx);
+        self.move_arr_idx.push(move_arr_s_idx + generated);
         //5. push to played moves stack
         self.played_moves_stack.push(mov);
         return;
@@ -300,9 +313,8 @@ impl Game {
         }
         //update turn
         self.board.turn = self.board.turn ^ 1;
-        //3. pop cur legal moves from stack, so previous on top
-        self.legal_moves_stack.pop().expect("legal_moves_stack was empty");
-        //assert!(!self.legal_moves_stack.is_empty());
+        //3. free up current latest moves by popping from move_arr_idx 
+        self.move_arr_idx.pop().expect("move_arr_idx was empty");
         //4. pop played moves stack
         self.played_moves_stack.pop();
         return;
