@@ -1,11 +1,13 @@
 use iced::keyboard::{self};
 use iced::widget::image::Handle;
-use iced::widget::{Image, button, column, container, row, stack, text};
-use iced::{Element, Size, Subscription};
+use iced::widget::{Button, Image, TextInput, button, center, column, container, row, stack, text};
+use iced::{Alignment, Border, Color, Element, Shadow, Size, Subscription, Theme};
 use iced::event::{self, Event};
 use crate::repr::game::Game;
 use crate::repr::board::square_to_string;
 use crate::repr::{_move, bitboard, types::*};
+
+use iced_aw::{Menu, MenuBar, menu::*, card, card::*};
 
 use crate::ui::image_handle::ImageHandle;
 use crate::ui::messages::*;
@@ -23,13 +25,19 @@ pub struct AppState {
     selected_square: Option<u32>,
     game: Game,
     image_handle: ImageHandle,
-    selection_target_sqrs: Vec<u32>
+    selection_target_sqrs: Vec<u32>,
+    fen_input: String,
+    show_error: bool,
+    error_str: String,
+    input_side: u32,
+    user_side: u32
 }
 
 impl AppState {
     
-    fn render_main_container(&self) -> Element<'static, Message, iced::Theme, iced::Renderer> {
-        let mut columns = row!();
+    fn render_main_container(&self) -> Element<'_, Message, iced::Theme, iced::Renderer> {
+        let mut columns = column!();
+        columns = columns.push(self.render_menu_bar());
         columns = columns.push(self.render_board());
         //rows
         return columns.width(1200).height(900).into();
@@ -97,6 +105,35 @@ impl AppState {
             .into()
     }
 
+    fn render_menu_bar(&self) -> Element<'_, Message, iced::Theme, iced::Renderer> {
+        let white_button: Button<'_, Message, iced::Theme, iced::Renderer> = 
+            button("")
+                .style(|_theme, _status| input_button_style(true, self.input_side == WHITE))
+                .width(50.0).height(50.0)
+                .on_press(Message::InputSideWhitePressed);
+        let black_button: Button<'_, Message, iced::Theme, iced::Renderer> = 
+            button("")
+                .style(|_theme, _status| input_button_style(false, self.input_side == BLACK))
+                .width(50.0).height(50.0)
+                .on_press(Message::InputSideBlackPressed);
+        let game_dd = Item::with_menu(
+        text("Game"),
+        Menu::new([
+            Item::new(button("Starting Position").on_press(Message::NewDefaultPosPressed)),
+            Item::new(button("From FEN").on_press(Message::NewFenPosPressed)),
+            Item::new(TextInput::new("FEN string", &self.fen_input)
+                .on_input(Message::FenContentChanged)
+                .on_paste(Message::FenContentChanged).width(200.0)
+            ),
+            Item::new(row![
+                    white_button,
+                    black_button
+                ])
+            ].into()).max_width(200.0).padding(20.0).spacing(25.0),
+        );
+        return MenuBar::new(vec![game_dd]).into();
+    }
+
     fn get_img_for_square(&self, sqr: u32) -> Option<Handle> {
         let owner: u32;
         if self.game.board.is_white_occupied(sqr) {
@@ -126,6 +163,12 @@ impl AppState {
 
     pub fn subscription() -> Subscription<Message> {
         return event::listen().map(Message::Event);
+    }
+
+    pub fn reset_state(&mut self) {
+        self.fen_input = String::new();
+        self.selected_square = None;
+        self.selection_target_sqrs = Vec::with_capacity(27);
     }
 
 }
@@ -179,6 +222,34 @@ pub fn update(state: &mut AppState, msg: Message) {
         }
         _ => {}
       }
+      Message::FenContentChanged(new_str) => {
+        state.fen_input = new_str;
+      }
+      Message::NewDefaultPosPressed => {
+        state.game = Game::default();
+        state.user_side = state.input_side;
+      }
+      Message::NewFenPosPressed => {
+        match Game::game_with(&state.fen_input) {
+            Ok(g) => {
+                state.reset_state();
+                state.game = g;
+                state.user_side = state.input_side;
+            }
+            Err(e) => {
+                state.show_error = true;
+            }
+        }
+      }
+      Message::InputSideWhitePressed => {
+        state.input_side = WHITE;
+      }
+      Message::InputSideBlackPressed => {
+        state.input_side = BLACK;
+      }
+      Message::ErrorHandled => {
+        state.show_error = false;
+      }
       _ => {
         println!("Unrecognized message");
       }
@@ -187,12 +258,36 @@ pub fn update(state: &mut AppState, msg: Message) {
 }
 
 pub fn view(state: &AppState) -> Element<Message> {
-    return state.render_main_container();
+    let main_content = state.render_main_container();
+    if state.show_error {
+        let error_window = center(Card::new("Error", "Invalid FEN-string").on_close(Message::ErrorHandled).max_width(300.0));
+        return stack![main_content, error_window].into();
+    } else {
+        return main_content.into();
+    }
 }
 
 /* pub fn run_fr() -> iced::Result {
     return run(update, view);
 } */
+
+fn input_button_style(white: bool, selected: bool) -> iced::widget::button::Style {
+    let main_color: iced::Color;
+    let border_color: iced::Color;
+    if white {main_color = Color::WHITE;} else {main_color = Color::BLACK;}
+    if selected {border_color = Color::from_rgb(0.0, 1.0, 0.0);} else {border_color = Color::TRANSPARENT;}
+    return iced::widget::button::Style {
+        background: Some(iced::Background::Color(main_color)),
+        border: Border {
+            color: border_color,
+            width: 2.0,
+            radius: 4.0.into()
+        },
+        shadow: Shadow::default(),
+        snap: true,
+        text_color: Color::TRANSPARENT
+    }
+}
 
 const LIGHT_SQR_COLOR: iced::Color = iced::Color::from_rgb(0.94, 0.90, 0.86);
 const DARK_SQR_COLOR: iced::Color = iced::Color::from_rgb(0.47, 0.40, 0.30);

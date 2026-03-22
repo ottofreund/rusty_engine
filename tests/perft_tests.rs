@@ -19,7 +19,11 @@ fn default_pos_perft_correct() {
 #[test]
 fn kiwipete_edge_case_perft() {
     let mut game: Game = Game::game_with("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ").unwrap();
-
+    //assert_eq!(go_perft(2, &mut game), 2039);
+    //perft_logger(3, &mut game, Some(1));
+    //assert_eq!(go_perft(3, &mut game), 97862)
+    //assert_eq!(go_perft(4, &mut game), 4085603);
+    //assert_eq!(go_perft(5, &mut game), 193690690)
 }
 
 fn go_perft(target_depth: usize, game: &mut Game) -> u32 {
@@ -66,7 +70,7 @@ fn perft_logger(depth: u32, game: &mut Game, log_depth: Option<u32>) -> u32 {
             return 1;
         } else {
             let mut perft_from_here: u32 = 0;
-            g.legal_moves().to_vec().iter().for_each(|mov| {
+            g.legal_search_moves().to_vec().iter().for_each(|mov| {
                 g.make_move(*mov, true);
                 perft_from_here += inner(d - 1, g, log_depth);
                 g.unmake_move(*mov);

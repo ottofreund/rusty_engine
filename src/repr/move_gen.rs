@@ -15,6 +15,8 @@ const WS_CASTLING_GAP_BB: u64 = 96; //2^5 + 2^6
 const WL_CASTLING_GAP_BB: u64 = 14; //2^1 + 2^2 + 2^3
 const BS_CASTLING_GAP_BB: u64 = 6917529027641081856; //2^61 + 2^62
 const BL_CASTLING_GAP_BB: u64 = 1008806316530991104; //2^57 + 2^58 + 2^59
+const WL_ATTACK_GAP_BB: u64 = 12; //2^2 + 2^3
+const BL_ATTACK_GAP_BB: u64 = 864691128455135232; //2^58 + 2^59
 const MAX_MOVES: usize = 218; //max moves in any pos
 const MAX_PSEUDO: usize = 250; //guess for max pseudo moves in any pos
 
@@ -556,20 +558,20 @@ fn add_castling(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
         let opponent_attacks: u64;
         if mover == WHITE {
             opponent_attacks = board.black_attacks;
-            preventing_bb = board.white_occupation | board.black_occupation | opponent_attacks;
-            if board.ws() && WS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
+            let total_occ: u64 = board.total_occupation();
+            if board.ws() && WS_CASTLING_GAP_BB & (total_occ | opponent_attacks) == 0 { //short is legal
                 move_vec.push(WHITE_SHORT);
             }
-            if board.wl() && WL_CASTLING_GAP_BB & preventing_bb == 0 { //long is legal
-                move_vec.push(WHITE_SHORT);
+            if board.wl() && WL_CASTLING_GAP_BB & total_occ == 0 && WL_ATTACK_GAP_BB & opponent_attacks == 0 { //long is legal
+                move_vec.push(WHITE_LONG);
             }
         } else {
             opponent_attacks = board.white_attacks;
-            preventing_bb = board.white_occupation | board.black_occupation | opponent_attacks;
-            if board.bs() && BS_CASTLING_GAP_BB & preventing_bb == 0 { //short is legal
+            let total_occ: u64 = board.total_occupation();
+            if board.bs() && BS_CASTLING_GAP_BB & (total_occ | opponent_attacks) == 0 { //short is legal
                 move_vec.push(BLACK_SHORT);
             }
-            if board.bl() && BL_CASTLING_GAP_BB & preventing_bb == 0 { //long is legal
+            if board.bl() && BL_CASTLING_GAP_BB & total_occ == 0 && BL_ATTACK_GAP_BB & opponent_attacks == 0 { //long is legal
                 move_vec.push(BLACK_LONG);
             }
         }

@@ -21,6 +21,7 @@
 
 ### Dependencies
 - `iced 0.14.0` - GUI framework
+- `iced_aw 0.13.0` - Additional widgets to iced
 - `rand 0.9.2` - Random number generation
 - Rust 2021 edition
 

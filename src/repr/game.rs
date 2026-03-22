@@ -77,6 +77,13 @@ impl Game {
         return &self.move_arr[0..end];
     }
 
+    ///Slice to current search moves (last ply)
+    pub fn legal_search_moves(&self) -> &[u32] {
+        let s: usize = self.move_arr_idx[self.move_arr_idx.len() - 2];
+        let e: usize = self.move_arr_idx[self.move_arr_idx.len() - 1];
+        return &self.move_arr[s..e];
+    }
+
     ///Public api ease of use and safety method, not called in search
     pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32) -> Result<u32, Error> {
         let mov: Option<u32> = self.legal_moves().iter().copied().find(|mov| 
