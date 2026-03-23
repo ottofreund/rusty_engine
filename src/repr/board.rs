@@ -101,13 +101,20 @@ impl Board {
         let long_dist: &mut u32;
         let long_corner_idx: u32;
         let king_piece_idx: u32;
+        let non_mover_s_dist: &mut u32;
+        let non_mover_l_dist: &mut u32;
+        let non_mover_s_corner_idx: u32;
+        let non_mover_l_corner_idx: u32;
         if is_white_turn { 
-            short_dist = &mut self.ws; long_dist = &mut self.wl; short_corner_idx = 7; long_corner_idx = 0; king_piece_idx = W_KING;
+            short_dist = &mut self.ws; long_dist = &mut self.wl; short_corner_idx = 7; long_corner_idx = 0; king_piece_idx = W_KING; non_mover_s_dist = &mut self.bs; non_mover_l_dist = &mut self.bl;
+            non_mover_s_corner_idx = 63; non_mover_l_corner_idx = 56;
         } else {
-            short_dist = &mut self.bs; long_dist = &mut self.bl; short_corner_idx = 63; long_corner_idx = 56; king_piece_idx = B_KING;
+            short_dist = &mut self.bs; long_dist = &mut self.bl; short_corner_idx = 63; long_corner_idx = 56; king_piece_idx = B_KING; non_mover_s_dist = &mut self.ws; non_mover_l_dist = &mut self.wl;
+            non_mover_s_corner_idx = 7; non_mover_l_corner_idx = 0;
         }
         let short_right: bool = *short_dist == 0;
         let long_right: bool = *long_dist == 0;
+        //update for mover
         if moved_piece == king_piece_idx {
             *short_dist += 1;
             *long_dist += 1;
@@ -118,7 +125,16 @@ impl Board {
             if !long_right || from == long_corner_idx || to == long_corner_idx {
                 *long_dist += 1;
             }
-        }   
+        }
+        //update for non-mover
+        let non_mover_short_right: bool = *non_mover_s_dist == 0;
+        let non_mover_long_right: bool = *non_mover_l_dist == 0;
+        if !non_mover_short_right || to == non_mover_s_corner_idx {
+            *non_mover_s_dist += 1;
+        }
+        if !non_mover_long_right || to == non_mover_l_corner_idx {
+            *non_mover_l_dist += 1;
+        }
         return;
     }
 

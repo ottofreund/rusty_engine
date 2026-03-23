@@ -615,7 +615,7 @@ pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen
         forward = from + 8; forward2 = from + 16; PAWN_START_RANK = RANKS[1]; pawn_piece_idx = 0; enemy_occupied = board.black_occupation;
     } else { //for black
         is_promotion = bitboard::contains_square(RANKS[1], from);
-        forward = from - 8; forward2 = from - 16; PAWN_START_RANK = RANKS[6]; pawn_piece_idx = 6; enemy_occupied = board.white_occupation;
+        forward = from - 8; forward2 = from.wrapping_sub(16); PAWN_START_RANK = RANKS[6]; pawn_piece_idx = 6; enemy_occupied = board.white_occupation;
     }
     //add attacking moves
     let mut characteristic_attacks: u64 = move_gen.attack_bbs[pawn_piece_idx][from as usize]; //bitboard
