@@ -11,10 +11,10 @@ fn default_pos_perft_correct() {
     //assert_eq!(go_perft(3, &mut game), 8902)
     //assert_eq!(go_perft(4, &mut game), 197281);
     //perft_logger(5, &mut game, Some(4));
-    //assert_eq!(go_perft(5, &mut game), 4865609);
+    assert_eq!(go_perft(5, &mut game), 4865609);
     //assert_eq!(go_perft(6, &mut game), 119060324);
     
-    perft_benchmark(|| {go_perft(5, &mut game);});
+    //perft_benchmark(|| {go_perft(5, &mut game);});
 }
 
 #[test]
@@ -26,8 +26,8 @@ fn edge_case_perft_2() { //"kiwipete" position
     //perft_logger(2, &mut game, Some(1));
     //assert_eq!(go_perft(3, &mut game), 97862);
     //assert_eq!(go_perft(4, &mut game), 4085603);
-    //assert_eq!(go_perft(5, &mut game), 193690690);
-    perft_benchmark(|| {go_perft(4, &mut game);});
+    assert_eq!(go_perft(5, &mut game), 193690690);
+    //perft_benchmark(|| {go_perft(4, &mut game);});
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn go_perft(target_depth: usize, game: &mut Game) -> u32 {
             cur_ply -= 1;
             continue;
         } else { //not done with this ply
-            game.make_move(game.move_arr[mv_idx], true);
+            game.make_move(game.move_arr[mv_idx], true, true);
             per_ply_idx[cur_ply] += 1;
             cur_ply += 1;
             if cur_ply == target_depth { //terminal cond
@@ -119,7 +119,7 @@ fn perft_logger(depth: u32, game: &mut Game, log_depth: Option<u32>) -> u32 {
         } else {
             let mut perft_from_here: u32 = 0;
             g.legal_search_moves().to_vec().iter().for_each(|mov| {
-                g.make_move(*mov, true);
+                g.make_move(*mov, true, true);
                 //println!("move_arr usage: {}", (g.move_arr_idx.last().copied().unwrap() as f32) / (g.move_arr.len() as f32));
                 perft_from_here += inner(d - 1, g, log_depth);
                 g.unmake_move(*mov);

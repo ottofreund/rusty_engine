@@ -26,7 +26,7 @@ impl Default for Game {
         let board: Board = Board::default_board(&move_gen);
         let turn: u32 = board.turn;
         let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
-        let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0, false);
+        let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0, false, false);
         let move_arr_idx: Vec<usize> = vec![0, generated];
         let ep_stack: Vec<Option<u32>> = vec![None];
         let pinned_info_stack: Vec<(u32, u64, u64, [u64; 64], u64)> = vec![(0, 0, 0, [0u64 ; 64], 0)];
@@ -49,7 +49,7 @@ impl Game {
             Err(_) => return Err("Fen error")
         }
         let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
-        let generated: usize = move_gen.generate_legal(&board, board.turn, &mut move_arr, 0, false);
+        let generated: usize = move_gen.generate_legal(&board, board.turn, &mut move_arr, 0, false, false);
         let move_arr_idx: Vec<usize> = vec![0, generated];
         let ep_sqr: Option<u32> = board.ep_square;
         let ep_stack: Vec<Option<u32>> = vec![ep_sqr];
@@ -92,7 +92,7 @@ impl Game {
         match mov {
             Some(m) => {
                 //println!("Successfully moved: {}", _move::to_string(m));
-                self.make_move(m, false);
+                self.make_move(m, false, false);
                 return Ok(m);
             },
             None => {
@@ -118,7 +118,7 @@ impl Game {
     }
 
     ///Board state is modified and legal_moves is updated, assumes mov is legal
-    pub fn make_move(&mut self, mov: u32, in_search: bool) {
+    pub fn make_move(&mut self, mov: u32, in_search: bool, in_perft_debug: bool) {
         let is_white_turn: bool = self.board.turn == WHITE;
         let is_promotion: bool = _move::is_promotion(mov);
         let from: u32 = _move::get_init(mov);
@@ -228,7 +228,7 @@ impl Game {
             self.move_arr_idx.clear();
             self.move_arr_idx.push(0); // 0 ply ends at 0 (exclusive)
         }
-        let generated: usize = self.move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx, in_search);
+        let generated: usize = self.move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx, in_search, in_perft_debug);
         self.move_arr_idx.push(move_arr_s_idx + generated);
         //5. push to played moves stack
         self.played_moves_stack.push(mov);
