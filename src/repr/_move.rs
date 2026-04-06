@@ -79,6 +79,18 @@ pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: 
     }
 }
 
+///Add only queen and knight promotions to a mutably borrowed move vector **vec**. Doesn't validate input, assumes correct usage
+pub fn add_search_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: &mut Vec<u32>) {
+    let moved_pawn_idx: u32;
+    let queen_piece_idx: u32;
+    let knight_piece_idx: u32;
+    if mover == WHITE {moved_pawn_idx = 0; queen_piece_idx = 5; knight_piece_idx = 1;} 
+    else {moved_pawn_idx = 6; queen_piece_idx = 11; knight_piece_idx = 7;}
+    moves.push(create_promotion(from, to, is_take, queen_piece_idx, mover, moved_pawn_idx));
+    moves.push(create_promotion(from, to, is_take, knight_piece_idx, mover, moved_pawn_idx));
+    return;
+}
+
 //decoding methods
 /// Get square moved from / init square
 pub fn get_init(mov: u32) -> u32  {

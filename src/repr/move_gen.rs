@@ -52,9 +52,9 @@ impl MoveGen {
     ///Called once upon arriving to a new position. <br>
     ///Not called when reverting move, since just fetched from stack.
     ///Returns how many moves generated
-    pub fn generate_legal(&self, board: &Board, mover: u32, move_arr: &mut [u32 ; MOVE_ARR_SIZE], move_arr_s_idx: usize) -> usize {
+    pub fn generate_legal(&self, board: &Board, mover: u32, move_arr: &mut [u32 ; MOVE_ARR_SIZE], move_arr_s_idx: usize, in_search: bool) -> usize {
         let mut generated: usize = 0;
-        for mov in self.generate_pseudolegal(board, mover) {
+        for mov in self.generate_pseudolegal(board, mover, in_search) {
             if self.pseudolegal_is_legal(mov, board, mover) {
                 //add taken piece idx to move (if eating) now, since it is necessary
                 let m: u32;
@@ -180,7 +180,7 @@ impl MoveGen {
         return true;
     }
 
-    pub fn generate_pseudolegal(&self, board: &Board, mover: u32) -> Vec<u32> {
+    pub fn generate_pseudolegal(&self, board: &Board, mover: u32, in_search: bool) -> Vec<u32> {
         let mut res: Vec<u32> = Vec::with_capacity(MAX_PSEUDO);
         let mut i: usize;
         let e: usize;
@@ -189,7 +189,7 @@ impl MoveGen {
             let mut piece_bb: u64 = board.pieces[i];
             while piece_bb != 0 {
                 let piece_idx: u32 = bitboard::pop_lsb(&mut piece_bb);
-                self.pseudolegal_for(piece_idx, i as u32, mover, board, &mut res, false, false);
+                self.pseudolegal_for(piece_idx, i as u32, mover, board, &mut res, false, false, in_search);
             }
             i += 1;
         }
@@ -204,10 +204,10 @@ impl MoveGen {
     ///3. If !**keep_protected**, remove "eating own piece" moves by binary ANDing with !own_occupation <br>
     ///4. If **targets_only** just return targets bitboard.
     ///5. Else Pop-lsb 1-by-1 and make move and add to **move_vec** until none left.
-    pub fn pseudolegal_for(&self, from: u32, piece: u32, mover: u32, board: &Board, move_vec: &mut Vec<u32>, keep_protected: bool, targets_only: bool) -> u64 {
+    pub fn pseudolegal_for(&self, from: u32, piece: u32, mover: u32, board: &Board, move_vec: &mut Vec<u32>, keep_protected: bool, targets_only: bool, in_search: bool) -> u64 {
         if piece == W_PAWN || piece == B_PAWN {
             //no en passant from this
-            pseudolegal_pawn(from, mover, board, self, move_vec);
+            pseudolegal_pawn(from, mover, board, self, move_vec, in_search);
             return 0;
         }
 
@@ -258,9 +258,9 @@ impl MoveGen {
     /// does NOT remove own pieces here yet since defended pieces are also of interest.
     pub fn get_sliding_for(&self, sqr: usize, rel_blockers: u64, rook: bool) -> u64 {
         if rook {
-            return self.magic_bb.rook_slide_bbs[sqr][self.magic_bb.get_magic_idx(sqr, rel_blockers, true)];
+            return self.magic_bb.rook_slide_bbs[self.magic_bb.get_magic_idx(sqr, rel_blockers, true)];
         } else {
-            return self.magic_bb.bishop_slide_bbs[sqr][self.magic_bb.get_magic_idx(sqr, rel_blockers, false)];
+            return self.magic_bb.bishop_slide_bbs[self.magic_bb.get_magic_idx(sqr, rel_blockers, false)];
         }
     }
 
@@ -390,7 +390,7 @@ impl MoveGen {
             let mut piece_bb: u64 = board.pieces[i];
             while piece_bb != 0 {
                 let piece_idx: u32 = bitboard::pop_lsb(&mut piece_bb);
-                let targets: u64 = self.pseudolegal_for(piece_idx, i as u32, side, board, &mut Vec::new(), true, true);
+                let targets: u64 = self.pseudolegal_for(piece_idx, i as u32, side, board, &mut Vec::new(), true, true, true);
                 if bitboard::contains_square(targets, opponent_king_sqr) { //see if checker
                     board.nof_checkers += 1;
                     bitboard::set_square(&mut board.check_block_sqrs, piece_idx);
@@ -607,9 +607,9 @@ fn add_en_passant(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
 }
 
 /// Add all pseudolegal pawn moves for pawn on square **from** and color **mover** on **board** to **move_vec** . <br>
-/// 
+/// if **in_search**, only queen and knight promotions are generated
 /// NO EN PASSANT
-pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen, move_vec: &mut Vec<u32>)  {
+pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen, move_vec: &mut Vec<u32>, in_search: bool) {
     //following are relative to color:
     let is_promotion: bool;
     let forward: u32;
@@ -630,7 +630,11 @@ pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen
         let attack_sqr: u32 = bitboard::pop_lsb(&mut characteristic_attacks);
         if bitboard::contains_square(enemy_occupied, attack_sqr) { //is pseudolegal
             if is_promotion {
-                add_all_promotions(from, attack_sqr, true, mover, move_vec);
+                if in_search {
+                    add_search_promotions(from, attack_sqr, true, mover, move_vec);
+                } else {
+                    add_all_promotions(from, attack_sqr, true, mover, move_vec);
+                } 
             } else {
                 move_vec.push(_move::create(from, attack_sqr, true, mover, pawn_piece_idx as u32));
             }

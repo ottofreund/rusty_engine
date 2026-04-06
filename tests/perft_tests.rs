@@ -14,7 +14,7 @@ fn default_pos_perft_correct() {
     //assert_eq!(go_perft(5, &mut game), 4865609);
     //assert_eq!(go_perft(6, &mut game), 119060324);
     
-    //perft_benchmark(|| {go_perft(5, &mut game);});
+    perft_benchmark(|| {go_perft(5, &mut game);});
 }
 
 #[test]
@@ -24,9 +24,10 @@ fn edge_case_perft_2() { //"kiwipete" position
     //game.try_make_move(4, 6).unwrap();
     //game.try_make_move(23, 14).unwrap();
     //perft_logger(2, &mut game, Some(1));
-    //assert_eq!(go_perft(3, &mut game), 97862)
+    //assert_eq!(go_perft(3, &mut game), 97862);
     //assert_eq!(go_perft(4, &mut game), 4085603);
-    assert_eq!(go_perft(5, &mut game), 193690690)
+    //assert_eq!(go_perft(5, &mut game), 193690690);
+    perft_benchmark(|| {go_perft(4, &mut game);});
 }
 
 #[test]

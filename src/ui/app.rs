@@ -191,12 +191,6 @@ pub fn update(state: &mut AppState, msg: Message) {
                     match state.game.try_make_move(selected_sqr, sqr) {
                         Ok(mov) => {
                             state.selected_square = None;
-                            println!("now legals: \n");
-                            state.game.legal_moves().iter().for_each(|m| {
-                                println!("{}", _move::to_string(*m));
-                            });
-
-                            println!("\n\n-------------------------\n\n")
                         },
                         Err(e) => {
                             state.selected_square = None;

@@ -3,10 +3,12 @@ use crate::repr::move_gen::{self, naive_rook_sliding, naive_bishop_sliding};
 ///Contains magically indexed precomputed slide_bbs and is associated with the methods and data needed to compute them
 ///Total size roughly a megabyte
 pub struct MagicBitboard {
-    pub rook_slide_bbs: Vec<Vec<u64>>, //pseudolegal slides magically indexed,
-    pub bishop_slide_bbs: Vec<Vec<u64>>,
+    pub rook_slide_bbs: Vec<u64>, //pseudolegal slides magically indexed per square, flattened to 1D
+    pub bishop_slide_bbs: Vec<u64>,
     rook_magics: [u64 ; 64],
-    bishop_magics: [u64 ; 64]
+    bishop_magics: [u64 ; 64],
+    rook_sqr_offset: [usize ; 64], // sqr offset to rook_slide_bbs, so e.g. sqr 5 slide_bbs start at rook_sqr_offset[5]
+    bishop_sqr_offset: [usize ; 64]
 }
 
 impl MagicBitboard {
@@ -16,11 +18,17 @@ impl MagicBitboard {
         let mut rook_magics: [u64 ; 64] = ROOK_MAGICS_MEMOIZED;
         let mut bishop_magics: [u64 ; 64] = BISHOP_MAGICS_MEMOIZED;
         //squares have greatly varying need of nof bits <==> inner collection len, thus use vectors
-        let mut rook_slide_bbs: Vec<Vec<u64>> = Vec::new(); 
-        let mut bishop_slide_bbs: Vec<Vec<u64>> = Vec::new();
+        let mut rook_slide_bbs: Vec<u64> = Vec::new(); 
+        let mut bishop_slide_bbs: Vec<u64> = Vec::new();
+        let mut rook_sqr_offset: [usize ; 64] = [0 ; 64];
+        let mut bishop_sqr_offset: [usize ; 64] = [0 ; 64];
+        let mut cur_rook_offset: usize = 0;
+        let mut cur_bishop_offset: usize = 0;
 
         let mut rng: ThreadRng = rand::rng();
         for sqr in 0..64 {  
+            rook_sqr_offset[sqr] = cur_rook_offset;
+            bishop_sqr_offset[sqr] = cur_bishop_offset;
             let rook_empty_board_attack_bb: u64 = empty_board_attack_bbs[3][sqr];
             let rook_empty_board_attack_bb_no_edges: u64 = rook_empty_board_attack_bbs_no_edges[sqr];
             let bishop_empty_board_attack_bb: u64 = empty_board_attack_bbs[2][sqr];
@@ -46,19 +54,25 @@ impl MagicBitboard {
                 let magic_idx: usize = ((block_mask.wrapping_mul(bishop_magics[sqr])) >> BISHOP_SHIFTS[sqr]) as usize;
                 bishop_lookup_vec[magic_idx] = naive_bishop_sliding(sqr as u32, block_mask, true);
             }
-            rook_slide_bbs.push(rook_lookup_vec);
-            bishop_slide_bbs.push(bishop_lookup_vec);
+            cur_rook_offset += rook_lookup_vec.len(); cur_bishop_offset += bishop_lookup_vec.len();
+            rook_slide_bbs.append(&mut rook_lookup_vec);
+            bishop_slide_bbs.append(&mut bishop_lookup_vec);
         }
         //now magics computed and 'legal' slide bbs filled magically indexed
-        return Self { rook_magics, bishop_magics, rook_slide_bbs, bishop_slide_bbs }
+        return Self { rook_magics, bishop_magics, rook_slide_bbs, bishop_slide_bbs, rook_sqr_offset, bishop_sqr_offset }
     }
     ///Get magic idx for **rook**/bishop with **rel_blockers**
     pub fn get_magic_idx(&self, sqr: usize, rel_blockers: u64, rook: bool) -> usize {
+        let magic: usize;
+        let sqr_offset: usize;
         if rook {
-            return ((rel_blockers.wrapping_mul(self.rook_magics[sqr])) >> ROOK_SHIFTS[sqr]) as usize;
+            magic = ((rel_blockers.wrapping_mul(self.rook_magics[sqr])) >> ROOK_SHIFTS[sqr]) as usize;
+            sqr_offset = self.rook_sqr_offset[sqr];
         } else {
-            return ((rel_blockers.wrapping_mul(self.bishop_magics[sqr])) >> BISHOP_SHIFTS[sqr]) as usize;
+            magic = ((rel_blockers.wrapping_mul(self.bishop_magics[sqr])) >> BISHOP_SHIFTS[sqr]) as usize;
+            sqr_offset = self.bishop_sqr_offset[sqr];
         }
+        return sqr_offset + magic
     }
 
 }

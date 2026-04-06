@@ -26,7 +26,7 @@ impl Default for Game {
         let board: Board = Board::default_board(&move_gen);
         let turn: u32 = board.turn;
         let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
-        let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0);
+        let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0, false);
         let move_arr_idx: Vec<usize> = vec![0, generated];
         let ep_stack: Vec<Option<u32>> = vec![None];
         let pinned_info_stack: Vec<(u32, u64, u64, [u64; 64], u64)> = vec![(0, 0, 0, [0u64 ; 64], 0)];
@@ -49,7 +49,7 @@ impl Game {
             Err(_) => return Err("Fen error")
         }
         let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
-        let generated: usize = move_gen.generate_legal(&board, board.turn, &mut move_arr, 0);
+        let generated: usize = move_gen.generate_legal(&board, board.turn, &mut move_arr, 0, false);
         let move_arr_idx: Vec<usize> = vec![0, generated];
         let ep_sqr: Option<u32> = board.ep_square;
         let ep_stack: Vec<Option<u32>> = vec![ep_sqr];
@@ -228,7 +228,7 @@ impl Game {
             self.move_arr_idx.clear();
             self.move_arr_idx.push(0); // 0 ply ends at 0 (exclusive)
         }
-        let generated: usize = self.move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx);
+        let generated: usize = self.move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx, in_search);
         self.move_arr_idx.push(move_arr_s_idx + generated);
         //5. push to played moves stack
         self.played_moves_stack.push(mov);
