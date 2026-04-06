@@ -65,7 +65,6 @@ impl MoveGen {
                         m = mov; //white pawn is 0 so do nothing
                     }   
                 } else if _move::is_eating(mov) {
-                    //println!("looking for eaten for: {}", _move::to_string(mov));
                     let eaten_piece: u32 = board.get_piece_type_at(_move::get_target(mov), mover ^ 1);
                     m = _move::with_eaten_piece(mov, eaten_piece);
                 } else {
@@ -99,7 +98,12 @@ impl MoveGen {
             let moved_king: bool = moved_piece == W_KING || moved_piece == B_KING;
             if board.nof_checkers == 1 {
                 let target: u32 = _move::get_target(mov);
-                let blocked_check: bool = bitboard::contains_square(board.check_block_sqrs, target);
+                let mut blocked_check: bool = bitboard::contains_square(board.check_block_sqrs, target);
+                //also en passant can "block" check
+                let ep_offset: i32; if mover == WHITE {ep_offset = -8} else {ep_offset = 8}
+                if _move::is_en_passant(mov) && bitboard::contains_square(board.check_block_sqrs, (board.ep_square.expect("was ep but no ep sqr") as i32 + ep_offset) as u32) {
+                    blocked_check = true;
+                }
                 //if one checker, can either move king to safe square or block (including eat)
                 if !moved_king && !blocked_check {
                     return false; 
@@ -127,20 +131,22 @@ impl MoveGen {
                 ep_rank = RANKS[3];
             }
             if ep_rank & opponent_horizontal_sliding > 0 {
-                let scan_right: bool = board.get_king_sqr_idx(mover) < init;
+                let mover_king_sqr: u32 = board.get_king_sqr_idx(mover);
+                let king_on_left_side: bool = mover_king_sqr < init;
                 let ep_dir_right: bool = _move::get_target(mov) % 8 > init % 8;
-                let scan_start_sqr: u32;
-                let apply_step_f: fn(u32) -> u32;
-                let end_sqr_bb: u64;
-                if scan_right {
-                    apply_step_f = |x: u32| x + 1;
-                    end_sqr_bb = FILES[7];
-                    if ep_dir_right {
-                        scan_start_sqr = init + 1;
-                    } else {
-                        scan_start_sqr = init;
-                    }
+                //scan right
+                let mut scan_start_sqr: u32;
+                let mut apply_step_f: fn(u32) -> u32 = |x: u32| x + 1;
+                let mut end_sqr_bb: u64 = FILES[7];
+                if ep_dir_right {
+                    scan_start_sqr = init + 1;
                 } else {
+                    scan_start_sqr = init;
+                }
+                let slide_bb_right: u64 = slide_to_dir(scan_start_sqr, apply_step_f, end_sqr_bb, board.total_occupation(), true);
+                if (king_on_left_side && (slide_bb_right & opponent_horizontal_sliding > 0))
+                    || (!king_on_left_side && bitboard::contains_square(slide_bb_right, mover_king_sqr)) {
+                    //necessary to scan left, could be edge case
                     apply_step_f = |x: u32| x - 1;
                     end_sqr_bb = FILES[0];
                     if ep_dir_right {
@@ -148,11 +154,12 @@ impl MoveGen {
                     } else {
                         scan_start_sqr = init - 1;
                     }
-                }
-                let slide_bb: u64 = slide_to_dir(scan_start_sqr, apply_step_f, end_sqr_bb, board.total_occupation(), true);
-                if slide_bb & opponent_horizontal_sliding > 0 {
-                    return false;
-                }
+                    let slide_bb_left: u64 = slide_to_dir(scan_start_sqr, apply_step_f, end_sqr_bb, board.total_occupation(), true);
+                    if (king_on_left_side && bitboard::contains_square(slide_bb_left, mover_king_sqr))
+                    || (!king_on_left_side && (slide_bb_left & opponent_horizontal_sliding > 0)) {
+                        return false
+                    }
+                }         
             }
         } else if moved_piece == mover_king_piece_idx {
             let target: u32 = _move::get_target(mov);

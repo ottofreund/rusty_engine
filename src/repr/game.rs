@@ -232,6 +232,11 @@ impl Game {
         self.move_arr_idx.push(move_arr_s_idx + generated);
         //5. push to played moves stack
         self.played_moves_stack.push(mov);
+
+        if self.board.white_occupation & self.board.black_occupation > 0 {
+            println!("overlap");
+        }
+
         return;
     }
 
@@ -324,6 +329,7 @@ impl Game {
         self.move_arr_idx.pop().expect("move_arr_idx was empty");
         //4. pop played moves stack
         self.played_moves_stack.pop();
+
         return;
     }
 

@@ -64,7 +64,7 @@ pub fn create_en_passant(from: u32, to: u32, mover: u32, moved_piece: u32) -> u3
 
 /// Promotion move creator
 pub fn create_promotion(from: u32, to: u32, is_take: bool, promotion_piece: u32, mover: u32, moved_piece: u32) -> u32 {
-    return (create(from, to, is_take, mover, moved_piece) | 524288) | (promotion_piece << 20);
+    return (create(from, to, is_take, mover, moved_piece) | 2097152) | (promotion_piece << 22); //2097152 == 2^21
 }
 ///Add all promotions for this pawn to a mutably borrowed move vector **vec**. Doesn't validate input, assumes correct usage
 pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: &mut Vec<u32>) {
@@ -72,7 +72,7 @@ pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: 
     let e: u32;
     let moved_piece: u32;
     //start and end indices of piece based off color. Also moved piece
-    if mover == WHITE { p = 1; e = 6; moved_piece = 0; } else { p = 7; e = 12; moved_piece = 6; }; 
+    if mover == WHITE { p = 1; e = 5; moved_piece = 0; } else { p = 7; e = 11; moved_piece = 6; }; 
     while p < e {
         moves.push(create_promotion(from, to, is_take, p, mover, moved_piece));
         p += 1
@@ -158,5 +158,9 @@ pub fn to_string(mov: u32) -> String {
         res.push_str(" -> ");
     }
     res.push_str(&square_to_string(get_target(mov)));
+    if is_promotion(mov) {
+        res.push_str(" -- promoting to ");
+        res.push_str(PIECE_CHARS[get_promoted_piece(mov) as usize]);
+    }
     return res;
 }

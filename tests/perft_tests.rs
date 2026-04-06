@@ -14,20 +14,64 @@ fn default_pos_perft_correct() {
     //assert_eq!(go_perft(5, &mut game), 4865609);
     //assert_eq!(go_perft(6, &mut game), 119060324);
     
-    perft_benchmark(|| {go_perft(5, &mut game);});
+    //perft_benchmark(|| {go_perft(5, &mut game);});
 }
 
 #[test]
-fn kiwipete_edge_case_perft() {
+fn edge_case_perft_2() { //"kiwipete" position
     let mut game: Game = Game::game_with("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ").unwrap();
     //assert_eq!(go_perft(2, &mut game), 2039);
     //game.try_make_move(4, 6).unwrap();
-    //game.try_make_move(60, 58, true).unwrap();
+    //game.try_make_move(23, 14).unwrap();
     //perft_logger(2, &mut game, Some(1));
     //assert_eq!(go_perft(3, &mut game), 97862)
-    assert_eq!(go_perft(4, &mut game), 4085603);
-    //assert_eq!(go_perft(5, &mut game), 193690690)
+    //assert_eq!(go_perft(4, &mut game), 4085603);
+    assert_eq!(go_perft(5, &mut game), 193690690)
 }
+
+#[test]
+fn edge_case_perft_3() {
+    let mut game: Game = Game::game_with("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1").unwrap();
+    //assert_eq!(go_perft(2, &mut game), 191);
+    //assert_eq!(go_perft(3, &mut game), 2812)
+    //assert_eq!(go_perft(4, &mut game), 43238);
+    //perft_logger(2, &mut game, Some(1));
+    //assert_eq!(go_perft(5, &mut game), 674624);
+    assert_eq!(go_perft(6, &mut game), 11030083);
+    //assert_eq!(go_perft(7, &mut game), 178633661);
+}
+
+#[test]
+fn edge_case_perft_4() {
+    let mut game: Game = Game::game_with("r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1").unwrap();
+    //assert_eq!(go_perft(2, &mut game), 264);
+    //assert_eq!(go_perft(3, &mut game), 9467)
+    //assert_eq!(go_perft(4, &mut game), 422333);
+    //perft_logger(2, &mut game, Some(1));
+    assert_eq!(go_perft(5, &mut game), 15833292);
+}
+
+
+#[test]
+fn edge_case_perft_5() {
+    let mut game: Game = Game::game_with("rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8").unwrap();
+    //assert_eq!(go_perft(2, &mut game), 1486);
+    //assert_eq!(go_perft(3, &mut game), 62379)
+    //assert_eq!(go_perft(4, &mut game), 2103487);
+    //perft_logger(2, &mut game, Some(1));
+    assert_eq!(go_perft(5, &mut game), 89941194);
+}
+
+#[test]
+fn edge_case_perft_6() {
+    let mut game: Game = Game::game_with("r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10").unwrap();
+    //assert_eq!(go_perft(2, &mut game), 2079);
+    //assert_eq!(go_perft(3, &mut game), 89890)
+    //assert_eq!(go_perft(4, &mut game), 3894594);
+    //perft_logger(2, &mut game, Some(1));
+    assert_eq!(go_perft(5, &mut game), 164075551);
+}
+
 
 fn go_perft(target_depth: usize, game: &mut Game) -> u32 {
     assert!(target_depth > 1);
@@ -72,10 +116,7 @@ fn perft_logger(depth: u32, game: &mut Game, log_depth: Option<u32>) -> u32 {
         if d == 0 {
             return 1;
         } else {
-            println!("move_arr_idx: {:?} when depth {}", g.move_arr_idx, d);
             let mut perft_from_here: u32 = 0;
-            g.legal_search_moves().to_vec().iter().for_each(|m| println!("mov: {}", _move::to_string(*m)));
-            println!("castling rights: ws={},wl={},bs={},bl={}", g.board.ws(), g.board.wl(), g.board.bs(), g.board.bl());
             g.legal_search_moves().to_vec().iter().for_each(|mov| {
                 g.make_move(*mov, true);
                 //println!("move_arr usage: {}", (g.move_arr_idx.last().copied().unwrap() as f32) / (g.move_arr.len() as f32));

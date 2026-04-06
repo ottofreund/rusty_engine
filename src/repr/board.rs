@@ -167,7 +167,8 @@ impl Board {
         let mut res: Board = Self {
             pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0
         }; //set computable to some defaults and compute now to get correct vals
-        move_gen.compute_attacked(&mut res, opposite_turn(turn));
+        let non_mover_attacks: u64 = move_gen.compute_attacked(&mut res, opposite_turn(turn));
+        if turn == WHITE {res.black_attacks = non_mover_attacks} else {res.white_attacks = non_mover_attacks}
         move_gen.compute_pinned(&mut res, turn);
         //now in valid state
         return res;
