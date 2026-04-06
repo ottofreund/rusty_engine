@@ -58,6 +58,8 @@ impl MagicBitboard {
             rook_slide_bbs.append(&mut rook_lookup_vec);
             bishop_slide_bbs.append(&mut bishop_lookup_vec);
         }
+        rook_slide_bbs.shrink_to_fit();
+        bishop_slide_bbs.shrink_to_fit();
         //now magics computed and 'legal' slide bbs filled magically indexed
         return Self { rook_magics, bishop_magics, rook_slide_bbs, bishop_slide_bbs, rook_sqr_offset, bishop_sqr_offset }
     }

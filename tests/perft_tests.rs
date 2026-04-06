@@ -27,7 +27,7 @@ fn edge_case_perft_2() { //"kiwipete" position
     //assert_eq!(go_perft(3, &mut game), 97862);
     //assert_eq!(go_perft(4, &mut game), 4085603);
     //assert_eq!(go_perft(5, &mut game), 193690690);
-    perft_benchmark(|| {go_perft(4, &mut game);});
+    perft_benchmark(|| {go_perft(5, &mut game);});
 }
 
 #[test]

@@ -1,7 +1,3 @@
-Easy improvements:
- - flatten rook_slide_bbs and bishop_slide_bbs to 1D
-
-
 Reminders:
  - Attacked squares and protected squares actually don't have to be distinguished. Attacked squares, that are generated from pseudolegals, can simply be allowed to contain "eat own piece / protect" moves and thus when moving king we just have to check that these pseudolegal targets <==> attacked/protected squares don't contain the king target.
  - Lookups to sliding piece arrays are done with **relevant** blocker bitboards, meaning that last square before edge is dismissed. This reduces the combination space greatly with minimal overhead of converting to relevant bb. The values of these lookup tables are naturally stored **with** edges.
