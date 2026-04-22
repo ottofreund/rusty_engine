@@ -1,6 +1,6 @@
 use std::fmt::Error;
 
-use crate::repr::{board::Board, move_gen::{MoveGen, AVG_BRANCH_FAC}, types::WHITE, types::BLACK};
+use crate::{repr::{_move::NULL_MOVE, board::Board, move_gen::{AVG_BRANCH_FAC, MoveGen}, types::{BLACK, WHITE}}, search::search::SearchData};
 use crate::repr::*;
 
 use crate::utils::fen_tool::fen_to_board;
@@ -17,7 +17,8 @@ pub struct Game {
     ep_stack: Vec<Option<u32>>,
     pinned_info_stack: Vec<(u32, u64, u64, [u64; 64], u64)>,
     opponent_attacked_stack: Vec<u64>,
-    pub played_moves_stack: Vec<u32>
+    pub played_moves_stack: Vec<u32>,
+    pub last_target: u32
 }
 
 impl Default for Game {
@@ -33,8 +34,9 @@ impl Default for Game {
         let opponent_attacked: u64 = board.black_attacks;
         let opponent_attacked_stack: Vec<u64> = vec![opponent_attacked];
         let played_moves_stack: Vec<u32> = Vec::new();
+        let last_target: u32 = NULL_MOVE;
         return Self {
-            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx
+            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx, last_target
         }
     }
 }
@@ -66,8 +68,9 @@ impl Game {
         if board.turn == WHITE {opponent_attacked = board.black_attacks;} else {opponent_attacked = board.white_attacks;}
         let opponent_attacked_stack: Vec<u64> = vec![opponent_attacked];
         let played_moves_stack: Vec<u32> = Vec::new();
+        let last_target: u32 = NULL_MOVE;
         return Ok(Self {
-            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx
+            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx, last_target
         })
     }
 
@@ -82,6 +85,12 @@ impl Game {
         let s: usize = self.move_arr_idx[self.move_arr_idx.len() - 2];
         let e: usize = self.move_arr_idx[self.move_arr_idx.len() - 1];
         return &self.move_arr[s..e];
+    }
+
+    ///The search bounds of current search moves in move_arr (last ply)
+    ///end is exclusive
+    pub fn search_move_bounds(&self) -> (usize, usize) {
+        return (self.move_arr_idx[self.move_arr_idx.len() - 2], self.move_arr_idx[self.move_arr_idx.len() - 1]);
     }
 
     ///Public api ease of use and safety method, not called in search
@@ -236,7 +245,8 @@ impl Game {
         if self.board.white_occupation & self.board.black_occupation > 0 {
             println!("overlap");
         }
-
+        //6. last target
+        self.last_target = to;
         return;
     }
 
@@ -329,6 +339,12 @@ impl Game {
         self.move_arr_idx.pop().expect("move_arr_idx was empty");
         //4. pop played moves stack
         self.played_moves_stack.pop();
+        //5. last target
+        if self.played_moves_stack.is_empty() {
+            self.last_target = NULL_MOVE;
+        } else {
+            self.last_target = _move::get_target(self.played_moves_stack.last().copied().unwrap());
+        }
 
         return;
     }

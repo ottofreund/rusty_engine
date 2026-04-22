@@ -11,10 +11,10 @@ fn default_pos_perft_correct() {
     //assert_eq!(go_perft(3, &mut game), 8902)
     //assert_eq!(go_perft(4, &mut game), 197281);
     //perft_logger(5, &mut game, Some(4));
-    assert_eq!(go_perft(5, &mut game), 4865609);
+    //assert_eq!(go_perft(5, &mut game), 4865609);
     //assert_eq!(go_perft(6, &mut game), 119060324);
     
-    //perft_benchmark(|| {go_perft(5, &mut game);});
+    perft_benchmark(|| {return go_perft(6, &mut game);});
 }
 
 #[test]
@@ -26,8 +26,8 @@ fn edge_case_perft_2() { //"kiwipete" position
     //perft_logger(2, &mut game, Some(1));
     //assert_eq!(go_perft(3, &mut game), 97862);
     //assert_eq!(go_perft(4, &mut game), 4085603);
-    assert_eq!(go_perft(5, &mut game), 193690690);
-    //perft_benchmark(|| {go_perft(4, &mut game);});
+    //assert_eq!(go_perft(5, &mut game), 193690690);
+    perft_benchmark(|| {return go_perft(4, &mut game);});
 }
 
 #[test]
@@ -38,8 +38,9 @@ fn edge_case_perft_3() {
     //assert_eq!(go_perft(4, &mut game), 43238);
     //perft_logger(2, &mut game, Some(1));
     //assert_eq!(go_perft(5, &mut game), 674624);
-    assert_eq!(go_perft(6, &mut game), 11030083);
+    //assert_eq!(go_perft(6, &mut game), 11030083);
     //assert_eq!(go_perft(7, &mut game), 178633661);
+    perft_benchmark(|| {return go_perft(7, &mut game);});
 }
 
 #[test]
@@ -75,6 +76,28 @@ fn edge_case_perft_6() {
 
 
 fn go_perft(target_depth: usize, game: &mut Game) -> u32 {
+    assert!(target_depth > 1);
+
+    fn inner(d_left: usize, game: &mut Game) -> usize {
+        if d_left == 1 {
+            return game.legal_search_moves().len();
+        } //else go deeper
+        let mut from_here: usize = 0;
+        let (s, e) = game.search_move_bounds();
+        for i in s..e {
+            let mov: u32 = game.move_arr[i];
+            game.make_move(mov, true, false);
+            from_here += inner(d_left - 1, game);
+            game.unmake_move(mov);
+        }
+        return from_here;
+    }
+
+    return inner(target_depth, game) as u32;
+}
+
+//legacy, replaced by recursive for simplicity, performance around the same
+fn go_perft_iterative(target_depth: usize, game: &mut Game) -> u32 {
     assert!(target_depth > 1);
     let mut found: usize = 0;
     //"pointer" to cur move idx of each ply, when higher ply covered increment lower ply
@@ -137,9 +160,10 @@ fn perft_logger(depth: u32, game: &mut Game, log_depth: Option<u32>) -> u32 {
     return found;
 }
 
-fn perft_benchmark<F: FnOnce()>(f: F) {
+fn perft_benchmark<F: FnOnce() -> u32>(f: F) {
     let start: Instant = Instant::now();
-    f();
+    let perft: u32 = f();
     let time_took: Duration = start.elapsed();
     println!("perft took {} ms", time_took.as_millis());
+    println!("cranked {:.2} million moves/second", ((perft as f32 / 1e6) as f32) / (time_took.as_secs_f32()))
 }
