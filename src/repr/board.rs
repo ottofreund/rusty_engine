@@ -1,4 +1,4 @@
-use crate::repr::{game::MOVE_ARR_SIZE, move_gen::MoveGen, types::{B_KING, BLACK, W_KING, WHITE, opposite_turn}};
+use crate::repr::{position::MOVE_ARR_SIZE, move_gen::MoveGen, types::{B_KING, BLACK, W_KING, WHITE, opposite_turn}};
 
 
 pub const FILES: [u64 ; 8] = [
@@ -14,18 +14,19 @@ pub struct Board {
     pub pieces: [u64 ; 12],
     pub white_occupation: u64,
     pub black_occupation: u64,
-    pub white_attacks: u64, //what squares are "seen" by white pieces, including squares with own color pieces "protected"
+    pub white_attacks: u64, //includes own squares (protected)
     pub black_attacks: u64,
-    pub ep_square: Option<u32>, //if either moves pawn 2 up, resulting square comes here
+    pub ep_square: Option<u32>, 
     pub turn: u32,
-    pub nof_checkers: u32, //if > 1, has to move king
-    pub check_block_sqrs: u64, //bitboard for squares that block the check, only applies if nof_checkers <= 1
+    pub nof_checkers: u32,
+    pub check_block_sqrs: u64,
     pub white_pinned: u64, //bitboard of white's pinned pieces
     pub black_pinned: u64,
-    //IF white_pinned[sqr], then white_pinned_restrictions[sqr] contains target squares that don't break the pin i.e. stay on the pin ray (diagonal or cardinal). else is garbage and shouldn't be looked at. This 
+    //if white_pinned[sqr], then white_pinned_restrictions[sqr] contains squares that keep the pin (don't expose king)
     pub white_pinned_restrictions: [u64 ; 64],
     pub black_pinned_restrictions: [u64 ; 64],
-    pub meta_attacks: u64, //'meta attacks' posed by the non-moving player, these refer to squares behind king on sliding piece ray, since the king can't move there, but it's not actually attacked 
+    pub meta_attacks: u64, //when checked by scanner, this contains the squares behind the king
+    pub major_minor_count: u32,
     ws: u32, //white short castling right distance
     wl: u32, //semaphore-like usage or "castling distance"
     bs: u32, //if 0, then has right else, num tells how many moves ago you had the right
@@ -156,16 +157,17 @@ impl Board {
         let ep_square: Option<u32> = None;
         let (ws, wl, bs, bl) = (0, 0, 0, 0);
         let turn: u32 = WHITE;
-        return Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, move_gen)
+        let major_minor_count: u32 = 14;
+        return Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, major_minor_count, move_gen)
     }
 
     ///Returns filled in valid state board after taking minimal positional information.
     pub fn board_with(
         pieces: [u64; 12], white_occupation: u64, black_occupation: u64, turn: u32, 
-        ws: u32, wl: u32, bs: u32, bl: u32, ep_square: Option<u32>, move_gen: &MoveGen
+        ws: u32, wl: u32, bs: u32, bl: u32, ep_square: Option<u32>, major_minor_count: u32, move_gen: &MoveGen
     ) -> Self {
         let mut res: Board = Self {
-            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0
+            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0, major_minor_count
         }; //set computable to some defaults and compute now to get correct vals
         let non_mover_attacks: u64 = move_gen.compute_attacked(&mut res, opposite_turn(turn));
         if turn == WHITE {res.black_attacks = non_mover_attacks} else {res.white_attacks = non_mover_attacks}
@@ -192,6 +194,34 @@ impl Board {
     }
 
 }
+
+
+impl Clone for Board {
+    fn clone(&self) -> Self {
+        return Self {
+            pieces: self.pieces.clone(),
+            white_occupation: self.white_occupation.clone(),
+            black_occupation: self.black_occupation.clone(),
+            white_attacks: self.white_attacks.clone(),
+            black_attacks: self.black_attacks.clone(),
+            ep_square: self.ep_square.clone(),
+            turn: self.turn.clone(),
+            nof_checkers: self.nof_checkers.clone(),
+            check_block_sqrs: self.check_block_sqrs,
+            white_pinned: self.white_pinned.clone(),
+            black_pinned: self.black_pinned.clone(),
+            white_pinned_restrictions: self.white_pinned_restrictions.clone(),
+            black_pinned_restrictions: self.black_pinned_restrictions.clone(),
+            meta_attacks: self.meta_attacks.clone(),
+            major_minor_count: self.major_minor_count.clone(),
+            ws: self.ws.clone(),
+            wl: self.wl.clone(),
+            bs: self.bs.clone(),
+            bl: self.bl.clone()
+        }
+    }
+}
+
 
 /* impl std::fmt::Display for Board {
 

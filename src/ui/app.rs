@@ -1,16 +1,19 @@
+
 use iced::keyboard::{self};
 use iced::widget::image::Handle;
 use iced::widget::{Button, Image, TextInput, button, center, column, container, row, stack, text};
-use iced::{Alignment, Border, Color, Element, Shadow, Size, Subscription, Theme};
+use iced::{Border, Color, Element, Shadow, Size, Subscription};
 use iced::event::{self, Event};
-use crate::repr::game::Game;
-use crate::repr::board::square_to_string;
-use crate::repr::{_move, bitboard, types::*};
 
-use iced_aw::{Menu, MenuBar, menu::*, card, card::*};
+use iced_aw::{Menu, MenuBar, menu::*, card::*};
 
 use crate::ui::image_handle::ImageHandle;
 use crate::ui::messages::*;
+
+use crate::repr::board::square_to_string;
+use crate::repr::position::Position;
+use crate::repr::{_move, bitboard, types::*};
+use crate::game::game::Game;
 
 pub fn run_fr() -> iced::Result {
     iced::application(|| AppState::default(), update, view)
@@ -89,7 +92,7 @@ impl AppState {
             
         let content: Element<'static, Message, iced::Theme, iced::Renderer>;
         if is_targeted {
-            if self.game.board.is_occupied_by(square, self.game.board.turn ^ 1) {
+            if self.game.position.board.is_occupied_by(square, self.game.position.board.turn ^ 1) {
                 let handle: Handle = self.image_handle.target_circle_handle.clone();
                 content = stack!(btn, Image::new(handle).width(SQR_SIZE).height(SQR_SIZE)).into();
             } else {
@@ -136,14 +139,14 @@ impl AppState {
 
     fn get_img_for_square(&self, sqr: u32) -> Option<Handle> {
         let owner: u32;
-        if self.game.board.is_white_occupied(sqr) {
+        if self.game.position.board.is_white_occupied(sqr) {
             owner = WHITE;
-        } else if self.game.board.is_black_occupied(sqr) {
+        } else if self.game.position.board.is_black_occupied(sqr) {
             owner = BLACK;
         } else {
             return None;
         }
-        let piece_type: u32 = self.game.board.get_piece_type_at(sqr, owner);
+        let piece_type: u32 = self.game.position.board.get_piece_type_at(sqr, owner);
         return Some(self.image_handle.img_handles[piece_type as usize].clone());
     }
 
@@ -151,7 +154,7 @@ impl AppState {
         match self.selected_square {
             Some(sqr) => {
                 self.selection_target_sqrs.clear();
-                self.game.legal_moves().iter().for_each(|mov| {
+                self.game.position.legal_moves().iter().for_each(|mov| {
                     if _move::get_init(*mov) == sqr {
                         self.selection_target_sqrs.push(_move::get_target(*mov));
                     }
@@ -188,7 +191,7 @@ pub fn update(state: &mut AppState, msg: Message) {
                 if selected_sqr == sqr { //unselect
                     state.selected_square = None;
                 } else { //move from selected_sqr to sqr
-                    match state.game.try_make_move(selected_sqr, sqr) {
+                    match state.game.position.try_make_move(selected_sqr, sqr, &state.game.move_gen) {
                         Ok(mov) => {
                             state.selected_square = None;
                         },
@@ -200,10 +203,10 @@ pub fn update(state: &mut AppState, msg: Message) {
             },
             None => {
                 let mover_occupied: u64;
-                if state.game.board.turn == WHITE {
-                    mover_occupied = state.game.board.white_occupation;
+                if state.game.position.board.turn == WHITE {
+                    mover_occupied = state.game.position.board.white_occupation;
                 } else {
-                    mover_occupied = state.game.board.black_occupation;
+                    mover_occupied = state.game.position.board.black_occupation;
                 }
                 if bitboard::contains_square(mover_occupied, sqr) {
                     state.selected_square = Some(sqr);
@@ -217,7 +220,7 @@ pub fn update(state: &mut AppState, msg: Message) {
             key: keyboard::Key::Character(c), ..
         }) => {
             if c.len() == 1 && c.contains('r') {
-                state.game.try_unmake_move();
+                state.game.position.try_unmake_move();
             }
         }
         _ => {}
@@ -230,10 +233,10 @@ pub fn update(state: &mut AppState, msg: Message) {
         state.user_side = state.input_side;
       }
       Message::NewFenPosPressed => {
-        match Game::game_with(&state.fen_input.trim()) {
-            Ok(g) => {
+        match Position::position_with(&state.fen_input.trim(), &state.game.move_gen) {
+            Ok(p) => {
                 state.reset_state();
-                state.game = g;
+                state.game.position = p;
                 state.user_side = state.input_side;
             }
             Err(e) => {

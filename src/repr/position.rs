@@ -1,6 +1,6 @@
 use std::fmt::Error;
 
-use crate::{repr::{_move::NULL_MOVE, board::Board, move_gen::{AVG_BRANCH_FAC, MoveGen}, types::{BLACK, WHITE}}, search::search::SearchData};
+use crate::repr::{_move::NULL_MOVE, board::Board, move_gen::{AVG_BRANCH_FAC, MoveGen}, types::{B_PAWN, BLACK, W_PAWN, WHITE}};
 use crate::repr::*;
 
 use crate::utils::fen_tool::fen_to_board;
@@ -9,9 +9,8 @@ pub const MOVE_ARR_SIZE: usize = AVG_BRANCH_FAC * 40; //supports 40 ply deep sea
 
 ///pinned_info_stack tuple order:
 ///0: nof_checkers, 1: check_block_sqrs, 2: mover_pinned, 3: mover_pinned_restrictions, 4: meta_attacks
-pub struct Game {
+pub struct Position {
     pub board: Board,
-    pub move_gen: MoveGen,
     pub move_arr: [u32 ; AVG_BRANCH_FAC * 40],
     pub move_arr_idx: Vec<usize>, //move_arr end idx by ply, so e.g. 0..move_arr_idx[0] is first ply idx range (idx is exclusive)
     ep_stack: Vec<Option<u32>>,
@@ -21,10 +20,11 @@ pub struct Game {
     pub last_target: u32
 }
 
-impl Default for Game {
-    fn default() -> Game {
-        let move_gen: MoveGen = MoveGen::init();
-        let board: Board = Board::default_board(&move_gen);
+
+impl Position {
+    
+    pub fn default(move_gen: &MoveGen) -> Position {
+        let board: Board = Board::default_board(move_gen);
         let turn: u32 = board.turn;
         let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
         let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0, false, false);
@@ -36,17 +36,13 @@ impl Default for Game {
         let played_moves_stack: Vec<u32> = Vec::new();
         let last_target: u32 = NULL_MOVE;
         return Self {
-            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx, last_target
+            board, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx, last_target
         }
     }
-}
 
-impl Game {
-    
-    pub fn game_with(fen: &str) -> Result<Self, &str> {
-        let move_gen: MoveGen = MoveGen::init();
+    pub fn position_with(fen: &str, move_gen: &MoveGen) -> Result<Self, &'static str> {
         let board: Board;
-        match fen_to_board(fen.to_string(), &move_gen) {
+        match fen_to_board(fen.to_string(), move_gen) {
             Ok(b) => board = b,
             Err(_) => return Err("Fen error")
         }
@@ -70,7 +66,7 @@ impl Game {
         let played_moves_stack: Vec<u32> = Vec::new();
         let last_target: u32 = NULL_MOVE;
         return Ok(Self {
-            board, move_gen, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx, last_target
+            board, ep_stack, pinned_info_stack, opponent_attacked_stack, played_moves_stack, move_arr, move_arr_idx, last_target
         })
     }
 
@@ -93,15 +89,19 @@ impl Game {
         return (self.move_arr_idx[self.move_arr_idx.len() - 2], self.move_arr_idx[self.move_arr_idx.len() - 1]);
     }
 
+    pub fn is_late_game(&self) -> bool {
+        return self.board.major_minor_count <= 7;
+    }
+
     ///Public api ease of use and safety method, not called in search
-    pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32) -> Result<u32, Error> {
+    pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32, move_gen: &MoveGen) -> Result<u32, Error> {
         let mov: Option<u32> = self.legal_moves().iter().copied().find(|mov| 
             _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr
         );
         match mov {
             Some(m) => {
                 //println!("Successfully moved: {}", _move::to_string(m));
-                self.make_move(m, false, false);
+                self.make_move(m, false, false, move_gen);
                 return Ok(m);
             },
             None => {
@@ -127,7 +127,7 @@ impl Game {
     }
 
     ///Board state is modified and legal_moves is updated, assumes mov is legal
-    pub fn make_move(&mut self, mov: u32, in_search: bool, in_perft_debug: bool) {
+    pub fn make_move(&mut self, mov: u32, in_search: bool, in_perft_debug: bool, move_gen: &MoveGen) {
         let is_white_turn: bool = self.board.turn == WHITE;
         let is_promotion: bool = _move::is_promotion(mov);
         let from: u32 = _move::get_init(mov);
@@ -149,6 +149,9 @@ impl Game {
             let eaten_piece: usize = _move::eaten_piece(mov).expect("Was eating but no eating piece found") as usize;
             bitboard::clear_square(&mut self.board.pieces[eaten_piece], to);
             bitboard::clear_square(opponent_occupation, to);
+            if eaten_piece as u32 != W_PAWN && eaten_piece as u32 != B_PAWN {
+                self.board.major_minor_count -= 1;
+            }
         }
         bitboard::clear_square(&mut self.board.pieces[moved_piece], from);
         bitboard::clear_square(own_occupation, from);
@@ -204,10 +207,10 @@ impl Game {
         //1. update current mover attacked, also sets nof_checkers
         //also push opponent attacked to stack
         if is_white_turn {
-            self.board.white_attacks = self.move_gen.compute_attacked(&mut self.board, WHITE);
+            self.board.white_attacks = move_gen.compute_attacked(&mut self.board, WHITE);
             self.opponent_attacked_stack.push(self.board.white_attacks);
         } else {
-            self.board.black_attacks = self.move_gen.compute_attacked(&mut self.board, BLACK);
+            self.board.black_attacks = move_gen.compute_attacked(&mut self.board, BLACK);
             self.opponent_attacked_stack.push(self.board.black_attacks);
         }
         
@@ -216,7 +219,7 @@ impl Game {
         
         //2. compute pinned
         //in board updates check_block_sqrs, moved_pinned, mover_pinned_restrictions and meta_attacks
-        self.move_gen.compute_pinned(&mut self.board, turn);
+        move_gen.compute_pinned(&mut self.board, turn);
         //3. push current pinned info to stack now after updating
         let mover_pinned: u64;
         let mover_pinned_restrictions: [u64 ; 64];
@@ -237,7 +240,7 @@ impl Game {
             self.move_arr_idx.clear();
             self.move_arr_idx.push(0); // 0 ply ends at 0 (exclusive)
         }
-        let generated: usize = self.move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx, in_search, in_perft_debug);
+        let generated: usize = move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx, in_search, in_perft_debug);
         self.move_arr_idx.push(move_arr_s_idx + generated);
         //5. push to played moves stack
         self.played_moves_stack.push(mov);
@@ -250,7 +253,7 @@ impl Game {
         return;
     }
 
-    /// Unmakes move, resulting that the state of board and game is equivalent as to before moving.
+    /// Unmakes move, resulting that the state of position is equivalent as to before moving.
     /// assumes mov was last made
     pub fn unmake_move(&mut self, mov: u32) {
         let unmaking_white_move: bool = !(self.board.turn == WHITE);
@@ -270,8 +273,12 @@ impl Game {
         }
 
         if eaten_piece.is_some() && !is_en_passant { //return eaten piece, en passant has own returning logic
-            bitboard::set_square(&mut self.board.pieces[eaten_piece.expect("Wasn't eating although checked") as usize], to);
+            let p: u32 = eaten_piece.expect("Wasn't eating although checked");
+            bitboard::set_square(&mut self.board.pieces[p as usize], to);
             bitboard::set_square(opponent_occupation, to);
+            if p != W_PAWN && p != B_PAWN {
+                self.board.major_minor_count += 1;
+            }
         }
         //moved piece updates
         bitboard::clear_square(own_occupation, to);
@@ -355,3 +362,20 @@ impl Game {
     }
 
 }
+
+impl Clone for Position {
+    fn clone(&self) -> Self {
+        
+        return Self {
+            board: self.board.clone(),
+            move_arr: self.move_arr.clone(),
+            move_arr_idx: self.move_arr_idx.clone(),
+            ep_stack: self.ep_stack.clone(),
+            pinned_info_stack: self.pinned_info_stack.clone(),
+            opponent_attacked_stack: self.opponent_attacked_stack.clone(),
+            played_moves_stack: self.played_moves_stack.clone(),
+            last_target: self.last_target.clone()
+        }
+    }
+}
+
