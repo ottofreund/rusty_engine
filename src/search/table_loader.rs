@@ -1,5 +1,7 @@
+use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
+use std::num::ParseIntError;
 
 
 pub fn read_table_value_file(file_path: &str) -> io::Result<Vec<i32>> {
@@ -12,9 +14,14 @@ pub fn read_table_value_file(file_path: &str) -> io::Result<Vec<i32>> {
         let line = line?;
         let value_row  = line
             .split(',')
+            .filter(|el| !el.trim().is_empty())
             .map(|s| s.trim().parse::<i32>())
             .collect::<Result<Vec<_>, _>>()  // collect Results
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        if value_row.len() != 8 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "Row didn't have 8 elements."));
+        }
 
         value_row.iter().for_each(|v| {
             res.push(*v);
