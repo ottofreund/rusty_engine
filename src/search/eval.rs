@@ -1,19 +1,29 @@
-use crate::repr::{bitboard, types::*};
+use std::io;
+
+use crate::{repr::{bitboard, types::*}, search::table_loader::read_table_value_file};
 
 pub const MATE_EVAL: i32 = 1_000_000;
 pub const PRUNE_EVAL: i32 = 2_000_000;
+const FILE_NAMES: [&str ; 8] = [
+    "pawn.txt", "knight.txt", "bishop.txt", "rook.txt", "queen.txt", "king.txt", "pawn_e.txt", "king_e.txt"
+];
 
+//pst: piece square table
 pub struct Evaluator {
-    piece_square_tables: [Vec<i32> ; 8] // [6] == pawn late game, [7] == king late game
+    pst: [Vec<i32> ; 8] // [6] == pawn late game, [7] == king late game
 }
 
-/* impl Default for Evaluator {
+impl Default for Evaluator {
     fn default() -> Self {
-        Self {
-            pi
+        let pst: [Vec<i32>; 8] = std::array::from_fn(|i| {
+            read_table_value_file(FILE_NAMES[i])
+                .expect("Failed to read piece value tables!")
+        });
+        return Self {
+            pst
         }
     }
-} */
+}
 
 impl Evaluator {
     /// simple eval based on piece square value tables
@@ -37,7 +47,7 @@ impl Evaluator {
                 if mover_is_white {
                     v += v_table[bitboard::pop_lsb(&mut p_bb) as usize];
                 } else {
-                    v += v_table[bitboard::pop_lsb(&mut p_bb) as usize];
+                    v += v_table[63 - bitboard::pop_lsb(&mut p_bb) as usize];
                 }
             }
         }
@@ -53,20 +63,15 @@ impl Evaluator {
         if is_late_game  {
             let p_u32: u32 = piece as u32;
             if p_u32 == W_PAWN || p_u32 == B_PAWN {
-                return &self.piece_square_tables[6];
+                return &self.pst[6];
             } else if p_u32 == W_KING || p_u32 == B_KING {
-                return &self.piece_square_tables[7];
+                return &self.pst[7];
             } else {
-                return &self.piece_square_tables[piece];
+                return &self.pst[piece];
             }
         } else {
-            return &self.piece_square_tables[piece];
+            return &self.pst[piece];
         }
     }
 
-}
-
-
-pub fn eval(pieces: [u64 ; 12], mover: u32) -> i32 {
-    return 1;
 }

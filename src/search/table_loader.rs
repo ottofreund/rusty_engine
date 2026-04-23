@@ -2,8 +2,6 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 
 
-
-
 pub fn read_table_value_file(file_path: &str) -> io::Result<Vec<i32>> {
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
