@@ -13,6 +13,7 @@ use crate::repr::{board::{square_to_string}, types::*};
 //31: mover is white?
 //this file contains utility methods for using them
 
+pub const NULL_MOVE: u32 = u32::MAX;
 //castling moves:
 pub const WHITE_SHORT: u32 = 2483159428; //1 0010100 0000 0 0 1 0000 0 000110 000100
 pub const WHITE_LONG: u32 = 2483290244; //1 0010100 0000 0 1 0 0000 0 000010 000100
@@ -158,6 +159,9 @@ pub fn with_eaten_piece(mov: u32, eaten: u32) -> u32 {
 const PIECE_CHARS: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
 
 pub fn to_string(mov: u32) -> String {
+    if mov == NULL_MOVE {
+        return "NULL_MOVE".to_string();
+    }
     let mut res = String::new();
     let piece: usize = get_moved_piece(mov) as usize;
     res.push_str(PIECE_CHARS[piece]);

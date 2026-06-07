@@ -6,7 +6,7 @@ const VALID_PIECE_CHARS: [char ; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 
 const VALID_MOVER_CHARS: [char ; 2] = ['w', 'b'];
 const VALID_CASTLING_CHARS: [char ; 4] = ['K', 'Q', 'k', 'q'];
 const FILE_CHARS: [char; 8] = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-
+pub const MAJOR_MINOR_PIECES: [char ; 8] = ['N', 'B', 'R', 'Q', 'n', 'b', 'r', 'q'];
 
 pub fn is_valid_fen(fen: &String) -> bool {
     let mut sections = fen.split(' ');
@@ -88,10 +88,11 @@ pub fn is_legal_piece_row(row: &str) -> bool {
     return true;
 }
 
-
-pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: &mut u64, black_occupation: &mut u64) {
+///returns major minor count
+pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: &mut u64, black_occupation: &mut u64) -> u32 {
     let rows = piece_str.split('/');
     let mut sqr_idx: i32 = 56;
+    let mut major_minor_count = 0;
     for row in rows.clone() {
         for c in row.chars() {
             if c.is_alphabetic() {
@@ -105,6 +106,9 @@ pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: 
                     //bitboard::set_square(black_occupation, sqr_idx as u32);
                     *black_occupation |= 1 << sqr_idx;
                 }
+                if MAJOR_MINOR_PIECES.contains(&c) {
+                    major_minor_count += 1;
+                }
                 sqr_idx += 1;
             } else { //empty for c spaces
                 let spaces: u32 = c.to_digit(10).expect("Was valid fen but invalid space count");
@@ -113,7 +117,7 @@ pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: 
         }
         sqr_idx -= 16
     }
-    return;
+    return major_minor_count;
 }
 
 ///Ok(board) with board being filled in valid state board, if fen valid <br>
@@ -127,7 +131,7 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
     let mut black_occupation: u64 = 0;
     let mut sections = fen.split(' ');
     let piece_str: &str = sections.next().expect("Was long enough but iterator ended.");
-    parse_pieces(piece_str, &mut pieces, &mut white_occupation, &mut black_occupation);
+    let major_minor_count: u32 = parse_pieces(piece_str, &mut pieces, &mut white_occupation, &mut black_occupation);
     let turn: u32 = match sections.next().expect("Was valid but sections ran out") {
         "w" => WHITE,
         "b" => BLACK,
@@ -150,7 +154,7 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
         ep_square = Some(file as u32 - 'a' as u32 + 8 * rank); 
     }
 
-    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, move_gen));
+    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, major_minor_count, move_gen));
 }
 
 pub const DEFAULT_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";

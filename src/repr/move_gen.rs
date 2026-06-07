@@ -4,7 +4,7 @@ use crate::repr::board::*;
 use crate::repr::magic_bb_loader::MagicBitboard;
 use crate::repr::types::*;
 use crate::repr::bitboard;
-use crate::repr::game::MOVE_ARR_SIZE;
+use crate::repr::position::MOVE_ARR_SIZE;
 
 pub const KNIGHT_JUMPS: [(i32, i32); 8] = [(1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)]; //in format (dx, dy), used for precomputing attack_bbs
 pub const DIAG_STEPS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, -1), (-1, 1)];
