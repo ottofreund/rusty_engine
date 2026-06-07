@@ -159,6 +159,9 @@ pub fn with_eaten_piece(mov: u32, eaten: u32) -> u32 {
 const PIECE_CHARS: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
 
 pub fn to_string(mov: u32) -> String {
+    if mov == NULL_MOVE {
+        return "NULL_MOVE".to_string();
+    }
     let mut res = String::new();
     let piece: usize = get_moved_piece(mov) as usize;
     res.push_str(PIECE_CHARS[piece]);

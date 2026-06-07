@@ -1,4 +1,4 @@
-use crate::{repr::{move_gen::MoveGen, position::Position}, search::{search::Searcher}};
+use crate::{repr::{move_gen::MoveGen, position::Position}, search::{searcher::Searcher}};
 
 
 

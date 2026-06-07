@@ -14,6 +14,8 @@ pub const B_KING: u32 = 11;
 pub const WHITE: u32 = 0;
 pub const BLACK: u32 = 1;
 
+pub const NOF_PIECE_TYPES: u32 = 6;
+
 pub fn opposite_turn(color: u32) -> u32 {
     return color ^ 1;
 }

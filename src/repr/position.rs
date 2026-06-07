@@ -231,7 +231,7 @@ impl Position {
         self.pinned_info_stack.push(
             (self.board.nof_checkers, self.board.check_block_sqrs, mover_pinned, mover_pinned_restrictions, self.board.meta_attacks)
         );
-        //4. generate legal moves to move_stack
+        //4. generate legal moves to move_arr
         let move_arr_s_idx: usize;
         if in_search {
             move_arr_s_idx = self.move_arr_idx.last().copied().expect("move_arr_idx was empty");

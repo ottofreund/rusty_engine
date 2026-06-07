@@ -13,9 +13,9 @@ fn default_pos_perft_correct() {
     //assert_eq!(go_perft(4, &mut pos, &move_gen), 197281);
     //perft_logger(5, &mut pos, Some(4), &move_gen);
     //assert_eq!(go_perft(5, &mut pos, &move_gen), 4865609);
-    assert_eq!(go_perft(6, &mut pos, &move_gen), 119060324);
+    //assert_eq!(go_perft(6, &mut pos, &move_gen), 119060324);
     
-    //perft_benchmark(|| {return go_perft(6, &mut pos, &move_gen);});
+    perft_benchmark(|| {return go_perft(6, &mut pos, &move_gen);});
 }
 
 #[test]

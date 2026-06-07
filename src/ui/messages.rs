@@ -11,5 +11,6 @@ pub enum Message {
     ErrorHandled,
     InputSideWhitePressed,
     InputSideBlackPressed,
-    Event(iced::Event)
+    Event(iced::Event),
+    SearchStart
 }

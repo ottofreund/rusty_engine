@@ -122,6 +122,7 @@ impl AppState {
         let game_dd = Item::with_menu(
         text("Game"),
         Menu::new([
+            Item::new(button("Search").on_press(Message::SearchStart)),
             Item::new(button("Starting Position").on_press(Message::NewDefaultPosPressed)),
             Item::new(button("From FEN").on_press(Message::NewFenPosPressed)),
             Item::new(TextInput::new("FEN string", &self.fen_input)
@@ -252,6 +253,11 @@ pub fn update(state: &mut AppState, msg: Message) {
       }
       Message::ErrorHandled => {
         state.show_error = false;
+      }
+      Message::SearchStart => {
+        println!("Search start pressed");
+        state.game.searcher.start_search(&state.game.move_gen);
+        println!("Search finished");
       }
       _ => {
         println!("Unrecognized message");
