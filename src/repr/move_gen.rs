@@ -5,6 +5,7 @@ use crate::repr::magic_bb_loader::MagicBitboard;
 use crate::repr::types::*;
 use crate::repr::bitboard;
 use crate::repr::position::MOVE_ARR_SIZE;
+use crate::utils::fen_tool;
 
 pub const KNIGHT_JUMPS: [(i32, i32); 8] = [(1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)]; //in format (dx, dy), used for precomputing attack_bbs
 pub const DIAG_STEPS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, -1), (-1, 1)];
@@ -114,6 +115,9 @@ impl MoveGen {
                     return false; 
                 } //in next section we check if the king's target square is legal (not attacked)
             } else { //shouldn't be > 2
+                println!("breakpoint, cur board is:");
+                println!("{}", board.to_string());
+                println!("and fen is: {}", fen_tool::board_to_fen(board));
                 panic!("Counted 3 or more checkers, which should be impossible.")
             }
             

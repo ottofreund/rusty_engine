@@ -73,7 +73,7 @@ pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: 
     let e: u32;
     let moved_piece: u32;
     //start and end indices of piece based off color. Also moved piece
-    if mover == WHITE { p = 1; e = 5; moved_piece = 0; } else { p = 7; e = 11; moved_piece = 6; }; 
+    if mover == WHITE { p = W_KNIGHT; e = W_KING; moved_piece = W_PAWN; } else { p = B_KNIGHT; e = B_KING; moved_piece = B_PAWN; }; 
     while p < e {
         moves.push(create_promotion(from, to, is_take, p, mover, moved_piece));
         p += 1
@@ -85,8 +85,8 @@ pub fn add_search_promotions(from: u32, to: u32, is_take: bool, mover: u32, move
     let moved_pawn_idx: u32;
     let queen_piece_idx: u32;
     let knight_piece_idx: u32;
-    if mover == WHITE {moved_pawn_idx = 0; queen_piece_idx = 5; knight_piece_idx = 1;} 
-    else {moved_pawn_idx = 6; queen_piece_idx = 11; knight_piece_idx = 7;}
+    if mover == WHITE {moved_pawn_idx = W_PAWN; queen_piece_idx = W_QUEEN; knight_piece_idx = W_KNIGHT;} 
+    else {moved_pawn_idx = B_PAWN; queen_piece_idx = B_QUEEN; knight_piece_idx = B_KNIGHT;}
     moves.push(create_promotion(from, to, is_take, queen_piece_idx, mover, moved_pawn_idx));
     moves.push(create_promotion(from, to, is_take, knight_piece_idx, mover, moved_pawn_idx));
     return;

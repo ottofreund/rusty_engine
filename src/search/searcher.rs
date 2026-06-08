@@ -1,4 +1,5 @@
 use std::{cmp::{Ordering, max}, collections::HashMap};
+use std::time::{Duration, Instant};
 
 use crate::{repr::{_move::{self, *}, move_gen::MoveGen, position::Position, types::{BLACK, NOF_PIECE_TYPES, WHITE}}, search::{eval::{Evaluator, MATE_EVAL, PRUNE_EVAL}, search_config::*, search_data::SearchData}};
 

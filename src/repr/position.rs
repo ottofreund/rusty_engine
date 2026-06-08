@@ -244,10 +244,6 @@ impl Position {
         self.move_arr_idx.push(move_arr_s_idx + generated);
         //5. push to played moves stack
         self.played_moves_stack.push(mov);
-
-        if self.board.white_occupation & self.board.black_occupation > 0 {
-            println!("overlap");
-        }
         //6. last target
         self.last_target = to;
         return;
