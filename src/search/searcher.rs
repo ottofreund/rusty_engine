@@ -129,8 +129,9 @@ impl Searcher {
             pv.fill(NULL_MOVE);
             let eval: i32 = inner(0, i, ALPHA_INIT, BETA_INIT, &mut pv, &prev_pv, pos, &self.evaluator, move_gen, &mut search_data.positions_searched, &mut search_data.ab_cutoffs);
             println!("at depth: {}, eval: {}", i, eval);
+            search_data.cumul_positions_searched += search_data.positions_searched;
             search_data.log_performance();
-            search_data.reset_performance_data();
+            search_data.reset_temp_performance_data();
         }
         
         search_data.pv_move.fill(NULL_MOVE);

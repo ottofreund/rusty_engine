@@ -1,8 +1,6 @@
 use rusty_engine::repr::position::Position;
 use rusty_engine::repr::move_gen::MoveGen;
-use rusty_engine::repr::*;
 use rusty_engine::utils::fen_tool::{DEFAULT_FEN};
-use std::time::{Duration, Instant};
 
 #[test]
 fn default_pos_perft_correct() {
@@ -13,9 +11,7 @@ fn default_pos_perft_correct() {
     //assert_eq!(go_perft(4, &mut pos, &move_gen), 197281);
     //perft_logger(5, &mut pos, Some(4), &move_gen);
     //assert_eq!(go_perft(5, &mut pos, &move_gen), 4865609);
-    //assert_eq!(go_perft(6, &mut pos, &move_gen), 119060324);
-    
-    perft_benchmark(|| {return go_perft(6, &mut pos, &move_gen);});
+    assert_eq!(go_perft(6, &mut pos, &move_gen), 119060324);
 }
 
 #[test]
@@ -29,7 +25,6 @@ fn edge_case_perft_2() { //"kiwipete" position
     //assert_eq!(go_perft(3, &mut pos, &move_gen), 97862);
     //assert_eq!(go_perft(4, &mut pos, &move_gen), 4085603);
     assert_eq!(go_perft(5, &mut pos, &move_gen), 193690690);
-    //perft_benchmark(|| {return go_perft(4, &mut pos, &move_gen);});
 }
 
 #[test]
@@ -43,7 +38,6 @@ fn edge_case_perft_3() {
     //assert_eq!(go_perft(5, &mut pos, &move_gen), 674624);
     //assert_eq!(go_perft(6, &mut pos, &move_gen), 11030083);
     assert_eq!(go_perft(7, &mut pos, &move_gen), 178633661);
-    //perft_benchmark(|| {return go_perft(7, &mut pos, &move_gen);});
 }
 
 #[test]
@@ -102,7 +96,7 @@ fn go_perft(target_depth: usize, pos: &mut Position, move_gen: &MoveGen) -> u32 
     return inner(target_depth, pos, move_gen) as u32;
 }
 
-
+/* 
 ///Helper for debugging to show distribution of moves one move deeper
 fn perft_logger(depth: u32, pos: &mut Position, log_depth: Option<u32>, move_gen: &MoveGen) -> u32 {
     let found: u32;
@@ -130,10 +124,4 @@ fn perft_logger(depth: u32, pos: &mut Position, log_depth: Option<u32>, move_gen
     return found;
 }
 
-fn perft_benchmark<F: FnOnce() -> u32>(f: F) {
-    let start: Instant = Instant::now();
-    let perft: u32 = f();
-    let time_took: Duration = start.elapsed();
-    println!("perft took {} ms", time_took.as_millis());
-    println!("cranked {:.2} million moves/second", ((perft as f32 / 1e6) as f32) / (time_took.as_secs_f32()))
-}
+ */

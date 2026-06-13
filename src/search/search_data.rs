@@ -13,8 +13,9 @@ pub struct SearchData {
     //this however is very unlikely to actually happen on board, (more in search, though could cause engine to seek improper three-fold in a losing position)
     pub repetition_map: HashMap<u64, u32>, 
     pub fifty_move_counter: u32,
-    pub positions_searched: u64,
-    pub ab_cutoffs: u64
+    pub positions_searched: u64, //per search
+    pub ab_cutoffs: u64,
+    pub cumul_positions_searched: u64
 }
 
 impl SearchData {
@@ -22,9 +23,13 @@ impl SearchData {
         println!("positions searched: {}, ab cutoffs: {}", self.positions_searched, self.ab_cutoffs);
     }
 
-    pub fn reset_performance_data(&mut self) {
+    pub fn reset_temp_performance_data(&mut self) {
         self.positions_searched = 0;
         self.ab_cutoffs = 0;
+    }
+
+    pub fn reset_cumul_performance_data(&mut self) {
+        self.cumul_positions_searched = 0;
     }
 
 }
@@ -37,7 +42,8 @@ impl Default for SearchData {
             repetition_map: HashMap::<u64, u32>::new(),
             fifty_move_counter: 0,
             positions_searched: 0,
-            ab_cutoffs: 0
+            ab_cutoffs: 0,
+            cumul_positions_searched: 0
         };
     }
 }
