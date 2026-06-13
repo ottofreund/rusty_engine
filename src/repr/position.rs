@@ -94,6 +94,7 @@ impl Position {
     }
 
     ///Public api ease of use and safety method, not called in search
+    ///Returns Success(made_move) if successful
     pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32, move_gen: &MoveGen) -> Result<u32, Error> {
         let mov: Option<u32> = self.legal_moves().iter().copied().find(|mov| 
             _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr

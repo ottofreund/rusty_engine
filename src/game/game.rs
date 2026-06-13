@@ -8,6 +8,16 @@ pub struct Game {
     pub move_gen: MoveGen
 }
 
+impl Game {
+
+    ///also imports to searcher to stay in sync
+    pub fn import_position(&mut self, position: Position) {
+        self.searcher.import_position(&position);
+        self.position = position;
+    }
+    
+}
+
 impl Default for Game {
     fn default() -> Self {
         let move_gen: MoveGen = MoveGen::init();
