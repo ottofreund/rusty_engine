@@ -15,6 +15,9 @@ use crate::repr::position::Position;
 use crate::repr::{_move, bitboard, types::*};
 use crate::game::game::Game;
 
+use std::time::{Duration, Instant};
+
+
 pub fn run_fr() -> iced::Result {
     iced::application(|| AppState::default(), update, view)
         .subscription(|_| AppState::subscription())
@@ -31,7 +34,6 @@ pub struct AppState {
     selection_target_sqrs: Vec<u32>,
     fen_input: String,
     show_error: bool,
-    error_str: String,
     input_side: u32,
     user_side: u32
 }
@@ -193,10 +195,11 @@ pub fn update(state: &mut AppState, msg: Message) {
                     state.selected_square = None;
                 } else { //move from selected_sqr to sqr
                     match state.game.position.try_make_move(selected_sqr, sqr, &state.game.move_gen) {
-                        Ok(mov) => {
+                        Ok(m) => {
                             state.selected_square = None;
+                            state.game.searcher.sync_new_move(m, &state.game.move_gen);
                         },
-                        Err(e) => {
+                        Err(_) => {
                             state.selected_square = None;
                         }
                     }
@@ -221,7 +224,7 @@ pub fn update(state: &mut AppState, msg: Message) {
             key: keyboard::Key::Character(c), ..
         }) => {
             if c.len() == 1 && c.contains('r') {
-                state.game.position.try_unmake_move();
+                state.game.position.try_unmake_move().unwrap();
             }
         }
         _ => {}
@@ -230,17 +233,18 @@ pub fn update(state: &mut AppState, msg: Message) {
         state.fen_input = new_str;
       }
       Message::NewDefaultPosPressed => {
-        state.game = Game::default();
+        state.reset_state();
         state.user_side = state.input_side;
+        state.game.import_position(Position::default(&state.game.move_gen));
       }
       Message::NewFenPosPressed => {
         match Position::position_with(&state.fen_input.trim(), &state.game.move_gen) {
             Ok(p) => {
                 state.reset_state();
-                state.game.position = p;
                 state.user_side = state.input_side;
+                state.game.import_position(p);
             }
-            Err(e) => {
+            Err(_) => {
                 state.show_error = true;
             }
         }
@@ -256,8 +260,10 @@ pub fn update(state: &mut AppState, msg: Message) {
       }
       Message::SearchStart => {
         println!("Search start pressed");
+        let start: Instant = Instant::now();
         state.game.searcher.start_search(&state.game.move_gen);
-        println!("Search finished");
+        let time_took: Duration = start.elapsed();
+        println!("Search finished in {} ms", time_took.as_millis());
       }
       _ => {
         println!("Unrecognized message");

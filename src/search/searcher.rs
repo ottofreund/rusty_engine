@@ -1,12 +1,13 @@
-use std::{cmp::{Ordering, max}, collections::HashMap};
+use std::{cmp::{max}};
 
-use crate::{repr::{_move::{self, *}, move_gen::MoveGen, position::Position, types::{BLACK, NOF_PIECE_TYPES, WHITE}}, search::{eval::{Evaluator, MATE_EVAL, PRUNE_EVAL}, search_config::*, search_data::SearchData}};
+use crate::{repr::{_move::{self, *}, move_gen::MoveGen, position::Position, types::{NOF_PIECE_TYPES}}, search::{eval::{Evaluator, MATE_EVAL}, search_config::*, search_data::SearchData}};
 
 
 pub const MAX_SEARCH_DEPTH: usize = 50;
 const THREAD_COUNT: usize = 4;
 const ALPHA_INIT: i32 = -1_000_000_000;
 const BETA_INIT: i32 = 1_000_000_000;
+const EVAL_INIT: i32 = -1_000_000_000;
 
 const PROMOTION_SCORE: i32 = 1_000_000;
 const LAST_TARGET_SCORE: i32 = 10_000;
@@ -25,6 +26,21 @@ pub struct Searcher {
 //minimax with alpha beta pruning, ran by iterative deepening
 //search heuristics in ordering of moves
 impl Searcher {
+
+    pub fn import_position(&mut self, pos: &Position) {
+        for i in 0..THREAD_COUNT {
+            self.positions[i] = (*pos).clone();
+        }
+        self.search_data = std::array::from_fn(|_| {
+            return SearchData::default();
+        });
+    }
+
+    pub fn sync_new_move(&mut self, mov: u32, move_gen: &MoveGen) {
+        for i in 0..THREAD_COUNT {
+            self.positions[i].make_move(mov, false, false, move_gen);
+        }
+    }
 
     pub fn from(pos: &Position) -> Searcher {
         let positions: [ Position ; THREAD_COUNT ] = std::array::from_fn(|_| {
@@ -55,7 +71,7 @@ impl Searcher {
     fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen) {
         match self.search_config.search_mode {
             SearchMode::StaticDepth(d) => {
-                self.search_static_d(idx, move_gen);
+                self.search_static_d(d, idx, move_gen);
             },
             SearchMode::StaticTime(t) => {
                 return;
@@ -67,7 +83,7 @@ impl Searcher {
 
 
     ///alpha-beta pruned negamax algorithm with iterative deepening
-    fn search_static_d(&mut self, idx: usize, move_gen: &MoveGen) {
+    fn search_static_d(&mut self, target_d: usize, idx: usize, move_gen: &MoveGen) {
 
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
@@ -85,7 +101,7 @@ impl Searcher {
                 return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
             }
             
-            let mut eval: i32 = i32::MIN;            
+            let mut eval: i32 = EVAL_INIT;            
             
             let mut new_alpha: i32 = alpha;
             for i in s..e {
@@ -113,23 +129,15 @@ impl Searcher {
             return eval;
         }
         //iterative deepening:
-        let target_d: usize;
-        match self.search_config.search_mode {
-            SearchMode::StaticDepth(d) => {
-                target_d = d;
-            },
-            SearchMode::StaticTime(_) => {
-                panic!("Called search_static_d with static time config");
-            }
-        }
         let mut pv: [u32 ; MAX_SEARCH_DEPTH + 1] = [ NULL_MOVE ; MAX_SEARCH_DEPTH + 1 ];
         for i in 1..=target_d {
             let prev_pv: [u32 ; MAX_SEARCH_DEPTH + 1] = pv;
             pv.fill(NULL_MOVE);
             let eval: i32 = inner(0, i, ALPHA_INIT, BETA_INIT, &mut pv, &prev_pv, pos, &self.evaluator, move_gen, &mut search_data.positions_searched, &mut search_data.ab_cutoffs);
             println!("at depth: {}, eval: {}", i, eval);
+            search_data.cumul_positions_searched += search_data.positions_searched;
             search_data.log_performance();
-            search_data.reset_performance_data();
+            search_data.reset_temp_performance_data();
         }
         
         search_data.pv_move.fill(NULL_MOVE);

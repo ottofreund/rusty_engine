@@ -4,3 +4,7 @@
 - Quiescence search
 - Transposition table
 - Three-fold-repetition detection
+
+
+Reminders:
+- Maybe clear out pv in search_data objects when starting new search?

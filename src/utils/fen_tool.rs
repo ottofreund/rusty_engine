@@ -150,11 +150,83 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
     } else {
         let mut char_iter = ep_string.chars();
         let file: char = char_iter.next().expect("ep wasn't valid");
-        let rank: u32 = char_iter.next().expect("ep wasn't valid") as u32 - 1;
+        let rank: u32 = char_iter.next().expect("ep wasn't valid") as u32 - b'1' as u32;
         ep_square = Some(file as u32 - 'a' as u32 + 8 * rank); 
     }
 
     return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, major_minor_count, move_gen));
+}
+
+pub fn board_to_fen(board: &Board) -> String {
+    let mut fen = String::with_capacity(64);
+
+    for rank in (0usize..8).rev() {
+        let mut empty_count = 0;
+
+        for file in 0usize..8 {
+            let square = rank * 8 + file;
+
+            let piece = board
+                .pieces
+                .iter()
+                .position(|bitboard| (*bitboard >> square) & 1 != 0)
+                .map(|index| VALID_PIECE_CHARS[index]);
+
+            match piece {
+                Some(piece_char) => {
+                    if empty_count != 0 {
+                        fen.push(char::from_digit(empty_count, 10).unwrap());
+                        empty_count = 0;
+                    }
+                    fen.push(piece_char);
+                }
+                None => empty_count += 1,
+            }
+        }
+
+        if empty_count != 0 {
+            fen.push(char::from_digit(empty_count, 10).unwrap());
+        }
+
+        if rank != 0 {
+            fen.push('/');
+        }
+    }
+
+    fen.push(' ');
+    fen.push(if board.turn == WHITE { 'w' } else { 'b' });
+    fen.push(' ');
+
+    let castling_start = fen.len();
+
+    if board.ws() {
+        fen.push('K');
+    }
+    if board.wl() {
+        fen.push('Q');
+    }
+    if board.bs() {
+        fen.push('k');
+    }
+    if board.bl() {
+        fen.push('q');
+    }
+
+    if fen.len() == castling_start {
+        fen.push('-');
+    }
+
+    fen.push(' ');
+
+    match board.ep_square {
+        Some(square) => {
+            fen.push(char::from(b'a' + (square % 8) as u8));
+            fen.push(char::from(b'1' + (square / 8) as u8));
+        }
+        None => fen.push('-'),
+    }
+
+    fen
 }
 
 pub const DEFAULT_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";

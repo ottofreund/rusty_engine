@@ -223,9 +223,39 @@ impl Clone for Board {
 }
 
 
-/* impl std::fmt::Display for Board {
+impl std::fmt::Display for Board {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const PIECE_CHARS: [char; 12] = [
+            'P', 'N', 'B', 'R', 'Q', 'K',
+            'p', 'n', 'b', 'r', 'q', 'k',
+        ];
 
-} */
+        writeln!(f, "    a b c d e f g h")?;
+        writeln!(f, "  +-----------------+")?;
+
+        for rank in (0..8).rev() {
+            write!(f, "{} | ", rank + 1)?;
+
+            for file in 0..8 {
+                let square = rank * 8 + file;
+                let piece = self.pieces
+                    .iter()
+                    .position(|bitboard| bitboard & (1u64 << square) != 0)
+                    .map_or('.', |piece_idx| PIECE_CHARS[piece_idx]);
+
+                write!(f, "{piece}")?;
+                if file < 7 {
+                    write!(f, " ")?;
+                }
+            }
+
+            writeln!(f, " | {}", rank + 1)?;
+        }
+
+        writeln!(f, "  +-----------------+")?;
+        write!(f, "    a b c d e f g h")
+    }
+}
 
 pub const FILE_CHARS: [&str; 8] = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
