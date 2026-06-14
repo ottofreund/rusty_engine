@@ -20,3 +20,32 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+    - name: Benchmark search
+      shell: bash
+      run: |
+        set -o pipefail
+
+        cargo test --test search_benchmark -- --ignored --show-output 2>&1 | tee benchmark-search.txt
+
+        {
+          echo "## Search benchmark"
+          echo
+          echo '```text'
+          cat benchmark-search.txt
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Benchmark move generation
+      shell: bash
+      run: |
+        set -o pipefail
+
+        cargo test --test move_gen_benchmark -- --ignored --show-output 2>&1 | tee benchmark-move-generation.txt
+
+        {
+          echo "## Move generation benchmark"
+          echo
+          echo '```text'
+          cat benchmark-move-generation.txt
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
