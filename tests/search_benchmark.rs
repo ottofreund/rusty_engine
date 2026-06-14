@@ -5,7 +5,7 @@ const DEPTH: usize = 8;
 
 #[test]
 #[ignore = "benchmark"]
-fn search_benchmarks() {
+fn search_benchmark() {
     let mut total_positions: u64 = 0;
     let mut total_time: u64 = 0;
     //default pos

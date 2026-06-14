@@ -7,6 +7,7 @@ pub const MAX_SEARCH_DEPTH: usize = 50;
 const THREAD_COUNT: usize = 4;
 const ALPHA_INIT: i32 = -1_000_000_000;
 const BETA_INIT: i32 = 1_000_000_000;
+const EVAL_INIT: i32 = -1_000_000_000;
 
 const PROMOTION_SCORE: i32 = 1_000_000;
 const LAST_TARGET_SCORE: i32 = 10_000;
@@ -100,7 +101,7 @@ impl Searcher {
                 return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
             }
             
-            let mut eval: i32 = i32::MIN;            
+            let mut eval: i32 = EVAL_INIT;            
             
             let mut new_alpha: i32 = alpha;
             for i in s..e {
