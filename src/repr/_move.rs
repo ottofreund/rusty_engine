@@ -94,52 +94,64 @@ pub fn add_search_promotions(from: u32, to: u32, is_take: bool, mover: u32, move
 
 //decoding methods
 /// Get square moved from / init square
+#[inline]
 pub fn get_init(mov: u32) -> u32  {
     return mov & 0x3F;
 }
 
 ///Get square moved to / target square 
+#[inline]
 pub fn get_target(mov: u32) -> u32  {
     return (mov & 0xFC0) >> 6;
 }
 
 ///Get piece type idx
+#[inline]
 pub fn get_moved_piece(mov: u32) -> u32 {
     return (mov >> 26) & 0xF;
 }
 
+#[inline]
 pub fn get_promoted_piece(mov: u32) -> u32 {
     return (mov >> 22) & 0xF;
 }
 
+#[inline]
 pub fn is_white_move(mov: u32) -> bool {
     return (mov & 2147483648) > 0; //msb toggled?
 }
 
+#[inline]
 pub fn is_short_castle(mov: u32) -> bool {
     return mov == WHITE_SHORT || mov == BLACK_SHORT;
 }
 
+#[inline]
 pub fn is_long_castle(mov: u32) -> bool {
     return mov == WHITE_LONG || mov == BLACK_LONG;
 }
 
+#[inline]
 pub fn is_castle(mov: u32) -> bool {
     return is_short_castle(mov) || is_long_castle(mov);
 }
 
+#[inline]
 pub fn is_eating(mov: u32) -> bool {
     return (mov & 4096) > 0;
 }
 
+#[inline]
 pub fn is_promotion(mov: u32) -> bool {
     return (mov & 2097152) > 0;
 }
 
+#[inline]
 pub fn is_en_passant(mov: u32) -> bool {
     return (mov & 1073741824) > 0; //2^30
 }
 
+#[inline]
 pub fn is_double_push(mov: u32) -> bool {
     return (mov & 8192) > 0
 }
@@ -154,6 +166,14 @@ pub fn eaten_piece(mov: u32) -> Option<u32> {
 
 pub fn with_eaten_piece(mov: u32, eaten: u32) -> u32 {
     return mov | (eaten << 14);
+}
+
+pub fn breaks_fifty_move(mov: u32) -> bool {
+    return is_eating(mov) || (get_moved_piece(mov) % 6) == W_PAWN;
+}
+
+pub fn is_unrepeatable(mov: u32) -> bool {
+    return is_eating(mov) || (get_moved_piece(mov) % 6) == W_PAWN || is_castle(mov);
 }
 
 const PIECE_CHARS: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];

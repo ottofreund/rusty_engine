@@ -1,6 +1,7 @@
 use crate::repr::move_gen::MoveGen;
 use crate::repr::board::Board;
 use crate::repr::types::{BLACK, WHITE};
+use crate::utils::zobrist::Zobrist;
 
 const VALID_PIECE_CHARS: [char ; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
 const VALID_MOVER_CHARS: [char ; 2] = ['w', 'b'];
@@ -122,7 +123,7 @@ pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: 
 
 ///Ok(board) with board being filled in valid state board, if fen valid <br>
 ///Else Err(FenError)
-pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
+pub fn fen_to_board(fen: String, move_gen: &MoveGen, zobrist: &Zobrist) -> Result<Board, &'static str> {
     if !is_valid_fen(&fen) {
         return Err("Fen error");
     }
@@ -154,7 +155,7 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen) -> Result<Board, &str> {
         ep_square = Some(file as u32 - 'a' as u32 + 8 * rank); 
     }
 
-    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, major_minor_count, move_gen));
+    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, major_minor_count, move_gen, zobrist));
 }
 
 pub fn board_to_fen(board: &Board) -> String {

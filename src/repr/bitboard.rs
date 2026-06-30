@@ -8,6 +8,7 @@ pub fn pop_lsb(bb: &mut u64) -> u32 {
     return trailing;
 }
 ///returns new bb with toggled off lsb for passed bb
+#[inline]
 pub fn with_pop_lsb(bb: u64) -> u64 {
     return bb & (bb - 1); 
 }
@@ -16,10 +17,12 @@ pub fn set_square(bb: &mut u64, sqr: u32) {
     *bb |= 1u64 << sqr;
 }
 ///Return new bitboard with set bit at sqr
+#[inline]
 pub fn with_set_square(bb: u64, sqr: u32) -> u64 {
     return bb | (1u64 << sqr);
 }
 ///Return new bitboard with cleared bit at sqr
+#[inline]
 pub fn with_clear_square(bb: u64, sqr: u32) -> u64 {
     return bb & !(1u64 << sqr);
 }
@@ -28,10 +31,12 @@ pub fn clear_square(bb: &mut u64, sqr: u32) {
     *bb &= !(1u64 << sqr);
 }
 ///Does bb have sqr toggled?
+#[inline]
 pub fn contains_square(bb: u64, sqr: u32) -> bool {
     return bb & (1u64 << sqr) != 0;
 }
 ///Remove
+#[inline]
 pub fn diff(bb: u64, bb_to_exclude: u64) -> u64 {
     return bb & !bb_to_exclude;
 }

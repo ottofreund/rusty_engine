@@ -1,6 +1,6 @@
 use std::fmt::Error;
 
-use crate::repr::{_move::NULL_MOVE, board::Board, move_gen::{AVG_BRANCH_FAC, MoveGen}, types::{B_PAWN, BLACK, W_PAWN, WHITE}};
+use crate::{repr::{_move::NULL_MOVE, board::Board, move_gen::{AVG_BRANCH_FAC, MoveGen}, types::{B_PAWN, BLACK, W_PAWN, WHITE}}, utils::zobrist::Zobrist};
 use crate::repr::*;
 
 use crate::utils::fen_tool::fen_to_board;
@@ -23,8 +23,8 @@ pub struct Position {
 
 impl Position {
     
-    pub fn default(move_gen: &MoveGen) -> Position {
-        let board: Board = Board::default_board(move_gen);
+    pub fn default(move_gen: &MoveGen, zobrist: &Zobrist) -> Position {
+        let board: Board = Board::default_board(move_gen, zobrist);
         let turn: u32 = board.turn;
         let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [0 ; MOVE_ARR_SIZE];
         let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0, false, false);
@@ -40,9 +40,9 @@ impl Position {
         }
     }
 
-    pub fn position_with(fen: &str, move_gen: &MoveGen) -> Result<Self, &'static str> {
+    pub fn position_with(fen: &str, move_gen: &MoveGen, zobrist: &Zobrist) -> Result<Self, &'static str> {
         let board: Board;
-        match fen_to_board(fen.to_string(), move_gen) {
+        match fen_to_board(fen.to_string(), move_gen, zobrist) {
             Ok(b) => board = b,
             Err(_) => return Err("Fen error")
         }
@@ -93,42 +93,8 @@ impl Position {
         return self.board.major_minor_count <= 7;
     }
 
-    ///Public api ease of use and safety method, not called in search
-    ///Returns Success(made_move) if successful
-    pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32, move_gen: &MoveGen) -> Result<u32, Error> {
-        let mov: Option<u32> = self.legal_moves().iter().copied().find(|mov| 
-            _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr
-        );
-        match mov {
-            Some(m) => {
-                //println!("Successfully moved: {}", _move::to_string(m));
-                self.make_move(m, false, false, move_gen);
-                return Ok(m);
-            },
-            None => {
-                return Err(Error::default())
-            }
-        }
-    }
-
-    ///Public api ease of use and safety method
-    pub fn try_unmake_move(&mut self) -> Result<u32, Error> {
-        let mov: Option<u32> = self.played_moves_stack.last().copied();
-        match mov {
-            Some(m) => {
-                println!("Successfully unmade: {}", _move::to_string(m));
-                self.unmake_move(m);
-                return Ok(m);
-            },
-            None => {
-                println!("Tried to unmake move with no moves played");
-                return Err(Error::default());
-            }
-        }
-    }
-
     ///Board state is modified and legal_moves is updated, assumes mov is legal
-    pub fn make_move(&mut self, mov: u32, in_search: bool, in_perft_debug: bool, move_gen: &MoveGen) {
+    pub fn make_move(&mut self, mov: u32, in_search: bool, in_perft_debug: bool, move_gen: &MoveGen, zobrist: &Zobrist) {
         let is_white_turn: bool = self.board.turn == WHITE;
         let is_promotion: bool = _move::is_promotion(mov);
         let from: u32 = _move::get_init(mov);
@@ -179,6 +145,7 @@ impl Position {
             bitboard::set_square(own_occupation, rook_to);
         }
 
+        let lost_ep: Option<u32> = self.board.ep_square;
         if is_en_passant { //clear ep_square
             let opponent_pawns: &mut u64;
             let offset: i32;
@@ -199,8 +166,12 @@ impl Position {
         }
         self.update_ep_sqr(); //update to board.ep_square as well
         //println!("Ep square: {:?}", self.board.ep_square);
-
+        let had_ws: bool = self.board.ws(); let had_wl: bool = self.board.wl(); let had_bs: bool = self.board.bs(); let had_bl: bool = self.board.bl();
         self.board.update_castling_rights_make(from, to, is_white_turn, moved_piece as u32);
+        let lost_ws: bool = had_ws && !self.board.ws();
+        let lost_wl: bool = had_wl && !self.board.wl();
+        let lost_bs: bool = had_bs && !self.board.bs();
+        let lost_bl: bool = had_bl && !self.board.bl();
 
         self.board.nof_checkers = 0;
         self.board.check_block_sqrs = 0;
@@ -247,12 +218,14 @@ impl Position {
         self.played_moves_stack.push(mov);
         //6. last target
         self.last_target = to;
+        //7. update zobrist hash
+        self.board.zhash = zobrist.updated_hash_forward(self.board.zhash, mov, lost_ws, lost_wl, lost_bs, lost_bl, lost_ep);
         return;
     }
 
     /// Unmakes move, resulting that the state of position is equivalent as to before moving.
     /// assumes mov was last made
-    pub fn unmake_move(&mut self, mov: u32) {
+    pub fn unmake_move(&mut self, mov: u32, zobrist: &Zobrist) {
         let unmaking_white_move: bool = !(self.board.turn == WHITE);
         let from: u32 = _move::get_init(mov);
         let to: u32 = _move::get_target(mov);
@@ -315,8 +288,14 @@ impl Position {
         //fetch ep_square from stack
         self.ep_stack.pop();
         self.board.ep_square = self.ep_stack.last().copied().expect("ep stack was empty, shouldn't happen");
+        let gained_ep: Option<u32> = self.board.ep_square;
 
+        let had_ws: bool = self.board.ws(); let had_wl: bool = self.board.wl(); let had_bs: bool = self.board.bs(); let had_bl: bool = self.board.bl();
         self.board.update_castling_rights_unmake();
+        let gained_ws: bool = !had_ws && self.board.ws();
+        let gained_wl: bool = !had_wl && self.board.wl();
+        let gained_bs: bool = !had_bs && self.board.bs();
+        let gained_bl: bool = !had_bl && self.board.bl();
         //fetch pin/check info from stack and update to board
         self.pinned_info_stack.pop();
         let pinned_info: (u32, u64, u64, [u64; 64], u64) = self.pinned_info_stack.last().copied().expect("pinned info stack was empty");
@@ -349,6 +328,8 @@ impl Position {
         } else {
             self.last_target = _move::get_target(self.played_moves_stack.last().copied().unwrap());
         }
+        //6. update zobrist hash
+        self.board.zhash = zobrist.updated_hash_backward(self.board.zhash, mov, gained_ws, gained_wl, gained_bs, gained_bl, gained_ep);
 
         return;
     }

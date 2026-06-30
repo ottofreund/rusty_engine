@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 pub fn run_fr() -> iced::Result {
     iced::application(|| AppState::default(), update, view)
-        .subscription(|_| AppState::subscription())
+        //.subscription(|_| AppState::subscription())
         .resizable(false)
         .window_size(Size::new(1300.0, 700.0))
         .run()
@@ -171,7 +171,7 @@ impl AppState {
         return event::listen().map(Message::Event);
     }
 
-    pub fn reset_state(&mut self) {
+    pub fn reset_state_inputs(&mut self) {
         self.fen_input = String::new();
         self.selected_square = None;
         self.selection_target_sqrs = Vec::with_capacity(27);
@@ -194,15 +194,15 @@ pub fn update(state: &mut AppState, msg: Message) {
                 if selected_sqr == sqr { //unselect
                     state.selected_square = None;
                 } else { //move from selected_sqr to sqr
-                    match state.game.position.try_make_move(selected_sqr, sqr, &state.game.move_gen) {
+                    match state.game.try_make_move(selected_sqr, sqr) {
                         Ok(m) => {
-                            state.selected_square = None;
-                            state.game.searcher.sync_new_move(m, &state.game.move_gen);
+                        
                         },
-                        Err(_) => {
-                            state.selected_square = None;
+                        Err(_) => { //tried illegal move
+                            
                         }
                     }
+                    state.reset_state_inputs();
                 }
             },
             None => {
@@ -219,7 +219,7 @@ pub fn update(state: &mut AppState, msg: Message) {
             }
         }
       }
-      Message::Event(event) => match event {
+      /* Message::Event(event) => match event { DEPRECATED
         Event::Keyboard(keyboard::Event::KeyPressed {
             key: keyboard::Key::Character(c), ..
         }) => {
@@ -228,19 +228,19 @@ pub fn update(state: &mut AppState, msg: Message) {
             }
         }
         _ => {}
-      }
+      } */
       Message::FenContentChanged(new_str) => {
         state.fen_input = new_str;
       }
       Message::NewDefaultPosPressed => {
-        state.reset_state();
+        state.reset_state_inputs();
         state.user_side = state.input_side;
-        state.game.import_position(Position::default(&state.game.move_gen));
+        state.game.import_position(Position::default(&state.game.move_gen, &state.game.zobrist));
       }
       Message::NewFenPosPressed => {
-        match Position::position_with(&state.fen_input.trim(), &state.game.move_gen) {
+        match Position::position_with(&state.fen_input.trim(), &state.game.move_gen, &state.game.zobrist) {
             Ok(p) => {
-                state.reset_state();
+                state.reset_state_inputs();
                 state.user_side = state.input_side;
                 state.game.import_position(p);
             }
@@ -261,7 +261,7 @@ pub fn update(state: &mut AppState, msg: Message) {
       Message::SearchStart => {
         println!("Search start pressed");
         let start: Instant = Instant::now();
-        state.game.searcher.start_search(&state.game.move_gen);
+        state.game.searcher.start_search(&state.game.move_gen, &state.game.zobrist);
         let time_took: Duration = start.elapsed();
         println!("Search finished in {} ms", time_took.as_millis());
       }

@@ -1,6 +1,6 @@
 use std::{cmp::{max}};
 
-use crate::{repr::{_move::{self, *}, move_gen::MoveGen, position::Position, types::{NOF_PIECE_TYPES}}, search::{eval::{Evaluator, MATE_EVAL}, search_config::*, search_data::SearchData}};
+use crate::{repr::{_move::{self, *}, move_gen::MoveGen, position::Position, types::NOF_PIECE_TYPES}, search::{eval::{Evaluator, MATE_EVAL}, search_config::*, search_data::SearchData}, utils::zobrist::{Zobrist}};
 
 
 pub const MAX_SEARCH_DEPTH: usize = 50;
@@ -32,13 +32,13 @@ impl Searcher {
             self.positions[i] = (*pos).clone();
         }
         self.search_data = std::array::from_fn(|_| {
-            return SearchData::default();
+            return SearchData::new(pos);
         });
     }
 
-    pub fn sync_new_move(&mut self, mov: u32, move_gen: &MoveGen) {
+    pub fn sync_new_move(&mut self, new_pos: &Position) {
         for i in 0..THREAD_COUNT {
-            self.positions[i].make_move(mov, false, false, move_gen);
+            self.positions[i] = (*new_pos).clone();
         }
     }
 
@@ -47,7 +47,7 @@ impl Searcher {
             return (*pos).clone();
         });
         let search_data: [SearchData ; THREAD_COUNT] = std::array::from_fn(|_| {
-            return SearchData::default();
+            return SearchData::new(pos);
         });
         return Self {
             positions, search_data, multithreaded: false, search_config: SearchConfig::default(), evaluator: Evaluator::default()
@@ -55,23 +55,23 @@ impl Searcher {
     }
 
     
-    pub fn start_search(&mut self, move_gen: &MoveGen) {
+    pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist) {
         if self.multithreaded {
             panic!("multithreaded search");
             //PRAGMA FOR LOOP HERE
             for i in 0..THREAD_COUNT {
-                self.start_search_node(i, move_gen);
+                self.start_search_node(i, move_gen, zobrist);
             }
         } else {
-            self.start_search_node(0, move_gen);
+            self.start_search_node(0, move_gen, zobrist);
         }
     }
 
     
-    fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen) {
+    fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist) {
         match self.search_config.search_mode {
             SearchMode::StaticDepth(d) => {
-                self.search_static_d(d, idx, move_gen);
+                self.search_static_d(d, idx, move_gen, zobrist);
             },
             SearchMode::StaticTime(t) => {
                 return;
@@ -83,13 +83,13 @@ impl Searcher {
 
 
     ///alpha-beta pruned negamax algorithm with iterative deepening
-    fn search_static_d(&mut self, target_d: usize, idx: usize, move_gen: &MoveGen) {
+    fn search_static_d(&mut self, target_d: usize, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist) {
 
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
         //cv: current variation, pv: primary variation
-        fn inner(d: usize, target_d: usize, alpha: i32, beta: i32,  pv: &mut [u32], prev_pv: &[u32], pos: &mut Position, evaluator: &Evaluator, move_gen: &MoveGen, positions_searched: &mut u64, ab_cutoffs: &mut u64) -> i32 {
-            *positions_searched += 1;
+        fn inner(d: usize, target_d: usize, alpha: i32, beta: i32,  pv: &mut [u32], prev_pv: &[u32], pos: &mut Position, evaluator: &Evaluator, search_data: &mut SearchData, move_gen: &MoveGen, zobrist: &Zobrist) -> i32 {
+            search_data.positions_searched += 1;
             let (s, e) = pos.search_move_bounds();
             if s == e { //mate or stalemate
                 if pos.board.nof_checkers > 0 {
@@ -97,6 +97,8 @@ impl Searcher {
                 } else {
                     return 0; //stalemate
                 }
+            } else if search_data.in_three_fold(pos, true) {
+                return 0;
             } else if d == target_d {
                 return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
             }
@@ -107,9 +109,11 @@ impl Searcher {
             for i in s..e {
                 let mut child_pv: [u32 ; MAX_SEARCH_DEPTH + 1] = [ NULL_MOVE ; MAX_SEARCH_DEPTH + 1 ];
                 let mov: u32 = partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
-                pos.make_move(mov, true, false, move_gen);
-                let mov_eval: i32 = -inner(d + 1, target_d, -beta, -new_alpha, &mut child_pv, prev_pv, pos, evaluator, move_gen, positions_searched, ab_cutoffs);
-                pos.unmake_move(mov);
+                pos.make_move(mov, true, false, move_gen, zobrist);
+                search_data.repetition_map.entry(pos.board.zhash).and_modify(|counter| *counter += 1).or_insert(1);
+                let mov_eval: i32 = -inner(d + 1, target_d, -beta, -new_alpha, &mut child_pv, prev_pv, pos, evaluator, search_data, move_gen, zobrist);
+                search_data.repetition_map.entry(pos.board.zhash).and_modify(|counter| *counter -= 1).or_default();
+                pos.unmake_move(mov, zobrist);
                 
                 if mov_eval > eval {
                     eval = mov_eval;
@@ -121,7 +125,7 @@ impl Searcher {
                 new_alpha = max(new_alpha, mov_eval);
 
                 if new_alpha >= beta {
-                    *ab_cutoffs += 1;
+                    search_data.ab_cutoffs += 1;
                     return new_alpha;
                 }
 
@@ -133,7 +137,7 @@ impl Searcher {
         for i in 1..=target_d {
             let prev_pv: [u32 ; MAX_SEARCH_DEPTH + 1] = pv;
             pv.fill(NULL_MOVE);
-            let eval: i32 = inner(0, i, ALPHA_INIT, BETA_INIT, &mut pv, &prev_pv, pos, &self.evaluator, move_gen, &mut search_data.positions_searched, &mut search_data.ab_cutoffs);
+            let eval: i32 = inner(0, i, ALPHA_INIT, BETA_INIT, &mut pv, &prev_pv, pos, &self.evaluator, search_data, move_gen, zobrist);
             println!("at depth: {}, eval: {}", i, eval);
             search_data.cumul_positions_searched += search_data.positions_searched;
             search_data.log_performance();
