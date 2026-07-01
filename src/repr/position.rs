@@ -102,8 +102,19 @@ impl Position {
         let moved_piece: usize = _move::get_moved_piece(mov) as usize;
         let is_eating: bool = _move::is_eating(mov);
         let is_castle: bool = _move::is_castle(mov);
+        let is_short_castle: bool = is_castle && _move::is_short_castle(mov);
         let is_double_push: bool = _move::is_double_push(mov);
         let is_en_passant: bool = _move::is_en_passant(mov);
+        let promotion_piece: Option<usize> = if is_promotion {
+            Some(_move::get_promoted_piece(mov) as usize)
+        } else {
+            None
+        };
+        let eaten_piece: Option<usize> = if is_eating && !is_en_passant {
+            Some(_move::eaten_piece(mov).expect("Was eating but no eating piece found") as usize)
+        } else {
+            None
+        };
         let own_occupation: &mut u64;
         let opponent_occupation: &mut u64;
         if is_white_turn {
@@ -113,7 +124,7 @@ impl Position {
         }
         
         if is_eating && !is_en_passant { //clear eaten piece, en passant has own clearing logic
-            let eaten_piece: usize = _move::eaten_piece(mov).expect("Was eating but no eating piece found") as usize;
+            let eaten_piece: usize = eaten_piece.expect("Was eating but no eating piece found");
             bitboard::clear_square(&mut self.board.pieces[eaten_piece], to);
             bitboard::clear_square(opponent_occupation, to);
             if eaten_piece as u32 != W_PAWN && eaten_piece as u32 != B_PAWN {
@@ -128,13 +139,13 @@ impl Position {
         }
 
         if is_promotion {
-            let promotion_piece: usize = _move::get_promoted_piece(mov) as usize;
+            let promotion_piece: usize = promotion_piece.expect("Was promotion but no promotion piece found");
             bitboard::set_square(&mut self.board.pieces[promotion_piece], to);
         } else if is_castle {
             let rook_from: u32;
             let rook_to: u32;
             let rook_piece_idx: usize;
-            if _move::is_short_castle(mov) {
+            if is_short_castle {
                 if is_white_turn {rook_from = 7; rook_to = 5; rook_piece_idx = 3;} else {rook_from = 63; rook_to = 61; rook_piece_idx = 9;}
             } else {
                 if is_white_turn {rook_from = 0; rook_to = 3; rook_piece_idx = 3;} else {rook_from = 56; rook_to = 59; rook_piece_idx = 9;}
@@ -219,7 +230,26 @@ impl Position {
         //6. last target
         self.last_target = to;
         //7. update zobrist hash
-        self.board.zhash = zobrist.updated_hash_forward(self.board.zhash, mov, lost_ws, lost_wl, lost_bs, lost_bl, lost_ep);
+        self.board.zhash = zobrist.updated_hash_forward(
+            self.board.zhash,
+            from as usize,
+            to as usize,
+            moved_piece,
+            is_white_turn,
+            is_promotion,
+            promotion_piece,
+            is_eating,
+            eaten_piece,
+            is_castle,
+            is_short_castle,
+            is_double_push,
+            is_en_passant,
+            lost_ws,
+            lost_wl,
+            lost_bs,
+            lost_bl,
+            lost_ep,
+        );
         return;
     }
 
@@ -230,10 +260,22 @@ impl Position {
         let from: u32 = _move::get_init(mov);
         let to: u32 = _move::get_target(mov);
         let moved_piece: usize = _move::get_moved_piece(mov) as usize;
-        let eaten_piece: Option<u32> = _move::eaten_piece(mov);
         let is_castle: bool = _move::is_castle(mov);
+        let is_short_castle: bool = is_castle && _move::is_short_castle(mov);
         let is_promotion: bool = _move::is_promotion(mov);
+        let promotion_piece: Option<usize> = if is_promotion {
+            Some(_move::get_promoted_piece(mov) as usize)
+        } else {
+            None
+        };
+        let is_eating: bool = _move::is_eating(mov);
         let is_en_passant: bool = _move::is_en_passant(mov);
+        let is_double_push: bool = _move::is_double_push(mov);
+        let eaten_piece: Option<usize> = if is_eating && !is_en_passant {
+            Some(_move::eaten_piece(mov).expect("Was eating but no eating piece found") as usize)
+        } else {
+            None
+        };
         let own_occupation: &mut u64;
         let opponent_occupation: &mut u64;
         if unmaking_white_move {
@@ -242,11 +284,10 @@ impl Position {
             own_occupation = &mut self.board.black_occupation; opponent_occupation = &mut self.board.white_occupation;
         }
 
-        if eaten_piece.is_some() && !is_en_passant { //return eaten piece, en passant has own returning logic
-            let p: u32 = eaten_piece.expect("Wasn't eating although checked");
-            bitboard::set_square(&mut self.board.pieces[p as usize], to);
+        if let Some(p) = eaten_piece { //return eaten piece, en passant has own returning logic
+            bitboard::set_square(&mut self.board.pieces[p], to);
             bitboard::set_square(opponent_occupation, to);
-            if p != W_PAWN && p != B_PAWN {
+            if p as u32 != W_PAWN && p as u32 != B_PAWN {
                 self.board.major_minor_count += 1;
             }
         }
@@ -257,7 +298,7 @@ impl Position {
             bitboard::clear_square(&mut self.board.pieces[moved_piece], to);
             bitboard::set_square(&mut self.board.pieces[moved_piece], from);
         } else {
-            let promotion_piece: usize = _move::get_promoted_piece(mov) as usize;
+            let promotion_piece: usize = promotion_piece.expect("Was promotion but no promotion piece found");
             bitboard::clear_square(&mut self.board.pieces[promotion_piece], to);
             bitboard::set_square(&mut self.board.pieces[moved_piece], from);
         }
@@ -266,7 +307,7 @@ impl Position {
             let rook_from: u32;
             let rook_to: u32;
             let rook_piece_idx: usize;
-            if _move::is_short_castle(mov) {
+            if is_short_castle {
                 if unmaking_white_move {rook_from = 7; rook_to = 5; rook_piece_idx = 3;} else {rook_from = 63; rook_to = 61; rook_piece_idx = 9;}
             } else {
                 if unmaking_white_move {rook_from = 0; rook_to = 3; rook_piece_idx = 3;} else {rook_from = 56; rook_to = 59; rook_piece_idx = 9;}
@@ -329,7 +370,26 @@ impl Position {
             self.last_target = _move::get_target(self.played_moves_stack.last().copied().unwrap());
         }
         //6. update zobrist hash
-        self.board.zhash = zobrist.updated_hash_backward(self.board.zhash, mov, gained_ws, gained_wl, gained_bs, gained_bl, gained_ep);
+        self.board.zhash = zobrist.updated_hash_backward(
+            self.board.zhash,
+            from as usize,
+            to as usize,
+            moved_piece,
+            unmaking_white_move,
+            is_promotion,
+            promotion_piece,
+            is_eating,
+            eaten_piece,
+            is_castle,
+            is_short_castle,
+            is_double_push,
+            is_en_passant,
+            gained_ws,
+            gained_wl,
+            gained_bs,
+            gained_bl,
+            gained_ep,
+        );
 
         return;
     }

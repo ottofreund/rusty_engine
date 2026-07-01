@@ -1,7 +1,7 @@
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 
-use crate::repr::{_move, bitboard};
+use crate::repr::bitboard;
 use crate::repr::board::Board;
 use crate::repr::types::{BLACK, NOF_PIECE_TYPES};
 
@@ -56,20 +56,31 @@ impl Zobrist {
 
     ///when making move
     ///lost_ep <==> if position before making this move had ep sqr, then Some(ep_sqr) else None
-    pub fn updated_hash_forward(&self, cur: u64, mov: u32, lost_ws: bool, lost_wl: bool, lost_bs: bool, lost_bl: bool, lost_ep: Option<u32>) -> u64 {
+    pub fn updated_hash_forward(
+        &self,
+        cur: u64,
+        from: usize,
+        to: usize,
+        moved_piece: usize,
+        is_white_turn: bool,
+        is_promotion: bool,
+        promotion_piece: Option<usize>,
+        is_eating: bool,
+        eaten_piece: Option<usize>,
+        is_castle: bool,
+        is_short_castle: bool,
+        is_double_push: bool,
+        is_en_passant: bool,
+        lost_ws: bool,
+        lost_wl: bool,
+        lost_bs: bool,
+        lost_bl: bool,
+        lost_ep: Option<u32>,
+    ) -> u64 {
         let mut new: u64 = cur;
 
-        let is_promotion: bool = _move::is_promotion(mov);
-        let from: usize = _move::get_init(mov) as usize;
-        let to: usize = _move::get_target(mov) as usize;
-        let moved_piece: usize = _move::get_moved_piece(mov) as usize;
-        let is_white_turn: bool = moved_piece < 6; 
-        let is_eating: bool = _move::is_eating(mov);
-        let is_castle: bool = _move::is_castle(mov);
-        let is_double_push: bool = _move::is_double_push(mov);
-        let is_en_passant: bool = _move::is_en_passant(mov);
         if is_eating && !is_en_passant { //clear eaten piece, en passant has own clearing logic
-            let eaten_piece: usize = _move::eaten_piece(mov).expect("Was eating but no eating piece found") as usize;
+            let eaten_piece: usize = eaten_piece.expect("Was eating but no eating piece found");
             new ^= self.piece_rands[eaten_piece * NOF_SQUARES + to];
         }
         new ^= self.piece_rands[moved_piece * NOF_SQUARES + from];
@@ -78,13 +89,13 @@ impl Zobrist {
         }
 
         if is_promotion {
-            let promotion_piece: usize = _move::get_promoted_piece(mov) as usize;
+            let promotion_piece: usize = promotion_piece.expect("Was promotion but no promotion piece found");
             new ^= self.piece_rands[promotion_piece * NOF_SQUARES + to];
         } else if is_castle {
             let rook_from: usize;
             let rook_to: usize;
             let rook_piece_idx: usize;
-            if _move::is_short_castle(mov) {
+            if is_short_castle {
                 if is_white_turn {
                     rook_from = 7; rook_to = 5; rook_piece_idx = 3;
                 } else {
@@ -131,7 +142,18 @@ impl Zobrist {
     pub fn updated_hash_backward(
         &self,
         cur: u64,
-        mov: u32,
+        from: usize,
+        to: usize,
+        moved_piece: usize,
+        is_white_turn: bool,
+        is_promotion: bool,
+        promotion_piece: Option<usize>,
+        is_eating: bool,
+        eaten_piece: Option<usize>,
+        is_castle: bool,
+        is_short_castle: bool,
+        is_double_push: bool,
+        is_en_passant: bool,
         gained_ws: bool,
         gained_wl: bool,
         gained_bs: bool,
@@ -140,19 +162,8 @@ impl Zobrist {
     ) -> u64 {
         let mut new: u64 = cur;
 
-        let is_promotion: bool = _move::is_promotion(mov);
-        let from: usize = _move::get_init(mov) as usize;
-        let to: usize = _move::get_target(mov) as usize;
-        let moved_piece: usize = _move::get_moved_piece(mov) as usize;
-        let is_white_turn: bool = moved_piece < 6;
-        let is_eating: bool = _move::is_eating(mov);
-        let is_castle: bool = _move::is_castle(mov);
-        let is_double_push: bool = _move::is_double_push(mov);
-        let is_en_passant: bool = _move::is_en_passant(mov);
-
         if is_eating && !is_en_passant {
-            let eaten_piece: usize = _move::eaten_piece(mov)
-                .expect("Was eating but no eating piece found") as usize;
+            let eaten_piece: usize = eaten_piece.expect("Was eating but no eating piece found");
             new ^= self.piece_rands[eaten_piece * NOF_SQUARES + to];
         }
 
@@ -163,14 +174,14 @@ impl Zobrist {
         }
 
         if is_promotion {
-            let promotion_piece: usize = _move::get_promoted_piece(mov) as usize;
+            let promotion_piece: usize = promotion_piece.expect("Was promotion but no promotion piece found");
             new ^= self.piece_rands[promotion_piece * NOF_SQUARES + to];
         } else if is_castle {
             let rook_from: usize;
             let rook_to: usize;
             let rook_piece_idx: usize;
 
-            if _move::is_short_castle(mov) {
+            if is_short_castle {
                 if is_white_turn {
                     rook_from = 7; rook_to = 5; rook_piece_idx = 3;
                 } else {
