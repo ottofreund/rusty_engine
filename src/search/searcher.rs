@@ -39,6 +39,9 @@ impl Searcher {
     pub fn sync_new_move(&mut self, new_pos: &Position) {
         for i in 0..THREAD_COUNT {
             self.positions[i] = (*new_pos).clone();
+            self.search_data[i].repetition_map.entry(new_pos.board.zhash).and_modify(|counter| *counter += 1).or_insert(1);
+            //MAYBE DROP FIRST MOVE AND LEAVE REST
+            self.search_data[i].pv_move.fill(NULL_MOVE);
         }
     }
 

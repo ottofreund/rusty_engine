@@ -1,4 +1,4 @@
-use crate::{repr::{move_gen::MoveGen, types::{B_KING, W_KING, WHITE, opposite_turn}}, utils::zobrist::Zobrist};
+use crate::{repr::{move_gen::{MoveGen, add_en_passant}, types::{B_KING, W_KING, WHITE, opposite_turn}}, utils::zobrist::Zobrist};
 
 
 pub const FILES: [u64 ; 8] = [
@@ -196,6 +196,24 @@ impl Board {
         return self.bl == 0;
     }
 
+    fn no_legal_en_passant(&self) -> bool {
+        if self.ep_square.is_some() {
+            let mut eps: Vec<u32> = Vec::with_capacity(2);
+            add_en_passant(self, self.turn, &mut eps);
+            return eps.iter().filter(|ep| MoveGen::pseudolegal_is_legal(**ep, self, self.turn)).count() == 0;
+        } else {
+            return true;
+        }
+    }
+
+    fn repetition_ep(&self) -> Option<u32> {
+        if self.no_legal_en_passant() {
+            None
+        } else {
+            self.ep_square
+        } 
+    }
+
 }
 
 
@@ -223,6 +241,19 @@ impl Clone for Board {
             bs: self.bs.clone(),
             bl: self.bl.clone()
         }
+    }
+}
+
+impl PartialEq for Board {
+    fn eq(&self, other: &Self) -> bool {
+        return 
+            self.pieces == other.pieces && 
+            self.turn == other.turn && 
+            self.ws() == other.ws() && 
+            self.wl() == other.wl() && 
+            self.bs() == other.bs() && 
+            self.bl() == other.bl() && 
+            self.repetition_ep() == other.repetition_ep(); //only if en passant capture is actually possible
     }
 }
 

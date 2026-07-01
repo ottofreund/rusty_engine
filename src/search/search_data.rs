@@ -12,7 +12,6 @@ pub struct SearchData {
     //a collision may cause inadvertent three-fold-repetition, doesn't affect correctness in search though:
     //the unlikely worst case it that the engine seeks improper three-fold in an already losing position
     pub repetition_map: HashMap<u64, u32>, 
-    pub fifty_move_counter: u32,
     pub positions_searched: u64, //per search
     pub ab_cutoffs: u64,
     pub cumul_positions_searched: u64
@@ -27,7 +26,6 @@ impl SearchData {
             pv_move: [NULL_MOVE ; MAX_SEARCH_DEPTH + 1], 
             mate_in: None,
             repetition_map,
-            fifty_move_counter: 0,
             positions_searched: 0,
             ab_cutoffs: 0,
             cumul_positions_searched: 0

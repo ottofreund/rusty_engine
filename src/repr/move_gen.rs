@@ -56,7 +56,7 @@ impl MoveGen {
     pub fn generate_legal(&self, board: &Board, mover: u32, move_arr: &mut [u32 ; MOVE_ARR_SIZE], move_arr_s_idx: usize, in_search: bool, in_perft_debug: bool) -> usize {
         let mut generated: usize = 0;
         for mov in self.generate_pseudolegal(board, mover, in_search, in_perft_debug) {
-            if self.pseudolegal_is_legal(mov, board, mover) {
+            if MoveGen::pseudolegal_is_legal(mov, board, mover) {
                 //add taken piece idx to move (if eating) now, since it is necessary
                 let m: u32;
                 if _move::is_en_passant(mov) {
@@ -79,7 +79,7 @@ impl MoveGen {
     }
 
     ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares
-    pub fn pseudolegal_is_legal(&self, mov: u32, board: &Board, mover: u32) -> bool {
+    pub fn pseudolegal_is_legal(mov: u32, board: &Board, mover: u32) -> bool {
         let init: u32 = _move::get_init(mov);
         let moved_piece: u32 = _move::get_moved_piece(mov);
         let opponent_attacked: u64;
@@ -590,7 +590,7 @@ fn add_castling(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
 }
 
 ///Adds **pseudolegal** en passants to move_vec
-fn add_en_passant(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
+pub fn add_en_passant(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
     if let Some(ep_square) = board.ep_square {
         let mover_pawns: u64;
         let l_sqr: u32;

@@ -399,6 +399,14 @@ impl Position {
         return;
     }
 
+    pub fn in_checkmate(&self) -> bool {
+        return self.board.nof_checkers > 0 && self.legal_moves().is_empty();
+    }
+
+    pub fn in_stalemate(&self) -> bool {
+        return self.board.nof_checkers == 0 && self.legal_moves().is_empty();
+    }
+
 }
 
 impl Clone for Position {
