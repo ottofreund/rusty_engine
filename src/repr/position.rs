@@ -1,5 +1,3 @@
-use std::fmt::Error;
-
 use crate::{repr::{_move::NULL_MOVE, board::Board, move_gen::{AVG_BRANCH_FAC, MoveGen}, types::{B_PAWN, BLACK, W_PAWN, WHITE}}, utils::zobrist::Zobrist};
 use crate::repr::*;
 

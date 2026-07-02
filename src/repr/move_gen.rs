@@ -18,7 +18,6 @@ const BS_CASTLING_GAP_BB: u64 = 6917529027641081856; //2^61 + 2^62
 const BL_CASTLING_GAP_BB: u64 = 1008806316530991104; //2^57 + 2^58 + 2^59
 const WL_ATTACK_GAP_BB: u64 = 12; //2^2 + 2^3
 const BL_ATTACK_GAP_BB: u64 = 864691128455135232; //2^58 + 2^59
-const MAX_MOVES: usize = 218; //max moves in any pos
 const MAX_PSEUDO: usize = 250; //guess for max pseudo moves in any pos
 
 ///Uses **magic_bb** handle for precomputed slide moves.
@@ -81,6 +80,7 @@ impl MoveGen {
     ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares
     pub fn pseudolegal_is_legal(mov: u32, board: &Board, mover: u32) -> bool {
         let init: u32 = _move::get_init(mov);
+        let target: u32 = _move::get_target(mov);
         let moved_piece: u32 = _move::get_moved_piece(mov);
         let opponent_attacked: u64;
         let mover_king_piece_idx: u32;
@@ -98,7 +98,6 @@ impl MoveGen {
         if board.nof_checkers > 0 {
             let moved_king: bool = moved_piece == W_KING || moved_piece == B_KING;
             if board.nof_checkers == 1 {
-                let target: u32 = _move::get_target(mov);
                 let mut blocked_check: bool = bitboard::contains_square(board.check_block_sqrs, target);
                 //also en passant can "block" check
                 let ep_offset: i32; if mover == WHITE {ep_offset = -8} else {ep_offset = 8}
@@ -137,7 +136,7 @@ impl MoveGen {
             if ep_rank & opponent_horizontal_sliding > 0 {
                 let mover_king_sqr: u32 = board.get_king_sqr_idx(mover);
                 let king_on_left_side: bool = mover_king_sqr < init;
-                let ep_dir_right: bool = _move::get_target(mov) % 8 > init % 8;
+                let ep_dir_right: bool = target % 8 > init % 8;
                 //scan right
                 let mut scan_start_sqr: u32;
                 let mut apply_step_f: fn(u32) -> u32 = |x: u32| x + 1;
@@ -166,7 +165,6 @@ impl MoveGen {
                 }         
             }
         } else if moved_piece == mover_king_piece_idx {
-            let target: u32 = _move::get_target(mov);
             if bitboard::contains_square(opponent_attacked, target)
                 || bitboard::contains_square(board.meta_attacks, target) {
                 return false;
@@ -176,7 +174,6 @@ impl MoveGen {
         }
         //now pins
         if bitboard::contains_square(mover_pinned, init) {
-            let target: u32 = _move::get_target(mov);
             if !bitboard::contains_square(mover_pinned_restrictions, target) {
                 return false;
             }
@@ -565,7 +562,6 @@ fn pawn_attacks_white_for(sqr: u32) -> u64 {
 ///Adds LEGAL castling moves for **mover** to **move_vec**.
 fn add_castling(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
     if board.nof_checkers == 0 { //can't castle from check
-        let preventing_bb: u64;
         let opponent_attacks: u64;
         if mover == WHITE {
             opponent_attacks = board.black_attacks;
@@ -618,15 +614,15 @@ pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen
     let is_promotion: bool;
     let forward: u32;
     let forward2: u32;
-    let PAWN_START_RANK: u64;
+    let pawn_start_rank: u64;
     let pawn_piece_idx: usize;
     let enemy_occupied: u64;
     if mover == WHITE { 
         is_promotion = bitboard::contains_square(RANKS[6], from);
-        forward = from + 8; forward2 = from + 16; PAWN_START_RANK = RANKS[1]; pawn_piece_idx = 0; enemy_occupied = board.black_occupation;
+        forward = from + 8; forward2 = from + 16; pawn_start_rank = RANKS[1]; pawn_piece_idx = 0; enemy_occupied = board.black_occupation;
     } else { //for black
         is_promotion = bitboard::contains_square(RANKS[1], from);
-        forward = from - 8; forward2 = from.wrapping_sub(16); PAWN_START_RANK = RANKS[6]; pawn_piece_idx = 6; enemy_occupied = board.white_occupation;
+        forward = from - 8; forward2 = from.wrapping_sub(16); pawn_start_rank = RANKS[6]; pawn_piece_idx = 6; enemy_occupied = board.white_occupation;
     }
     //add attacking moves
     let mut characteristic_attacks: u64 = move_gen.attack_bbs[pawn_piece_idx][from as usize]; //bitboard
@@ -652,8 +648,8 @@ pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen
         } else {
             move_vec.push(_move::create(from, forward, false, mover, pawn_piece_idx as u32))
         }
-        //can go forward 2 if also no piece on forward2 and pawn on PAWN_START_RANK
-        if bitboard::contains_square(PAWN_START_RANK, from) && !board.is_occupied(forward2) {
+        //can go forward 2 if also no piece on forward2 and pawn on pawn_start_rank
+        if bitboard::contains_square(pawn_start_rank, from) && !board.is_occupied(forward2) {
             move_vec.push(_move::create_double_push(from, forward2, mover, pawn_piece_idx as u32))
         }
     }

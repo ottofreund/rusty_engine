@@ -36,10 +36,15 @@ impl Searcher {
         });
     }
 
-    pub fn sync_new_move(&mut self, new_pos: &Position) {
+    pub fn sync_new_move(&mut self, new_pos: &Position, mov: u32) {
         for i in 0..THREAD_COUNT {
             self.positions[i] = (*new_pos).clone();
-            self.search_data[i].repetition_map.entry(new_pos.board.zhash).and_modify(|counter| *counter += 1).or_insert(1);
+            if _move::is_unrepeatable(mov) {
+                self.search_data[i].board_hash_history.clear();
+                self.search_data[i].board_hash_history.push(new_pos.board.zhash);
+            } else {
+                self.search_data[i].board_hash_history.push(new_pos.board.zhash);
+            }
             //MAYBE DROP FIRST MOVE AND LEAVE REST
             self.search_data[i].pv_move.fill(NULL_MOVE);
         }
@@ -100,7 +105,7 @@ impl Searcher {
                 } else {
                     return 0; //stalemate
                 }
-            } else if search_data.in_three_fold(pos, true) {
+            } else if search_data.in_three_fold(pos) {
                 return 0;
             } else if d == target_d {
                 return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
@@ -113,9 +118,9 @@ impl Searcher {
                 let mut child_pv: [u32 ; MAX_SEARCH_DEPTH + 1] = [ NULL_MOVE ; MAX_SEARCH_DEPTH + 1 ];
                 let mov: u32 = partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
                 pos.make_move(mov, true, false, move_gen, zobrist);
-                search_data.repetition_map.entry(pos.board.zhash).and_modify(|counter| *counter += 1).or_insert(1);
+                search_data.board_hash_history.push(pos.board.zhash);
                 let mov_eval: i32 = -inner(d + 1, target_d, -beta, -new_alpha, &mut child_pv, prev_pv, pos, evaluator, search_data, move_gen, zobrist);
-                search_data.repetition_map.entry(pos.board.zhash).and_modify(|counter| *counter -= 1).or_default();
+                search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
                 
                 if mov_eval > eval {

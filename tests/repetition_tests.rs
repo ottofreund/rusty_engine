@@ -83,6 +83,57 @@ fn on_board_threefold_distinguishes_legal_ep_capture_right() {
     assert_in_progress(&game);
 }
 
+#[test]
+fn search_detects_natural_threefold_repetition() {
+    let mut game = Game::default();
+
+    for (idx, (from, to)) in [
+        ("g1", "f3"),
+        ("g8", "f6"),
+        ("f3", "g1"),
+        ("f6", "g8"),
+        ("g1", "f3"),
+        ("g8", "f6"),
+        ("f3", "g1"),
+        ("f6", "g8"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        play(&mut game, from, to);
+
+        if idx == 3 {
+            assert_not_search_threefold(&game);
+        }
+    }
+
+    assert_search_threefold(&game);
+}
+
+#[test]
+fn search_repetition_history_resets_after_unrepeatable_move() {
+    let mut game = Game::default();
+
+    for (from, to) in [("g1", "f3"), ("g8", "f6"), ("f3", "g1"), ("f6", "g8")] {
+        play(&mut game, from, to);
+    }
+
+    assert!(
+        game.searcher.search_data[0].board_hash_history.len() > 1,
+        "expected reversible moves to accumulate search repetition history"
+    );
+
+    play(&mut game, "e2", "e4");
+
+    let search_data = &game.searcher.search_data[0];
+    assert_eq!(
+        search_data.board_hash_history,
+        vec![game.position.board.zhash],
+        "expected pawn move to reset search repetition history"
+    );
+    assert_not_search_threefold(&game);
+}
+
 fn import_position(game: &mut Game, fen: &str) {
     let position =
         Position::position_with(fen, &game.move_gen, &game.zobrist).expect("valid FEN position");
@@ -123,5 +174,19 @@ fn assert_in_progress(game: &Game) {
         matches!(&game.game_state, GameState::InProgress),
         "expected game to remain in progress, got {}",
         game.game_state.to_string()
+    );
+}
+
+fn assert_search_threefold(game: &Game) {
+    assert!(
+        game.searcher.search_data[0].in_three_fold(&game.position),
+        "expected search repetition tracking to detect threefold"
+    );
+}
+
+fn assert_not_search_threefold(game: &Game) {
+    assert!(
+        !game.searcher.search_data[0].in_three_fold(&game.position),
+        "expected search repetition tracking to remain below threefold"
     );
 }

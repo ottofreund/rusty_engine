@@ -1,4 +1,4 @@
-use crate::{game::game_state::GameState, repr::{_move, board::{self, Board}, move_gen::MoveGen, position::Position}, search::searcher::Searcher, utils::zobrist::Zobrist};
+use crate::{game::game_state::GameState, repr::{_move, board::{Board}, move_gen::MoveGen, position::Position}, search::searcher::Searcher, utils::zobrist::Zobrist};
 use std::fmt::Error;
 
 
@@ -35,7 +35,7 @@ impl Game {
             Some(m) => {
                 //println!("Successfully moved: {}", _move::to_string(m));
                 self.position.make_move(m, false, false, &self.move_gen, &self.zobrist);
-                self.searcher.sync_new_move(&self.position);
+                self.searcher.sync_new_move(&self.position, m);
                 if _move::is_unrepeatable(m) {
                     println!("move was unrepeatable");
                     self.repetition_relevant_history_idx = self.board_history.len();

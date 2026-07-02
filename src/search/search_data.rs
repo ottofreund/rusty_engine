@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{repr::{_move::NULL_MOVE, position::Position}, search::searcher::MAX_SEARCH_DEPTH};
 
 
@@ -8,10 +6,7 @@ use crate::{repr::{_move::NULL_MOVE, position::Position}, search::searcher::MAX_
 pub struct SearchData {
     pub pv_move: [u32 ; MAX_SEARCH_DEPTH + 1], //next moves on last search's primary variation (i.e. search result)
     pub mate_in: Option<u32>,
-    //zobrist hash value to nof times position was reached
-    //a collision may cause inadvertent three-fold-repetition, doesn't affect correctness in search though:
-    //the unlikely worst case it that the engine seeks improper three-fold in an already losing position
-    pub repetition_map: HashMap<u64, u32>, 
+    pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
     pub positions_searched: u64, //per search
     pub ab_cutoffs: u64,
     pub cumul_positions_searched: u64
@@ -20,35 +15,26 @@ pub struct SearchData {
 impl SearchData {
 
     pub fn new(pos: &Position) -> Self {
-        let mut repetition_map: HashMap<u64, u32> = HashMap::new();
-        repetition_map.insert(pos.board.zhash, 1);
+        let mut board_hash_history: Vec<u64> = Vec::with_capacity(32);
+        board_hash_history.push(pos.board.zhash);
         return Self { 
             pv_move: [NULL_MOVE ; MAX_SEARCH_DEPTH + 1], 
             mate_in: None,
-            repetition_map,
+            board_hash_history: board_hash_history,
             positions_searched: 0,
             ab_cutoffs: 0,
             cumul_positions_searched: 0
         };
     }
 
-    pub fn in_three_fold(&self, pos: &Position, is_cur_pos: bool) -> bool {
-        match self.repetition_map.get(&pos.board.zhash) {
-            Some(r) => {
-                if *r >= 3 {
-                    return true; 
-                } else {
-                    return false;
-                }
-            },
-            None => {
-                if is_cur_pos {
-                    panic!("cur pos wasn't in repetition_map");
-                } else {
-                    return false;
-                }
+    pub fn in_three_fold(&self, pos: &Position) -> bool {
+        let mut count: u32 = 1;
+        for i in 0..(self.board_hash_history.len() - 1) {
+            if pos.board.zhash == self.board_hash_history[i] {
+                count += 1;
             }
         }
+        return count >= 3;
     }
 
     pub fn log_performance(&self) {
