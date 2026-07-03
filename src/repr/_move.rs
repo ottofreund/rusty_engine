@@ -176,6 +176,10 @@ pub fn is_unrepeatable(mov: u32) -> bool {
     return is_eating(mov) || (get_moved_piece(mov) % 6) == W_PAWN || is_castle(mov);
 }
 
+pub fn breaks_fifty_counter(mov: u32) -> bool {
+    return is_eating(mov) || (get_moved_piece(mov) % 6) == W_PAWN;
+}
+
 const PIECE_CHARS: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
 
 pub fn to_string(mov: u32) -> String {

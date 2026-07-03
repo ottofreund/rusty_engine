@@ -10,7 +10,7 @@ const FILE_CHARS: [char; 8] = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 pub const MAJOR_MINOR_PIECES: [char ; 8] = ['N', 'B', 'R', 'Q', 'n', 'b', 'r', 'q'];
 
 pub fn is_valid_fen(fen: &String) -> bool {
-    let mut sections = fen.split(' ');
+    let mut sections = fen.split_whitespace();
     let sec_count: usize = sections.clone().count();
     if sec_count < 4 || sec_count > 6 {
         return false;
@@ -64,6 +64,16 @@ pub fn is_valid_fen(fen: &String) -> bool {
         }
         let rank: u32 = chars[1].to_digit(10).expect("Checked is_digit, wasn't");
         if rank < 1 || rank > 8 {
+            return false;
+        }
+    }
+    if let Some(half_move_clock) = sections.next() {
+        if half_move_clock.parse::<u32>().is_err() {
+            return false;
+        }
+    }
+    if let Some(full_move_number) = sections.next() {
+        if full_move_number.parse::<u32>().is_err() {
             return false;
         }
     }
@@ -130,7 +140,7 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen, zobrist: &Zobrist) -> Resul
     let mut pieces: [u64; 12] = [0 ; 12];
     let mut white_occupation: u64 = 0;
     let mut black_occupation: u64 = 0;
-    let mut sections = fen.split(' ');
+    let mut sections = fen.split_whitespace();
     let piece_str: &str = sections.next().expect("Was long enough but iterator ended.");
     let major_minor_count: u32 = parse_pieces(piece_str, &mut pieces, &mut white_occupation, &mut black_occupation);
     let turn: u32 = match sections.next().expect("Was valid but sections ran out") {
@@ -154,8 +164,12 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen, zobrist: &Zobrist) -> Resul
         let rank: u32 = char_iter.next().expect("ep wasn't valid") as u32 - b'1' as u32;
         ep_square = Some(file as u32 - 'a' as u32 + 8 * rank); 
     }
+    let half_move_clock: u32 = match sections.next() {
+        Some(half_move_clock_string) => half_move_clock_string.parse::<u32>().expect("Was valid but half move clock wasn't a u32"),
+        None => 0,
+    };
 
-    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, major_minor_count, move_gen, zobrist));
+    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, major_minor_count, move_gen, zobrist, half_move_clock));
 }
 
 pub fn board_to_fen(board: &Board) -> String {
@@ -226,6 +240,10 @@ pub fn board_to_fen(board: &Board) -> String {
         }
         None => fen.push('-'),
     }
+
+    fen.push(' ');
+    fen.push_str(&board.half_move_clock.to_string());
+    fen.push_str(" 1");
 
     fen
 }

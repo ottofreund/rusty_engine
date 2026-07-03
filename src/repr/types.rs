@@ -28,5 +28,6 @@ pub struct BoardStateInfo {
     pub mover_pinned: u64,
     pub mover_pinned_restrictions: [u64 ; 64],
     pub meta_attacks: u64,
-    pub opponent_attacked: u64
+    pub opponent_attacked: u64,
+    pub half_move_clock: u32,
 }

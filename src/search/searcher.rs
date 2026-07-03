@@ -105,7 +105,7 @@ impl Searcher {
                 } else {
                     return 0; //stalemate
                 }
-            } else if search_data.in_three_fold(pos) {
+            } else if search_data.in_three_fold(pos) || pos.board.is_fifty_move_draw() {
                 return 0;
             } else if d == target_d {
                 return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());

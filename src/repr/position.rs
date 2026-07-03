@@ -109,7 +109,8 @@ impl Position {
             mover_pinned: if is_white_turn {self.board.white_pinned} else {self.board.black_pinned},
             mover_pinned_restrictions: if is_white_turn {self.board.white_pinned_restrictions} else {self.board.black_pinned_restrictions},
             meta_attacks: self.board.meta_attacks,
-            opponent_attacked: if is_white_turn {self.board.black_attacks} else {self.board.white_attacks}
+            opponent_attacked: if is_white_turn {self.board.black_attacks} else {self.board.white_attacks},
+            half_move_clock: self.board.half_move_clock,
         };
 
         self.board_state_info_stack.push(cur_board_state_info);
@@ -174,6 +175,11 @@ impl Position {
             }
         } else {
             self.board.ep_square = None;
+        }
+        if _move::breaks_fifty_counter(mov) {
+            self.board.half_move_clock = 0;
+        } else {
+            self.board.half_move_clock += 1;
         }
 
         let had_ws: bool = self.board.ws(); let had_wl: bool = self.board.wl(); let had_bs: bool = self.board.bs(); let had_bl: bool = self.board.bl();
@@ -326,6 +332,7 @@ impl Position {
         let board_state_info: BoardStateInfo = self.board_state_info_stack.pop().expect("board state info stack was empty");
 
         self.board.ep_square = board_state_info.ep_sqr;
+        self.board.half_move_clock = board_state_info.half_move_clock;
 
         let gained_ep: Option<u32> = self.board.ep_square;
         let had_ws: bool = self.board.ws(); let had_wl: bool = self.board.wl(); let had_bs: bool = self.board.bs(); let had_bl: bool = self.board.bl();

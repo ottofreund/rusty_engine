@@ -9,7 +9,7 @@ pub const RANKS: [u64 ; 8] = [
 ];
 pub const EDGES: u64 = FILES[0] | FILES[7] | RANKS[0] | RANKS[7];
 /// Mutable state board representing a legal chess position
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Board {
     pub pieces: [u64 ; 12],
     pub white_occupation: u64,
@@ -28,6 +28,7 @@ pub struct Board {
     pub meta_attacks: u64, //when checked by scanner, this contains the squares behind the king
     pub major_minor_count: u32,
     pub zhash: u64,
+    pub half_move_clock: u32,
     ws: u32, //white short castling right distance
     wl: u32, //semaphore-like usage or "castling distance"
     bs: u32, //if 0, then has right else, num tells how many moves ago you had the right
@@ -159,16 +160,17 @@ impl Board {
         let (ws, wl, bs, bl) = (0, 0, 0, 0);
         let turn: u32 = WHITE;
         let major_minor_count: u32 = 14;
-        return Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, major_minor_count, move_gen, zobrist)
+        let half_move_clock: u32 = 0;
+        return Board::board_with(pieces, white_occupation, black_occupation, turn, ws, wl, bs, bl, ep_square, major_minor_count, move_gen, zobrist, half_move_clock)
     }
 
     ///Returns filled in valid state board after taking minimal positional information.
     pub fn board_with(
         pieces: [u64; 12], white_occupation: u64, black_occupation: u64, turn: u32, 
-        ws: u32, wl: u32, bs: u32, bl: u32, ep_square: Option<u32>, major_minor_count: u32, move_gen: &MoveGen, zobrist: &Zobrist
+        ws: u32, wl: u32, bs: u32, bl: u32, ep_square: Option<u32>, major_minor_count: u32, move_gen: &MoveGen, zobrist: &Zobrist, half_move_clock: u32
     ) -> Self {
         let mut res: Board = Self {
-            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0, major_minor_count, zhash: 0
+            pieces, white_occupation, black_occupation, white_attacks: 0, black_attacks: 0, ep_square, ws, wl, bs, bl, turn, white_pinned: 0, black_pinned: 0, white_pinned_restrictions: [0u64; 64], black_pinned_restrictions: [0u64; 64], nof_checkers: 0, check_block_sqrs: 0, meta_attacks: 0, major_minor_count, zhash: 0, half_move_clock
         }; //set computable to some defaults and compute now to get correct vals
         let non_mover_attacks: u64 = move_gen.compute_attacked(&mut res, opposite_turn(turn));
         if turn == WHITE {res.black_attacks = non_mover_attacks} else {res.white_attacks = non_mover_attacks}
@@ -214,35 +216,12 @@ impl Board {
         } 
     }
 
-}
-
-
-impl Clone for Board {
-    fn clone(&self) -> Self {
-        return Self {
-            pieces: self.pieces.clone(),
-            white_occupation: self.white_occupation.clone(),
-            black_occupation: self.black_occupation.clone(),
-            white_attacks: self.white_attacks.clone(),
-            black_attacks: self.black_attacks.clone(),
-            ep_square: self.ep_square.clone(),
-            turn: self.turn.clone(),
-            nof_checkers: self.nof_checkers.clone(),
-            check_block_sqrs: self.check_block_sqrs,
-            white_pinned: self.white_pinned.clone(),
-            black_pinned: self.black_pinned.clone(),
-            white_pinned_restrictions: self.white_pinned_restrictions.clone(),
-            black_pinned_restrictions: self.black_pinned_restrictions.clone(),
-            meta_attacks: self.meta_attacks.clone(),
-            major_minor_count: self.major_minor_count.clone(),
-            zhash: self.zhash.clone(),
-            ws: self.ws.clone(),
-            wl: self.wl.clone(),
-            bs: self.bs.clone(),
-            bl: self.bl.clone()
-        }
+    pub fn is_fifty_move_draw(&self) -> bool {
+        return self.half_move_clock >= 100;
     }
+
 }
+
 
 impl PartialEq for Board {
     fn eq(&self, other: &Self) -> bool {

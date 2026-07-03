@@ -58,6 +58,8 @@ impl Game {
             return GameState::Stalemate;
         } else if self.cur_pos_is_threefold() {
             return GameState::DrawByRepetition;
+        } else if self.position.board.is_fifty_move_draw() {
+            return GameState::DrawByFiftyMoveRule;
         } else {
             return GameState::InProgress;
         }
