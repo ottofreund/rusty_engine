@@ -29,10 +29,18 @@ impl SearchData {
 
     pub fn in_three_fold(&self, pos: &Position) -> bool {
         let mut count: u32 = 1;
-        for i in 0..(self.board_hash_history.len() - 1) {
+        let mut i: usize;
+        if self.board_hash_history.len() % 2 == 0 {
+            i = 1;
+        } else {
+            i = 0;
+        }
+        let e: usize = self.board_hash_history.len() - 1;
+        while i < e {
             if pos.board.zhash == self.board_hash_history[i] {
                 count += 1;
             }
+            i += 2;
         }
         return count >= 3;
     }

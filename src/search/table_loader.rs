@@ -1,7 +1,5 @@
-use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
-use std::num::ParseIntError;
 
 
 pub fn read_table_value_file(file_path: &str) -> io::Result<Vec<i32>> {
