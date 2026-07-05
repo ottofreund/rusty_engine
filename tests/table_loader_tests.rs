@@ -1,4 +1,9 @@
-use std::{fs, io::Write, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    io::Write,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use rusty_engine::search::table_loader::read_table_value_file;
 

@@ -26,7 +26,7 @@ pub struct BoardStateInfo {
     pub nof_checkers: u32,
     pub check_block_sqrs: u64,
     pub mover_pinned: u64,
-    pub mover_pinned_restrictions: [u64 ; 64],
+    pub mover_pinned_restrictions: [u64; 64],
     pub meta_attacks: u64,
     pub opponent_attacked: u64,
     pub half_move_clock: u32,

@@ -1,7 +1,19 @@
-use std::{cmp::{max}};
+use std::cmp::max;
 
-use crate::{repr::{_move::{self, *}, move_gen::MoveGen, position::Position, types::NOF_PIECE_TYPES}, search::{eval::{Evaluator, MATE_EVAL}, search_config::*, search_data::SearchData}, utils::zobrist::{Zobrist}};
-
+use crate::{
+    repr::{
+        _move::{self, *},
+        move_gen::MoveGen,
+        position::Position,
+        types::NOF_PIECE_TYPES,
+    },
+    search::{
+        eval::{Evaluator, MATE_EVAL},
+        search_config::*,
+        search_data::SearchData,
+    },
+    utils::zobrist::Zobrist,
+};
 
 pub const MAX_SEARCH_DEPTH: usize = 50;
 const THREAD_COUNT: usize = 4;
@@ -15,18 +27,17 @@ const EATING_MULTIPLIER: i32 = 100;
 const BASELINE_SCORE: i32 = 1000; //to avoid underflow
 
 pub struct Searcher {
-    pub positions: [ Position ; THREAD_COUNT ],
-    pub search_data: [SearchData ; THREAD_COUNT],
+    pub positions: [Position; THREAD_COUNT],
+    pub search_data: [SearchData; THREAD_COUNT],
     pub multithreaded: bool,
     pub search_config: SearchConfig,
     pub evaluator: Evaluator,
+    last_sync_deviates_from_pv: bool
 }
-
 
 //minimax with alpha beta pruning, ran by iterative deepening
 //search heuristics in ordering of moves
 impl Searcher {
-
     pub fn import_position(&mut self, pos: &Position) {
         for i in 0..THREAD_COUNT {
             self.positions[i] = (*pos).clone();
@@ -34,35 +45,57 @@ impl Searcher {
         self.search_data = std::array::from_fn(|_| {
             return SearchData::new(pos);
         });
+        self.last_sync_deviates_from_pv = true;
     }
 
+    ///Both engine moves and user moves are synced
     pub fn sync_new_move(&mut self, new_pos: &Position, mov: u32) {
+        self.last_sync_deviates_from_pv = match self.collect_best_move() {
+            Some(bm) => bm != mov,
+            None => true
+        };
+        println!("last sync deviates from pv: {}", self.last_sync_deviates_from_pv);
         for i in 0..THREAD_COUNT {
             self.positions[i] = (*new_pos).clone();
             if _move::is_unrepeatable(mov) {
                 self.search_data[i].board_hash_history.clear();
-                self.search_data[i].board_hash_history.push(new_pos.board.zhash);
+                self.search_data[i]
+                    .board_hash_history
+                    .push(new_pos.board.zhash);
             } else {
-                self.search_data[i].board_hash_history.push(new_pos.board.zhash);
+                self.search_data[i]
+                    .board_hash_history
+                    .push(new_pos.board.zhash);
             }
-            //MAYBE DROP FIRST MOVE AND LEAVE REST
-            self.search_data[i].pv_move.fill(NULL_MOVE);
+            //Here can be distinguished if new move was according to the best variation or deviated
+            //If according to pv, then can skip lower depths of iterative deepening as much as possible,
+            //since would get the same result anyways
+            //Else if deviates, just start null out PV and start from scratch ig, engine probably has some punishing move now
+            if self.last_sync_deviates_from_pv {
+                self.search_data[i].pv.fill(NULL_MOVE);
+            } else {
+                self.drop_pv_head(i);
+            }
         }
     }
 
     pub fn from(pos: &Position) -> Searcher {
-        let positions: [ Position ; THREAD_COUNT ] = std::array::from_fn(|_| {
+        let positions: [Position; THREAD_COUNT] = std::array::from_fn(|_| {
             return (*pos).clone();
         });
-        let search_data: [SearchData ; THREAD_COUNT] = std::array::from_fn(|_| {
+        let search_data: [SearchData; THREAD_COUNT] = std::array::from_fn(|_| {
             return SearchData::new(pos);
         });
         return Self {
-            positions, search_data, multithreaded: false, search_config: SearchConfig::default(), evaluator: Evaluator::default()
-        }
+            positions,
+            search_data,
+            multithreaded: false,
+            search_config: SearchConfig::default(),
+            evaluator: Evaluator::default(),
+            last_sync_deviates_from_pv: true
+        };
     }
 
-    
     pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist) {
         if self.multithreaded {
             panic!("multithreaded search");
@@ -75,31 +108,45 @@ impl Searcher {
         }
     }
 
-    
     fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist) {
         match self.search_config.search_mode {
             SearchMode::StaticDepth(d) => {
                 self.search_static_d(d, idx, move_gen, zobrist);
-            },
+            }
             SearchMode::StaticTime(t) => {
                 return;
-            },
-            _ => panic!("unknown search mode")
+            }
+            _ => panic!("unknown search mode"),
         }
         return;
     }
 
-
     ///alpha-beta pruned negamax algorithm with iterative deepening
-    fn search_static_d(&mut self, target_d: usize, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist) {
-
-        let pos: &mut Position = &mut self.positions[idx];
-        let search_data: &mut SearchData = &mut self.search_data[idx];
+    fn search_static_d(
+        &mut self,
+        target_d: usize,
+        idx: usize,
+        move_gen: &MoveGen,
+        zobrist: &Zobrist,
+    ) {
         //cv: current variation, pv: primary variation
-        fn inner(d: usize, target_d: usize, alpha: i32, beta: i32,  pv: &mut [u32], prev_pv: &[u32], pos: &mut Position, evaluator: &Evaluator, search_data: &mut SearchData, move_gen: &MoveGen, zobrist: &Zobrist) -> i32 {
+        fn inner(
+            d: usize,
+            target_d: usize,
+            alpha: i32,
+            beta: i32,
+            pv: &mut [u32],
+            prev_pv: &[u32],
+            pos: &mut Position,
+            evaluator: &Evaluator,
+            search_data: &mut SearchData,
+            move_gen: &MoveGen,
+            zobrist: &Zobrist,
+        ) -> i32 {
             search_data.positions_searched += 1;
             let (s, e) = pos.search_move_bounds();
-            if s == e { //mate or stalemate
+            if s == e {
+                //mate or stalemate
                 if pos.board.nof_checkers > 0 {
                     return -MATE_EVAL + d as i32; //sooner mate is better
                 } else {
@@ -110,19 +157,31 @@ impl Searcher {
             } else if d == target_d {
                 return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
             }
-            
-            let mut eval: i32 = EVAL_INIT;            
-            
+
+            let mut eval: i32 = EVAL_INIT;
             let mut new_alpha: i32 = alpha;
             for i in s..e {
-                let mut child_pv: [u32 ; MAX_SEARCH_DEPTH + 1] = [ NULL_MOVE ; MAX_SEARCH_DEPTH + 1 ];
-                let mov: u32 = partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
+                let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
+                let mov: u32 =
+                    partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
                 pos.make_move(mov, true, false, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
-                let mov_eval: i32 = -inner(d + 1, target_d, -beta, -new_alpha, &mut child_pv, prev_pv, pos, evaluator, search_data, move_gen, zobrist);
+                let mov_eval: i32 = -inner(
+                    d + 1,
+                    target_d,
+                    -beta,
+                    -new_alpha,
+                    &mut child_pv,
+                    prev_pv,
+                    pos,
+                    evaluator,
+                    search_data,
+                    move_gen,
+                    zobrist,
+                );
                 search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
-                
+
                 if mov_eval > eval {
                     eval = mov_eval;
                     //child's pv becomes this node's pv
@@ -136,40 +195,82 @@ impl Searcher {
                     search_data.ab_cutoffs += 1;
                     return new_alpha;
                 }
-
             }
             return eval;
         }
         //iterative deepening:
-        let mut pv: [u32 ; MAX_SEARCH_DEPTH + 1] = [ NULL_MOVE ; MAX_SEARCH_DEPTH + 1 ];
-        for i in 1..=target_d {
-            let prev_pv: [u32 ; MAX_SEARCH_DEPTH + 1] = pv;
+        let synced_pv_depth: usize = self.count_pv_moves(idx);
+        let pos: &mut Position = &mut self.positions[idx];
+        let search_data: &mut SearchData = &mut self.search_data[idx];
+        let mut pv: [u32; MAX_SEARCH_DEPTH + 1] = search_data.pv;
+        for i in (synced_pv_depth + 1)..=target_d {
+            let prev_pv: [u32; MAX_SEARCH_DEPTH + 1] = pv;
             pv.fill(NULL_MOVE);
-            let eval: i32 = inner(0, i, ALPHA_INIT, BETA_INIT, &mut pv, &prev_pv, pos, &self.evaluator, search_data, move_gen, zobrist);
+            let eval: i32 = inner(
+                0,
+                i,
+                ALPHA_INIT,
+                BETA_INIT,
+                &mut pv,
+                &prev_pv,
+                pos,
+                &self.evaluator,
+                search_data,
+                move_gen,
+                zobrist,
+            );
             println!("at depth: {}, eval: {}", i, eval);
             search_data.cumul_positions_searched += search_data.positions_searched;
             search_data.log_performance();
             search_data.reset_temp_performance_data();
         }
-        
-        search_data.pv_move.fill(NULL_MOVE);
+
         let mut i = 0;
-        while i <= MAX_SEARCH_DEPTH {
-            search_data.pv_move[i] = pv[i];
+        while i < MAX_SEARCH_DEPTH {
+            search_data.pv[i] = pv[i];
             if pv[i] == NULL_MOVE {
                 break;
             }
             i += 1;
         }
 
-        println!("got pv: {:?}", search_data.pv_move.map(|m| _move::to_string(m)));
+        println!(
+            "got pv: {:?}",
+            search_data.pv.map(|m| _move::to_string(m))
+        );
 
         return;
     }
 
-    
-}
+    pub fn collect_best_move(&self) -> Option<u32> {
+        if self.multithreaded {
+            panic!("multithreaded search");
+        } else {
+            match self.search_data[0].pv[0] {
+                NULL_MOVE => None,
+                m => Some(m),
+            }
+        }
+    }
 
+    fn drop_pv_head(&mut self, idx: usize) {
+        let mut new_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
+        new_pv[0..MAX_SEARCH_DEPTH].copy_from_slice(&self.search_data[idx].pv[1..=MAX_SEARCH_DEPTH]);
+        self.search_data[idx].pv = new_pv;
+    }
+
+    fn count_pv_moves(&self, idx: usize) -> usize {
+        let mut i: usize = 0;
+        while i < MAX_SEARCH_DEPTH {
+            if self.search_data[idx].pv[i] == NULL_MOVE {
+                break;
+            }
+            i += 1;
+        }
+        return i;
+    }
+
+}
 
 //k == 1, so "selection pick", in place
 fn partial_selection_sort(move_arr_s: &mut [u32], pv_mv: u32, last_target: u32) -> u32 {
@@ -181,12 +282,12 @@ fn partial_selection_sort(move_arr_s: &mut [u32], pv_mv: u32, last_target: u32) 
     let mut best_m: u32 = NULL_MOVE;
     for i in 0..move_arr_s.len() {
         let mut cur_v: i32 = BASELINE_SCORE;
-        let mov: u32= move_arr_s[i];
+        let mov: u32 = move_arr_s[i];
         if mov == pv_mv {
             best_i = i;
             best_m = mov;
             break;
-        } 
+        }
         if _move::is_promotion(mov) {
             cur_v += PROMOTION_SCORE + _move::get_promoted_piece(mov) as i32;
         }
@@ -194,8 +295,10 @@ fn partial_selection_sort(move_arr_s: &mut [u32], pv_mv: u32, last_target: u32) 
             cur_v += LAST_TARGET_SCORE;
         }
         if _move::is_eating(mov) {
-            cur_v += EATING_MULTIPLIER * ((_move::eaten_piece(mov).unwrap() % NOF_PIECE_TYPES) as i32 - (_move::get_moved_piece(mov) % NOF_PIECE_TYPES) as i32) ;
-        } 
+            cur_v += EATING_MULTIPLIER
+                * ((_move::eaten_piece(mov).unwrap() % NOF_PIECE_TYPES) as i32
+                    - (_move::get_moved_piece(mov) % NOF_PIECE_TYPES) as i32);
+        }
         if cur_v > best_v {
             best_v = cur_v;
             best_i = i;

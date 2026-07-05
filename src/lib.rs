@@ -1,5 +1,5 @@
+pub mod game;
 pub mod repr;
+pub mod search;
 pub mod ui;
 pub mod utils;
-pub mod search;
-pub mod game;

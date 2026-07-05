@@ -1,6 +1,10 @@
-use crate::{game::game_state::GameState, repr::{_move, board::{Board}, move_gen::MoveGen, position::Position}, search::searcher::Searcher, utils::zobrist::Zobrist};
+use crate::{
+    game::game_state::GameState,
+    repr::{_move, board::Board, move_gen::MoveGen, position::Position},
+    search::searcher::Searcher,
+    utils::zobrist::Zobrist,
+};
 use std::fmt::Error;
-
 
 pub struct Game {
     pub position: Position,
@@ -8,12 +12,11 @@ pub struct Game {
     pub move_gen: MoveGen,
     pub zobrist: Zobrist,
     pub game_state: GameState,
-    pub board_history: Vec<Board>, 
-    repetition_relevant_history_idx: usize // [this..] are relevant for checking repetition
+    pub board_history: Vec<Board>,
+    repetition_relevant_history_idx: usize, // [this..] are relevant for checking repetition
 }
 
 impl Game {
-
     ///also imports to searcher to stay in sync
     pub fn import_position(&mut self, position: Position) {
         self.searcher.import_position(&position);
@@ -28,13 +31,15 @@ impl Game {
     ///Syncs the searcher if successful
     ///Returns Success(made_move) if successful
     pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32) -> Result<u32, Error> {
-        let mov: Option<u32> = self.position.legal_moves().iter().copied().find(|mov| 
-            _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr
-        );
+        let mov: Option<u32> =
+            self.position.legal_moves().iter().copied().find(|mov| {
+                _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr
+            });
         match mov {
             Some(m) => {
                 //println!("Successfully moved: {}", _move::to_string(m));
-                self.position.make_move(m, false, false, &self.move_gen, &self.zobrist);
+                self.position
+                    .make_move(m, false, false, &self.move_gen, &self.zobrist);
                 self.searcher.sync_new_move(&self.position, m);
                 if _move::is_unrepeatable(m) {
                     println!("move was unrepeatable");
@@ -44,10 +49,8 @@ impl Game {
                 self.game_state = self.current_game_state();
                 println!("Game state: {}", self.game_state.to_string());
                 return Ok(m);
-            },
-            None => {
-                return Err(Error::default())
             }
+            None => return Err(Error::default()),
         }
     }
 
@@ -90,8 +93,6 @@ impl Game {
             }
         }
     } */
-
-    
 }
 
 impl Default for Game {
@@ -101,7 +102,7 @@ impl Default for Game {
         let position: Position = Position::default(&move_gen, &zobrist);
         let searcher: Searcher = Searcher::from(&position);
         let board_history: Vec<Board> = vec![position.board.clone()];
-        
+
         return Self {
             position,
             searcher,
@@ -109,7 +110,7 @@ impl Default for Game {
             zobrist,
             game_state: GameState::InProgress,
             board_history,
-            repetition_relevant_history_idx: 0
-        }
+            repetition_relevant_history_idx: 0,
+        };
     }
 }

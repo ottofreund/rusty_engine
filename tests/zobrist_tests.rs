@@ -6,8 +6,7 @@ use rusty_engine::{
     utils::fen_tool::{self, DEFAULT_FEN},
 };
 
-const DEFAULT_BLACK_TO_MOVE_FEN: &str =
-    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1";
+const DEFAULT_BLACK_TO_MOVE_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1";
 const CASTLING_FEN: &str = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
 const NO_CASTLING_FEN: &str = "r3k2r/8/8/8/8/8/8/R3K2R w - - 0 1";
 const EN_PASSANT_FEN: &str = "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1";

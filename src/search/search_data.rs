@@ -1,29 +1,28 @@
-use crate::{repr::{_move::NULL_MOVE, position::Position}, search::searcher::MAX_SEARCH_DEPTH};
-
-
-
+use crate::{
+    repr::{_move::NULL_MOVE, position::Position},
+    search::searcher::MAX_SEARCH_DEPTH,
+};
 
 pub struct SearchData {
-    pub pv_move: [u32 ; MAX_SEARCH_DEPTH + 1], //next moves on last search's primary variation (i.e. search result)
+    pub pv: [u32; MAX_SEARCH_DEPTH + 1], //next moves on last search's primary variation (i.e. search result)
     pub mate_in: Option<u32>,
     pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
-    pub positions_searched: u64, //per search
+    pub positions_searched: u64,      //per search
     pub ab_cutoffs: u64,
-    pub cumul_positions_searched: u64
+    pub cumul_positions_searched: u64,
 }
 
 impl SearchData {
-
     pub fn new(pos: &Position) -> Self {
         let mut board_hash_history: Vec<u64> = Vec::with_capacity(32);
         board_hash_history.push(pos.board.zhash);
-        return Self { 
-            pv_move: [NULL_MOVE ; MAX_SEARCH_DEPTH + 1], 
+        return Self {
+            pv: [NULL_MOVE; MAX_SEARCH_DEPTH + 1],
             mate_in: None,
             board_hash_history: board_hash_history,
             positions_searched: 0,
             ab_cutoffs: 0,
-            cumul_positions_searched: 0
+            cumul_positions_searched: 0,
         };
     }
 
@@ -46,7 +45,10 @@ impl SearchData {
     }
 
     pub fn log_performance(&self) {
-        println!("positions searched: {}, ab cutoffs: {}", self.positions_searched, self.ab_cutoffs);
+        println!(
+            "positions searched: {}, ab cutoffs: {}",
+            self.positions_searched, self.ab_cutoffs
+        );
     }
 
     pub fn reset_temp_performance_data(&mut self) {
@@ -57,5 +59,4 @@ impl SearchData {
     pub fn reset_cumul_performance_data(&mut self) {
         self.cumul_positions_searched = 0;
     }
-
 }

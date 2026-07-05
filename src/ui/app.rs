@@ -1,22 +1,20 @@
-
+use iced::event::{self, Event};
 use iced::keyboard::{self};
 use iced::widget::image::Handle;
-use iced::widget::{Button, Image, TextInput, button, center, column, container, row, stack, text};
+use iced::widget::{button, center, column, container, row, stack, text, Button, Image, TextInput};
 use iced::{Border, Color, Element, Shadow, Size, Subscription};
-use iced::event::{self, Event};
 
-use iced_aw::{Menu, MenuBar, menu::*, card::*};
+use iced_aw::{card::*, menu::*, Menu, MenuBar};
 
 use crate::ui::image_handle::ImageHandle;
 use crate::ui::messages::*;
 
+use crate::game::game::Game;
 use crate::repr::board::square_to_string;
 use crate::repr::position::Position;
 use crate::repr::{_move, bitboard, types::*};
-use crate::game::game::Game;
 
 use std::time::{Duration, Instant};
-
 
 pub fn run_fr() -> iced::Result {
     iced::application(|| AppState::default(), update, view)
@@ -35,11 +33,10 @@ pub struct AppState {
     fen_input: String,
     show_error: bool,
     input_side: u32,
-    user_side: u32
+    user_side: u32,
 }
 
 impl AppState {
-    
     fn render_main_container(&self) -> Element<'_, Message, iced::Theme, iced::Renderer> {
         let mut columns = column!();
         columns = columns.push(self.render_menu_bar());
@@ -69,7 +66,8 @@ impl AppState {
     fn render_square(&self, square: u32) -> Element<'static, Message, iced::Theme, iced::Renderer> {
         let is_light = (square / 8 + square % 8) % 2 != 0;
         let is_selected = self.selected_square == Some(square);
-        let is_targeted: bool = self.selected_square.is_some() && self.selection_target_sqrs.contains(&square);
+        let is_targeted: bool =
+            self.selected_square.is_some() && self.selection_target_sqrs.contains(&square);
 
         let bg_color = if is_selected {
             SELECTED_SQUARE_COLOR
@@ -79,22 +77,28 @@ impl AppState {
             DARK_SQR_COLOR
         };
         let img_handle: Option<Handle> = self.get_img_for_square(square);
-        
+
         let btn = match img_handle {
             Some(handle) => button(Image::new(handle).width(SQR_SIZE).height(SQR_SIZE)),
-            None => button(text("").width(SQR_SIZE).height(SQR_SIZE).center())
-        }.width(SQR_SIZE)
-         .height(SQR_SIZE)
-         .style(move |_theme, _status| {
+            None => button(text("").width(SQR_SIZE).height(SQR_SIZE).center()),
+        }
+        .width(SQR_SIZE)
+        .height(SQR_SIZE)
+        .style(move |_theme, _status| {
             let mut style = iced::widget::button::Style::default();
             style.background = Some(iced::Background::Color(bg_color));
             style
-         })
-         .on_press(Message::SquareClicked(square));
-            
+        })
+        .on_press(Message::SquareClicked(square));
+
         let content: Element<'static, Message, iced::Theme, iced::Renderer>;
         if is_targeted {
-            if self.game.position.board.is_occupied_by(square, self.game.position.board.turn ^ 1) {
+            if self
+                .game
+                .position
+                .board
+                .is_occupied_by(square, self.game.position.board.turn ^ 1)
+            {
                 let handle: Handle = self.image_handle.target_circle_handle.clone();
                 content = stack!(btn, Image::new(handle).width(SQR_SIZE).height(SQR_SIZE)).into();
             } else {
@@ -104,38 +108,40 @@ impl AppState {
         } else {
             content = btn.into();
         }
-        container(content)
-            .width(SQR_SIZE)
-            .height(SQR_SIZE)
-            .into()
+        container(content).width(SQR_SIZE).height(SQR_SIZE).into()
     }
 
     fn render_menu_bar(&self) -> Element<'_, Message, iced::Theme, iced::Renderer> {
-        let white_button: Button<'_, Message, iced::Theme, iced::Renderer> = 
-            button("")
-                .style(|_theme, _status| input_button_style(true, self.input_side == WHITE))
-                .width(50.0).height(50.0)
-                .on_press(Message::InputSideWhitePressed);
-        let black_button: Button<'_, Message, iced::Theme, iced::Renderer> = 
-            button("")
-                .style(|_theme, _status| input_button_style(false, self.input_side == BLACK))
-                .width(50.0).height(50.0)
-                .on_press(Message::InputSideBlackPressed);
+        let white_button: Button<'_, Message, iced::Theme, iced::Renderer> = button("")
+            .style(|_theme, _status| input_button_style(true, self.input_side == WHITE))
+            .width(50.0)
+            .height(50.0)
+            .on_press(Message::InputSideWhitePressed);
+        let black_button: Button<'_, Message, iced::Theme, iced::Renderer> = button("")
+            .style(|_theme, _status| input_button_style(false, self.input_side == BLACK))
+            .width(50.0)
+            .height(50.0)
+            .on_press(Message::InputSideBlackPressed);
         let game_dd = Item::with_menu(
-        text("Game"),
-        Menu::new([
-            Item::new(button("Search").on_press(Message::SearchStart)),
-            Item::new(button("Starting Position").on_press(Message::NewDefaultPosPressed)),
-            Item::new(button("From FEN").on_press(Message::NewFenPosPressed)),
-            Item::new(TextInput::new("FEN string", &self.fen_input)
-                .on_input(Message::FenContentChanged)
-                .on_paste(Message::FenContentChanged).width(200.0)
-            ),
-            Item::new(row![
-                    white_button,
-                    black_button
-                ])
-            ].into()).max_width(200.0).padding(20.0).spacing(25.0),
+            text("Game"),
+            Menu::new(
+                [
+                    Item::new(button("Search").on_press(Message::SearchStart)),
+                    Item::new(button("Starting Position").on_press(Message::NewDefaultPosPressed)),
+                    Item::new(button("From FEN").on_press(Message::NewFenPosPressed)),
+                    Item::new(
+                        TextInput::new("FEN string", &self.fen_input)
+                            .on_input(Message::FenContentChanged)
+                            .on_paste(Message::FenContentChanged)
+                            .width(200.0),
+                    ),
+                    Item::new(row![white_button, black_button]),
+                ]
+                .into(),
+            )
+            .max_width(200.0)
+            .padding(20.0)
+            .spacing(25.0),
         );
         return MenuBar::new(vec![game_dd]).into();
     }
@@ -162,7 +168,7 @@ impl AppState {
                         self.selection_target_sqrs.push(_move::get_target(*mov));
                     }
                 })
-            },
+            }
             None => {}
         }
     }
@@ -176,98 +182,103 @@ impl AppState {
         self.selected_square = None;
         self.selection_target_sqrs = Vec::with_capacity(27);
     }
-
 }
-
-
 
 pub fn update(state: &mut AppState, msg: Message) {
     match msg {
-      Message::Reset => {
-        println!("Got to reset handler");
-        state.selected_square = None;
-      }
-      Message::SquareClicked(sqr) => {
-        println!("Clicked square: {}", square_to_string(sqr));
-        match state.selected_square {
-            Some(selected_sqr) => {
-                if selected_sqr == sqr { //unselect
-                    state.selected_square = None;
-                } else { //move from selected_sqr to sqr
-                    match state.game.try_make_move(selected_sqr, sqr) {
-                        Ok(m) => {
-                        
-                        },
-                        Err(_) => { //tried illegal move
-                            
+        Message::Reset => {
+            println!("Got to reset handler");
+            state.selected_square = None;
+        }
+        Message::SquareClicked(sqr) => {
+            println!("Clicked square: {}", square_to_string(sqr));
+            match state.selected_square {
+                Some(selected_sqr) => {
+                    if selected_sqr == sqr {
+                        //unselect
+                        state.selected_square = None;
+                    } else {
+                        //move from selected_sqr to sqr
+                        match state.game.try_make_move(selected_sqr, sqr) {
+                            Ok(m) => {}
+                            Err(_) => { //tried illegal move
+                            }
                         }
+                        state.reset_state_inputs();
                     }
+                }
+                None => {
+                    let mover_occupied: u64;
+                    if state.game.position.board.turn == WHITE {
+                        mover_occupied = state.game.position.board.white_occupation;
+                    } else {
+                        mover_occupied = state.game.position.board.black_occupation;
+                    }
+                    if bitboard::contains_square(mover_occupied, sqr) {
+                        state.selected_square = Some(sqr);
+                        state.update_selection_targets();
+                    } //else not valid selection
+                }
+            }
+        }
+        /* Message::Event(event) => match event { DEPRECATED
+          Event::Keyboard(keyboard::Event::KeyPressed {
+              key: keyboard::Key::Character(c), ..
+          }) => {
+              if c.len() == 1 && c.contains('r') {
+                  state.game.position.try_unmake_move().unwrap();
+              }
+          }
+          _ => {}
+        } */
+        Message::FenContentChanged(new_str) => {
+            state.fen_input = new_str;
+        }
+        Message::NewDefaultPosPressed => {
+            state.reset_state_inputs();
+            state.user_side = state.input_side;
+            state
+                .game
+                .import_position(Position::default(&state.game.move_gen, &state.game.zobrist));
+        }
+        Message::NewFenPosPressed => {
+            match Position::position_with(
+                &state.fen_input.trim(),
+                &state.game.move_gen,
+                &state.game.zobrist,
+            ) {
+                Ok(p) => {
                     state.reset_state_inputs();
+                    state.user_side = state.input_side;
+                    state.game.import_position(p);
                 }
-            },
-            None => {
-                let mover_occupied: u64;
-                if state.game.position.board.turn == WHITE {
-                    mover_occupied = state.game.position.board.white_occupation;
-                } else {
-                    mover_occupied = state.game.position.board.black_occupation;
+                Err(_) => {
+                    state.show_error = true;
                 }
-                if bitboard::contains_square(mover_occupied, sqr) {
-                    state.selected_square = Some(sqr);
-                    state.update_selection_targets();
-                } //else not valid selection
             }
         }
-      }
-      /* Message::Event(event) => match event { DEPRECATED
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Character(c), ..
-        }) => {
-            if c.len() == 1 && c.contains('r') {
-                state.game.position.try_unmake_move().unwrap();
-            }
+        Message::InputSideWhitePressed => {
+            state.input_side = WHITE;
         }
-        _ => {}
-      } */
-      Message::FenContentChanged(new_str) => {
-        state.fen_input = new_str;
-      }
-      Message::NewDefaultPosPressed => {
-        state.reset_state_inputs();
-        state.user_side = state.input_side;
-        state.game.import_position(Position::default(&state.game.move_gen, &state.game.zobrist));
-      }
-      Message::NewFenPosPressed => {
-        match Position::position_with(&state.fen_input.trim(), &state.game.move_gen, &state.game.zobrist) {
-            Ok(p) => {
-                state.reset_state_inputs();
-                state.user_side = state.input_side;
-                state.game.import_position(p);
-            }
-            Err(_) => {
-                state.show_error = true;
-            }
+        Message::InputSideBlackPressed => {
+            state.input_side = BLACK;
         }
-      }
-      Message::InputSideWhitePressed => {
-        state.input_side = WHITE;
-      }
-      Message::InputSideBlackPressed => {
-        state.input_side = BLACK;
-      }
-      Message::ErrorHandled => {
-        state.show_error = false;
-      }
-      Message::SearchStart => {
-        println!("Search start pressed");
-        let start: Instant = Instant::now();
-        state.game.searcher.start_search(&state.game.move_gen, &state.game.zobrist);
-        let time_took: Duration = start.elapsed();
-        println!("Search finished in {} ms", time_took.as_millis());
-      }
-      _ => {
-        println!("Unrecognized message");
-      }
+        Message::ErrorHandled => {
+            state.show_error = false;
+        }
+        Message::SearchStart => {
+            println!("Search start pressed");
+            let start: Instant = Instant::now();
+            state
+                .game
+                .searcher
+                .start_search(&state.game.move_gen, &state.game.zobrist);
+            let time_took: Duration = start.elapsed();
+            println!("Search finished in {} ms", time_took.as_millis());
+        }
+        _ => {
+            println!("Unrecognized message");
+        }
     }
     return;
 }
@@ -275,7 +286,11 @@ pub fn update(state: &mut AppState, msg: Message) {
 pub fn view(state: &AppState) -> Element<Message> {
     let main_content = state.render_main_container();
     if state.show_error {
-        let error_window = center(Card::new("Error", "Invalid FEN-string").on_close(Message::ErrorHandled).max_width(300.0));
+        let error_window = center(
+            Card::new("Error", "Invalid FEN-string")
+                .on_close(Message::ErrorHandled)
+                .max_width(300.0),
+        );
         return stack![main_content, error_window].into();
     } else {
         return main_content.into();
@@ -289,19 +304,27 @@ pub fn view(state: &AppState) -> Element<Message> {
 fn input_button_style(white: bool, selected: bool) -> iced::widget::button::Style {
     let main_color: iced::Color;
     let border_color: iced::Color;
-    if white {main_color = Color::WHITE;} else {main_color = Color::BLACK;}
-    if selected {border_color = Color::from_rgb(0.0, 1.0, 0.0);} else {border_color = Color::TRANSPARENT;}
+    if white {
+        main_color = Color::WHITE;
+    } else {
+        main_color = Color::BLACK;
+    }
+    if selected {
+        border_color = Color::from_rgb(0.0, 1.0, 0.0);
+    } else {
+        border_color = Color::TRANSPARENT;
+    }
     return iced::widget::button::Style {
         background: Some(iced::Background::Color(main_color)),
         border: Border {
             color: border_color,
             width: 2.0,
-            radius: 4.0.into()
+            radius: 4.0.into(),
         },
         shadow: Shadow::default(),
         snap: true,
-        text_color: Color::TRANSPARENT
-    }
+        text_color: Color::TRANSPARENT,
+    };
 }
 
 const LIGHT_SQR_COLOR: iced::Color = iced::Color::from_rgb(0.94, 0.90, 0.86);

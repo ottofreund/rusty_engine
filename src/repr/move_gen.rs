@@ -1,13 +1,22 @@
 use crate::repr::_move;
 use crate::repr::_move::*;
+use crate::repr::bitboard;
 use crate::repr::board::*;
 use crate::repr::magic_bb_loader::MagicBitboard;
-use crate::repr::types::*;
-use crate::repr::bitboard;
 use crate::repr::position::MOVE_ARR_SIZE;
+use crate::repr::types::*;
 use crate::utils::fen_tool;
 
-pub const KNIGHT_JUMPS: [(i32, i32); 8] = [(1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)]; //in format (dx, dy), used for precomputing attack_bbs
+pub const KNIGHT_JUMPS: [(i32, i32); 8] = [
+    (1, 2),
+    (2, 1),
+    (2, -1),
+    (1, -2),
+    (-1, -2),
+    (-2, -1),
+    (-2, 1),
+    (-1, 2),
+]; //in format (dx, dy), used for precomputing attack_bbs
 pub const DIAG_STEPS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, -1), (-1, 1)];
 pub const CARDINAL_STEPS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
 pub const AVG_BRANCH_FAC: usize = 35;
@@ -22,37 +31,57 @@ const MAX_PSEUDO: usize = 250; //guess for max pseudo moves in any pos
 
 ///Uses **magic_bb** handle for precomputed slide moves.
 pub struct MoveGen {
-    pub attack_bbs: [[u64 ; 64] ; 12], //empty board attack bbs, for pawns doesn't include forward moves, since they aren't attacked by pawns. Doesn't include en passant or castling either.
-    pub rook_bbs_no_edges: [u64 ; 64], //slides on empty board without the last square on edge for each direction. Used for block masks since they are optimized by not including edges.
-    pub bishop_bbs_no_edges: [u64 ; 64],
+    pub attack_bbs: [[u64; 64]; 12], //empty board attack bbs, for pawns doesn't include forward moves, since they aren't attacked by pawns. Doesn't include en passant or castling either.
+    pub rook_bbs_no_edges: [u64; 64], //slides on empty board without the last square on edge for each direction. Used for block masks since they are optimized by not including edges.
+    pub bishop_bbs_no_edges: [u64; 64],
     pub magic_bb: MagicBitboard,
 }
 
 impl MoveGen {
     ///Necessarily also inits magicbbs
     pub fn init() -> Self {
-        let mut attack_bbs: [[u64 ; 64] ; 12] = [[0 ; 64] ; 12];
-        let mut rook_bbs_no_edges: [u64 ; 64] = [0 ; 64];
-        let mut bishop_bbs_no_edges: [u64 ; 64] = [0 ; 64];
+        let mut attack_bbs: [[u64; 64]; 12] = [[0; 64]; 12];
+        let mut rook_bbs_no_edges: [u64; 64] = [0; 64];
+        let mut bishop_bbs_no_edges: [u64; 64] = [0; 64];
         //construct attack_bbs
         let mut x: u32 = 0;
         let mut y: u32 = 0;
         while y < 8 {
             while x < 8 {
-                process_square(x, y, &mut attack_bbs, &mut rook_bbs_no_edges, &mut bishop_bbs_no_edges);
+                process_square(
+                    x,
+                    y,
+                    &mut attack_bbs,
+                    &mut rook_bbs_no_edges,
+                    &mut bishop_bbs_no_edges,
+                );
                 x += 1;
             }
             x = 0;
             y += 1;
         }
-        let magic_bb: MagicBitboard = MagicBitboard::init_magic(&attack_bbs, &rook_bbs_no_edges, &bishop_bbs_no_edges, false); 
-        return Self { attack_bbs, rook_bbs_no_edges, bishop_bbs_no_edges, magic_bb }
+        let magic_bb: MagicBitboard =
+            MagicBitboard::init_magic(&attack_bbs, &rook_bbs_no_edges, &bishop_bbs_no_edges, false);
+        return Self {
+            attack_bbs,
+            rook_bbs_no_edges,
+            bishop_bbs_no_edges,
+            magic_bb,
+        };
     }
 
     ///Called once upon arriving to a new position. <br>
     ///Not called when reverting move, since just fetched from stack.
     ///Returns how many moves generated
-    pub fn generate_legal(&self, board: &Board, mover: u32, move_arr: &mut [u32 ; MOVE_ARR_SIZE], move_arr_s_idx: usize, in_search: bool, in_perft_debug: bool) -> usize {
+    pub fn generate_legal(
+        &self,
+        board: &Board,
+        mover: u32,
+        move_arr: &mut [u32; MOVE_ARR_SIZE],
+        move_arr_s_idx: usize,
+        in_search: bool,
+        in_perft_debug: bool,
+    ) -> usize {
         let mut generated: usize = 0;
         for mov in self.generate_pseudolegal(board, mover, in_search, in_perft_debug) {
             if MoveGen::pseudolegal_is_legal(mov, board, mover) {
@@ -63,9 +92,10 @@ impl MoveGen {
                         m = _move::with_eaten_piece(mov, 6);
                     } else {
                         m = mov; //white pawn is 0 so do nothing
-                    }   
+                    }
                 } else if _move::is_eating(mov) {
-                    let eaten_piece: u32 = board.get_piece_type_at(_move::get_target(mov), mover ^ 1);
+                    let eaten_piece: u32 =
+                        board.get_piece_type_at(_move::get_target(mov), mover ^ 1);
                     m = _move::with_eaten_piece(mov, eaten_piece);
                 } else {
                     m = mov;
@@ -87,39 +117,53 @@ impl MoveGen {
         let mover_pinned: u64;
         let mover_pinned_restrictions: u64;
         if mover == WHITE {
-            opponent_attacked = board.black_attacks; mover_king_piece_idx = 5; 
-            mover_pinned = board.white_pinned; mover_pinned_restrictions = board.white_pinned_restrictions[init as usize];
-        } 
-        else {
-            opponent_attacked = board.white_attacks; mover_king_piece_idx = 11;
-            mover_pinned = board.black_pinned; mover_pinned_restrictions = board.black_pinned_restrictions[init as usize];
+            opponent_attacked = board.black_attacks;
+            mover_king_piece_idx = 5;
+            mover_pinned = board.white_pinned;
+            mover_pinned_restrictions = board.white_pinned_restrictions[init as usize];
+        } else {
+            opponent_attacked = board.white_attacks;
+            mover_king_piece_idx = 11;
+            mover_pinned = board.black_pinned;
+            mover_pinned_restrictions = board.black_pinned_restrictions[init as usize];
         }
-        
+
         if board.nof_checkers > 0 {
             let moved_king: bool = moved_piece == W_KING || moved_piece == B_KING;
             if board.nof_checkers == 1 {
-                let mut blocked_check: bool = bitboard::contains_square(board.check_block_sqrs, target);
+                let mut blocked_check: bool =
+                    bitboard::contains_square(board.check_block_sqrs, target);
                 //also en passant can "block" check
-                let ep_offset: i32; if mover == WHITE {ep_offset = -8} else {ep_offset = 8}
-                if _move::is_en_passant(mov) && bitboard::contains_square(board.check_block_sqrs, (board.ep_square.expect("was ep but no ep sqr") as i32 + ep_offset) as u32) {
+                let ep_offset: i32;
+                if mover == WHITE {
+                    ep_offset = -8
+                } else {
+                    ep_offset = 8
+                }
+                if _move::is_en_passant(mov)
+                    && bitboard::contains_square(
+                        board.check_block_sqrs,
+                        (board.ep_square.expect("was ep but no ep sqr") as i32 + ep_offset) as u32,
+                    )
+                {
                     blocked_check = true;
                 }
                 //if one checker, can either move king to safe square or block (including eat)
                 if !moved_king && !blocked_check {
-                    return false; 
+                    return false;
                 } //if moved king, next section checks that king's target is legal
             } else if board.nof_checkers == 2 {
                 //if two checkers, only chance is to move king to safe square
                 if !moved_king {
-                    return false; 
+                    return false;
                 } //in next section we check if the king's target square is legal (not attacked)
-            } else { //shouldn't be > 2
+            } else {
+                //shouldn't be > 2
                 println!("breakpoint, cur board is:");
                 println!("{}", board.to_string());
                 println!("and fen is: {}", fen_tool::board_to_fen(board));
                 panic!("Counted 3 or more checkers, which should be impossible.")
             }
-            
         }
 
         if _move::is_en_passant(mov) && board.get_king_sqr_idx(mover) / 8 == init / 8 {
@@ -146,9 +190,17 @@ impl MoveGen {
                 } else {
                     scan_start_sqr = init;
                 }
-                let slide_bb_right: u64 = slide_to_dir(scan_start_sqr, apply_step_f, end_sqr_bb, board.total_occupation(), true);
+                let slide_bb_right: u64 = slide_to_dir(
+                    scan_start_sqr,
+                    apply_step_f,
+                    end_sqr_bb,
+                    board.total_occupation(),
+                    true,
+                );
                 if (king_on_left_side && (slide_bb_right & opponent_horizontal_sliding > 0))
-                    || (!king_on_left_side && bitboard::contains_square(slide_bb_right, mover_king_sqr)) {
+                    || (!king_on_left_side
+                        && bitboard::contains_square(slide_bb_right, mover_king_sqr))
+                {
                     //necessary to scan left, could be edge case
                     apply_step_f = |x: u32| x - 1;
                     end_sqr_bb = FILES[0];
@@ -157,16 +209,25 @@ impl MoveGen {
                     } else {
                         scan_start_sqr = init - 1;
                     }
-                    let slide_bb_left: u64 = slide_to_dir(scan_start_sqr, apply_step_f, end_sqr_bb, board.total_occupation(), true);
-                    if (king_on_left_side && bitboard::contains_square(slide_bb_left, mover_king_sqr))
-                    || (!king_on_left_side && (slide_bb_left & opponent_horizontal_sliding > 0)) {
-                        return false
+                    let slide_bb_left: u64 = slide_to_dir(
+                        scan_start_sqr,
+                        apply_step_f,
+                        end_sqr_bb,
+                        board.total_occupation(),
+                        true,
+                    );
+                    if (king_on_left_side
+                        && bitboard::contains_square(slide_bb_left, mover_king_sqr))
+                        || (!king_on_left_side && (slide_bb_left & opponent_horizontal_sliding > 0))
+                    {
+                        return false;
                     }
-                }         
+                }
             }
         } else if moved_piece == mover_king_piece_idx {
             if bitboard::contains_square(opponent_attacked, target)
-                || bitboard::contains_square(board.meta_attacks, target) {
+                || bitboard::contains_square(board.meta_attacks, target)
+            {
                 return false;
             } else {
                 return true;
@@ -181,16 +242,38 @@ impl MoveGen {
         return true;
     }
 
-    pub fn generate_pseudolegal(&self, board: &Board, mover: u32, in_search: bool, in_perft_debug: bool) -> Vec<u32> {
+    pub fn generate_pseudolegal(
+        &self,
+        board: &Board,
+        mover: u32,
+        in_search: bool,
+        in_perft_debug: bool,
+    ) -> Vec<u32> {
         let mut res: Vec<u32> = Vec::with_capacity(MAX_PSEUDO);
         let mut i: usize;
         let e: usize;
-        if mover == WHITE {i = 0; e = 6;} else {i = 6; e = 12;}
+        if mover == WHITE {
+            i = 0;
+            e = 6;
+        } else {
+            i = 6;
+            e = 12;
+        }
         while i < e {
             let mut piece_bb: u64 = board.pieces[i];
             while piece_bb != 0 {
                 let piece_idx: u32 = bitboard::pop_lsb(&mut piece_bb);
-                self.pseudolegal_for(piece_idx, i as u32, mover, board, &mut res, false, false, in_search, in_perft_debug);
+                self.pseudolegal_for(
+                    piece_idx,
+                    i as u32,
+                    mover,
+                    board,
+                    &mut res,
+                    false,
+                    false,
+                    in_search,
+                    in_perft_debug,
+                );
             }
             i += 1;
         }
@@ -205,29 +288,66 @@ impl MoveGen {
     ///3. If !**keep_protected**, remove "eating own piece" moves by binary ANDing with !own_occupation <br>
     ///4. If **targets_only** just return targets bitboard.
     ///5. Else Pop-lsb 1-by-1 and make move and add to **move_vec** until none left.
-    pub fn pseudolegal_for(&self, from: u32, piece: u32, mover: u32, board: &Board, move_vec: &mut Vec<u32>, keep_protected: bool, targets_only: bool, in_search: bool, in_perft_debug: bool) -> u64 {
+    pub fn pseudolegal_for(
+        &self,
+        from: u32,
+        piece: u32,
+        mover: u32,
+        board: &Board,
+        move_vec: &mut Vec<u32>,
+        keep_protected: bool,
+        targets_only: bool,
+        in_search: bool,
+        in_perft_debug: bool,
+    ) -> u64 {
         if piece == W_PAWN || piece == B_PAWN {
             //no en passant from this
-            pseudolegal_pawn(from, mover, board, self, move_vec, in_search, in_perft_debug);
+            pseudolegal_pawn(
+                from,
+                mover,
+                board,
+                self,
+                move_vec,
+                in_search,
+                in_perft_debug,
+            );
             return 0;
         }
 
         let mut targets: u64 = match piece {
-            W_KNIGHT | B_KNIGHT =>  self.attack_bbs[1][from as usize],
-            W_BISHOP | B_BISHOP =>  {
-                self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, bitboard::with_clear_square(board.total_occupation(), from), false), false)
-            },
-            W_ROOK | B_ROOK =>  {
-                self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, bitboard::with_clear_square(board.total_occupation(), from), true), true)
-            },
-            W_QUEEN | B_QUEEN =>  {
+            W_KNIGHT | B_KNIGHT => self.attack_bbs[1][from as usize],
+            W_BISHOP | B_BISHOP => self.get_sliding_for(
+                from as usize,
+                self.get_relevant_blockers(
+                    from as usize,
+                    bitboard::with_clear_square(board.total_occupation(), from),
+                    false,
+                ),
+                false,
+            ),
+            W_ROOK | B_ROOK => self.get_sliding_for(
+                from as usize,
+                self.get_relevant_blockers(
+                    from as usize,
+                    bitboard::with_clear_square(board.total_occupation(), from),
+                    true,
+                ),
+                true,
+            ),
+            W_QUEEN | B_QUEEN => {
                 let blockers: u64 = bitboard::with_clear_square(board.total_occupation(), from);
-                self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, blockers, true), true)
-                    |
-                self.get_sliding_for(from as usize, self.get_relevant_blockers(from as usize, blockers, false), false)
-            },
+                self.get_sliding_for(
+                    from as usize,
+                    self.get_relevant_blockers(from as usize, blockers, true),
+                    true,
+                ) | self.get_sliding_for(
+                    from as usize,
+                    self.get_relevant_blockers(from as usize, blockers, false),
+                    false,
+                )
+            }
             W_KING | B_KING => self.attack_bbs[5][from as usize],
-            _ => panic!("Couldn't match piece in pseudolegal_for. Reached unreachable case.")    
+            _ => panic!("Couldn't match piece in pseudolegal_for. Reached unreachable case."),
         };
         //3.
         let opponent_occupied: u64;
@@ -242,10 +362,12 @@ impl MoveGen {
             }
             opponent_occupied = board.white_occupation;
         }
-        if targets_only { //4.
+        if targets_only {
+            //4.
             return targets;
-        } else { //5.
-            while targets != 0 { 
+        } else {
+            //5.
+            while targets != 0 {
                 let target_sqr: u32 = bitboard::pop_lsb(&mut targets);
                 let is_take: bool = bitboard::contains_square(opponent_occupied, target_sqr);
                 move_vec.push(_move::create(from, target_sqr, is_take, mover, piece));
@@ -259,9 +381,11 @@ impl MoveGen {
     /// does NOT remove own pieces here yet since defended pieces are also of interest.
     pub fn get_sliding_for(&self, sqr: usize, rel_blockers: u64, rook: bool) -> u64 {
         if rook {
-            return self.magic_bb.rook_slide_bbs[self.magic_bb.get_magic_idx(sqr, rel_blockers, true)];
+            return self.magic_bb.rook_slide_bbs
+                [self.magic_bb.get_magic_idx(sqr, rel_blockers, true)];
         } else {
-            return self.magic_bb.bishop_slide_bbs[self.magic_bb.get_magic_idx(sqr, rel_blockers, false)];
+            return self.magic_bb.bishop_slide_bbs
+                [self.magic_bb.get_magic_idx(sqr, rel_blockers, false)];
         }
     }
 
@@ -294,8 +418,8 @@ impl MoveGen {
         //first reset bitboards containing previous pinned info
         board.white_pinned = 0;
         board.black_pinned = 0;
-        board.white_pinned_restrictions = [0 ; 64];
-        board.black_pinned_restrictions = [0 ; 64];
+        board.white_pinned_restrictions = [0; 64];
+        board.black_pinned_restrictions = [0; 64];
         board.meta_attacks = 0;
         //compute new pins
         self.pinned_for_specified(false, board, side);
@@ -315,7 +439,7 @@ impl MoveGen {
             } else {
                 opponent_sliding = board.pieces[10] | board.pieces[9];
                 empty_sliding_from_king = self.attack_bbs[3][king_sqr_idx];
-            }       
+            }
         } else {
             if diag {
                 opponent_sliding = board.pieces[4] | board.pieces[2];
@@ -323,40 +447,65 @@ impl MoveGen {
             } else {
                 opponent_sliding = board.pieces[4] | board.pieces[3];
                 empty_sliding_from_king = self.attack_bbs[3][king_sqr_idx];
-            }       
+            }
         }
-        
+
         let mut potential_pinners: u64 = opponent_sliding & empty_sliding_from_king;
         //2.
-        if potential_pinners == 0 { return }; //no potential pinners
-        //3.
-        let rpp: u64 = self.get_sliding_for(king_sqr_idx, self.get_relevant_blockers(king_sqr_idx, opponent_sliding, !diag), !diag);
+        if potential_pinners == 0 {
+            return;
+        }; //no potential pinners
+           //3.
+        let rpp: u64 = self.get_sliding_for(
+            king_sqr_idx,
+            self.get_relevant_blockers(king_sqr_idx, opponent_sliding, !diag),
+            !diag,
+        );
         let total_occupation: u64 = board.white_occupation | board.black_occupation;
         //4.
         while potential_pinners != 0 {
             //4.1
             let pp_sqr_idx: usize = bitboard::pop_lsb(&mut potential_pinners) as usize; //potential pinner sqr idx
-            //4.2
-            let specific_rpp: u64 = rpp & self.get_sliding_for(pp_sqr_idx, self.get_relevant_blockers(pp_sqr_idx, 1 << king_sqr_idx, !diag), !diag);
+                                                                                        //4.2
+            let specific_rpp: u64 = rpp
+                & self.get_sliding_for(
+                    pp_sqr_idx,
+                    self.get_relevant_blockers(pp_sqr_idx, 1 << king_sqr_idx, !diag),
+                    !diag,
+                );
             //4.3
             let occupied_rpp: u64 = specific_rpp & total_occupation;
             //4.4
-            if occupied_rpp.count_ones() == 1 { //we have pinner
+            if occupied_rpp.count_ones() == 1 {
+                //we have pinner
                 let pinner_idx: u32 = occupied_rpp.trailing_zeros(); //4.4.1
-                //4.4.2
+                                                                     //4.4.2
                 if side == WHITE {
                     bitboard::set_square(&mut board.white_pinned, pinner_idx);
-                    board.white_pinned_restrictions[pinner_idx as usize] |= bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat pinner;
+                    board.white_pinned_restrictions[pinner_idx as usize] |=
+                        bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32);
+                //can also eat pinner;
                 } else {
                     bitboard::set_square(&mut board.black_pinned, pinner_idx);
-                    board.black_pinned_restrictions[pinner_idx as usize] |= bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat pinner;
+                    board.black_pinned_restrictions[pinner_idx as usize] |=
+                        bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32);
+                    //can also eat pinner;
                 }
-            } else if occupied_rpp.count_ones() == 0 { //we have a sliding checker, set the check_block_sqrs
-                board.check_block_sqrs |= bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat checker so set pp_sqr_idx
-                //with sliding check we have a meta-attack behind king
+            } else if occupied_rpp.count_ones() == 0 {
+                //we have a sliding checker, set the check_block_sqrs
+                board.check_block_sqrs |=
+                    bitboard::with_set_square(specific_rpp, pp_sqr_idx as u32); //can also eat checker so set pp_sqr_idx
+                                                                                //with sliding check we have a meta-attack behind king
                 let empty_board_slides: u64;
-                if diag { empty_board_slides = self.attack_bbs[2][pp_sqr_idx]; } else { empty_board_slides = self.attack_bbs[3][pp_sqr_idx]; }
-                board.meta_attacks |= self.attack_bbs[5][king_sqr_idx] & empty_board_slides & !specific_rpp & !(1 << king_sqr_idx);
+                if diag {
+                    empty_board_slides = self.attack_bbs[2][pp_sqr_idx];
+                } else {
+                    empty_board_slides = self.attack_bbs[3][pp_sqr_idx];
+                }
+                board.meta_attacks |= self.attack_bbs[5][king_sqr_idx]
+                    & empty_board_slides
+                    & !specific_rpp
+                    & !(1 << king_sqr_idx);
             }
         }
     }
@@ -368,31 +517,59 @@ impl MoveGen {
     pub fn compute_attacked(&self, board: &mut Board, side: u32) -> u64 {
         let mut res: u64 = pawn_attacked(board, side);
         let opponent_king_sqr: u32 = board.get_king_sqr_idx(side ^ 1);
-        if bitboard::contains_square(res, opponent_king_sqr) { //pawn checker
+        if bitboard::contains_square(res, opponent_king_sqr) {
+            //pawn checker
             board.nof_checkers += 1;
             //set pawn check block sqr
-            let mover_pawns: u64; let l_offset: i32; let r_offset: i32;
-            if side == WHITE
-            {mover_pawns = board.pieces[0]; l_offset = -9; r_offset = -7;} else 
-            {mover_pawns = board.pieces[6]; l_offset = 7; r_offset = 9;}
+            let mover_pawns: u64;
+            let l_offset: i32;
+            let r_offset: i32;
+            if side == WHITE {
+                mover_pawns = board.pieces[0];
+                l_offset = -9;
+                r_offset = -7;
+            } else {
+                mover_pawns = board.pieces[6];
+                l_offset = 7;
+                r_offset = 9;
+            }
             //possible left pawn checker
             if !bitboard::contains_square(FILES[0], opponent_king_sqr) {
-                board.check_block_sqrs |= mover_pawns & (1 << (opponent_king_sqr as i32 + l_offset));
+                board.check_block_sqrs |=
+                    mover_pawns & (1 << (opponent_king_sqr as i32 + l_offset));
             }
             //possible right pawn checker
             if !bitboard::contains_square(FILES[7], opponent_king_sqr) {
-                board.check_block_sqrs |= mover_pawns & (1 << (opponent_king_sqr as i32 + r_offset));
+                board.check_block_sqrs |=
+                    mover_pawns & (1 << (opponent_king_sqr as i32 + r_offset));
             }
         }
         let mut i: usize;
         let e: usize;
-        if side == WHITE {i = 1; e = 6;} else {i = 7; e = 12;} //no pawns
+        if side == WHITE {
+            i = 1;
+            e = 6;
+        } else {
+            i = 7;
+            e = 12;
+        } //no pawns
         while i < e {
             let mut piece_bb: u64 = board.pieces[i];
             while piece_bb != 0 {
                 let piece_idx: u32 = bitboard::pop_lsb(&mut piece_bb);
-                let targets: u64 = self.pseudolegal_for(piece_idx, i as u32, side, board, &mut Vec::new(), true, true, true, false);
-                if bitboard::contains_square(targets, opponent_king_sqr) { //see if checker
+                let targets: u64 = self.pseudolegal_for(
+                    piece_idx,
+                    i as u32,
+                    side,
+                    board,
+                    &mut Vec::new(),
+                    true,
+                    true,
+                    true,
+                    false,
+                );
+                if bitboard::contains_square(targets, opponent_king_sqr) {
+                    //see if checker
                     board.nof_checkers += 1;
                     bitboard::set_square(&mut board.check_block_sqrs, piece_idx);
                 }
@@ -402,13 +579,18 @@ impl MoveGen {
         }
         return res;
     }
-
 }
 
 ///Compute and add attacking bitboard for all pieces at (x, y)
-fn process_square(x: u32, y: u32, attack_bbs: &mut[[u64 ; 64] ; 12], rook_bbs_no_edges: &mut[u64 ; 64], bishop_bbs_no_edges: &mut[u64 ; 64]) {
+fn process_square(
+    x: u32,
+    y: u32,
+    attack_bbs: &mut [[u64; 64]; 12],
+    rook_bbs_no_edges: &mut [u64; 64],
+    bishop_bbs_no_edges: &mut [u64; 64],
+) {
     let sqr_idx: u32 = x % 8 + y * 8;
-    //with pawns moves for black the same as white but flipped and mirrored 
+    //with pawns moves for black the same as white but flipped and mirrored
     //for all other pieces attacking squares are identical for white and black
     //1. pawn attacks, flip bb for black corresponding (at different idx)
     let white_pawn_bb: u64 = pawn_attacks_white_for(sqr_idx);
@@ -419,7 +601,8 @@ fn process_square(x: u32, y: u32, attack_bbs: &mut[[u64 ; 64] ; 12], rook_bbs_no
     let mut bb_knight: u64 = 0;
     for jump in KNIGHT_JUMPS {
         let target: (i32, i32) = (x as i32 + jump.0, y as i32 + jump.1);
-        if target.0 >= 0 && target.0 < 8 && target.1 >= 0 && target.1 < 8 { //add if in bounds of board
+        if target.0 >= 0 && target.0 < 8 && target.1 >= 0 && target.1 < 8 {
+            //add if in bounds of board
             bitboard::set_square(&mut bb_knight, (target.0 % 8 + target.1 * 8) as u32);
         }
     }
@@ -428,13 +611,14 @@ fn process_square(x: u32, y: u32, attack_bbs: &mut[[u64 ; 64] ; 12], rook_bbs_no
     //3. bishop attacks
     let mut bishop_bb: u64 = 0;
     let mut king_bb: u64 = 0; //simultaneously compute king diagonals (when 1 step taken)
-    //in each diag dir take steps as long as on board
+                              //in each diag dir take steps as long as on board
     for diag_step in DIAG_STEPS {
         let mut cur_target = (x as i32 + diag_step.0, y as i32 + diag_step.1);
         let mut steps_taken: u32 = 1;
         while cur_target.0 >= 0 && cur_target.0 < 8 && cur_target.1 >= 0 && cur_target.1 < 8 {
             bitboard::set_square(&mut bishop_bb, (cur_target.0 % 8 + cur_target.1 * 8) as u32);
-            if steps_taken == 1 { //set king bb
+            if steps_taken == 1 {
+                //set king bb
                 bitboard::set_square(&mut king_bb, (cur_target.0 % 8 + cur_target.1 * 8) as u32);
             }
             cur_target.0 += diag_step.0;
@@ -452,7 +636,8 @@ fn process_square(x: u32, y: u32, attack_bbs: &mut[[u64 ; 64] ; 12], rook_bbs_no
         let mut steps_taken: u32 = 1;
         while cur_target.0 >= 0 && cur_target.0 < 8 && cur_target.1 >= 0 && cur_target.1 < 8 {
             bitboard::set_square(&mut rook_bb, (cur_target.0 % 8 + cur_target.1 * 8) as u32);
-            if steps_taken == 1 { //set king bb
+            if steps_taken == 1 {
+                //set king bb
                 bitboard::set_square(&mut king_bb, (cur_target.0 % 8 + cur_target.1 * 8) as u32);
             }
             cur_target.0 += cardinal_step.0;
@@ -473,23 +658,33 @@ fn process_square(x: u32, y: u32, attack_bbs: &mut[[u64 ; 64] ; 12], rook_bbs_no
     bishop_bbs_no_edges[sqr_idx as usize] = naive_bishop_sliding(sqr_idx, 0, false);
 }
 
-
 ///Returns all variations of blocker masks from **full_attack_bb**. <br/>
 ///**attack_bb_no_edges** must be defined if the last square before edge is wished to not be included
-pub fn generate_all_blocker_masks(mut full_attack_bb: u64, attack_bb_no_edges: Option<u64>) -> Vec<u64> {
+pub fn generate_all_blocker_masks(
+    mut full_attack_bb: u64,
+    attack_bb_no_edges: Option<u64>,
+) -> Vec<u64> {
     let include_edges: bool = attack_bb_no_edges.is_none();
     let mut res: Vec<u64> = Vec::new();
     if !include_edges {
         full_attack_bb &= attack_bb_no_edges.expect("Checked that Some but was None.")
     }
     let mut cur_block_mask: u64 = full_attack_bb;
-    //iterate through all subsets of blocking mask and add to res 
+    //iterate through all subsets of blocking mask and add to res
     loop {
         if cur_block_mask == 0 {
-            if include_edges {res.push(cur_block_mask)} else {res.push(cur_block_mask & attack_bb_no_edges.unwrap())}
+            if include_edges {
+                res.push(cur_block_mask)
+            } else {
+                res.push(cur_block_mask & attack_bb_no_edges.unwrap())
+            }
             break;
         }
-        if include_edges {res.push(cur_block_mask)} else {res.push(cur_block_mask & attack_bb_no_edges.unwrap())}
+        if include_edges {
+            res.push(cur_block_mask)
+        } else {
+            res.push(cur_block_mask & attack_bb_no_edges.unwrap())
+        }
         cur_block_mask = (cur_block_mask - 1) & full_attack_bb;
     }
     return res;
@@ -526,18 +721,29 @@ pub fn naive_bishop_sliding(sqr: u32, blockers: u64, include_edge: bool) -> u64 
 }
 
 ///generalize stepping to some direction with end edge and blockers to find possible sliding squares returned in bb
-fn slide_to_dir(sqr: u32, apply_step_f: fn(u32) -> u32, end_sqr_bb: u64, blockers: u64, include_edge: bool) -> u64 {
+fn slide_to_dir(
+    sqr: u32,
+    apply_step_f: fn(u32) -> u32,
+    end_sqr_bb: u64,
+    blockers: u64,
+    include_edge: bool,
+) -> u64 {
     let mut res: u64 = 0;
     let mut cur_sqr: u32 = sqr;
-    if !bitboard::contains_square(end_sqr_bb, cur_sqr) { //if not already on edge (end_sqr_bb)
+    if !bitboard::contains_square(end_sqr_bb, cur_sqr) {
+        //if not already on edge (end_sqr_bb)
         cur_sqr = apply_step_f(cur_sqr);
-        while !bitboard::contains_square(blockers, cur_sqr) && !bitboard::contains_square(end_sqr_bb, cur_sqr) { //stop when blocker or on end edge (end_sqr_bb)
+        while !bitboard::contains_square(blockers, cur_sqr)
+            && !bitboard::contains_square(end_sqr_bb, cur_sqr)
+        {
+            //stop when blocker or on end edge (end_sqr_bb)
             res |= 1 << cur_sqr;
             cur_sqr = apply_step_f(cur_sqr);
         }
         //now add the blocker or edge if needed
         let on_edge: bool = bitboard::contains_square(EDGES, cur_sqr);
-        if (on_edge && include_edge) || !on_edge { //always take blocker if not on edge
+        if (on_edge && include_edge) || !on_edge {
+            //always take blocker if not on edge
             res |= 1 << cur_sqr;
         }
     }
@@ -548,7 +754,7 @@ fn slide_to_dir(sqr: u32, apply_step_f: fn(u32) -> u32, end_sqr_bb: u64, blocker
 ///Computes the attacking squares for **sqr** from white's perspective
 fn pawn_attacks_white_for(sqr: u32) -> u64 {
     let non_accessible_ranks: u64 = RANKS[0] | RANKS[7]; //first and last rank non-accessible
-    if bitboard::contains_square(non_accessible_ranks, sqr) { 
+    if bitboard::contains_square(non_accessible_ranks, sqr) {
         return 0;
     }
     let mut res: u64 = 0;
@@ -561,28 +767,39 @@ fn pawn_attacks_white_for(sqr: u32) -> u64 {
 
 ///Adds LEGAL castling moves for **mover** to **move_vec**.
 fn add_castling(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
-    if board.nof_checkers == 0 { //can't castle from check
+    if board.nof_checkers == 0 {
+        //can't castle from check
         let opponent_attacks: u64;
         if mover == WHITE {
             opponent_attacks = board.black_attacks;
             let total_occ: u64 = board.total_occupation();
-            if board.ws() && WS_CASTLING_GAP_BB & (total_occ | opponent_attacks) == 0 { //short is legal
+            if board.ws() && WS_CASTLING_GAP_BB & (total_occ | opponent_attacks) == 0 {
+                //short is legal
                 move_vec.push(WHITE_SHORT);
             }
-            if board.wl() && WL_CASTLING_GAP_BB & total_occ == 0 && WL_ATTACK_GAP_BB & opponent_attacks == 0 { //long is legal
+            if board.wl()
+                && WL_CASTLING_GAP_BB & total_occ == 0
+                && WL_ATTACK_GAP_BB & opponent_attacks == 0
+            {
+                //long is legal
                 move_vec.push(WHITE_LONG);
             }
         } else {
             opponent_attacks = board.white_attacks;
             let total_occ: u64 = board.total_occupation();
-            if board.bs() && BS_CASTLING_GAP_BB & (total_occ | opponent_attacks) == 0 { //short is legal
+            if board.bs() && BS_CASTLING_GAP_BB & (total_occ | opponent_attacks) == 0 {
+                //short is legal
                 move_vec.push(BLACK_SHORT);
             }
-            if board.bl() && BL_CASTLING_GAP_BB & total_occ == 0 && BL_ATTACK_GAP_BB & opponent_attacks == 0 { //long is legal
+            if board.bl()
+                && BL_CASTLING_GAP_BB & total_occ == 0
+                && BL_ATTACK_GAP_BB & opponent_attacks == 0
+            {
+                //long is legal
                 move_vec.push(BLACK_LONG);
             }
         }
-    } 
+    }
 }
 
 ///Adds **pseudolegal** en passants to move_vec
@@ -593,15 +810,35 @@ pub fn add_en_passant(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
         let r_sqr: u32;
         let pawn_piece_idx: u32;
         if mover == WHITE {
-            mover_pawns = board.pieces[0]; l_sqr = ep_square - 9; r_sqr = ep_square - 7; pawn_piece_idx = 0;
+            mover_pawns = board.pieces[0];
+            l_sqr = ep_square - 9;
+            r_sqr = ep_square - 7;
+            pawn_piece_idx = 0;
         } else {
-            mover_pawns = board.pieces[6]; l_sqr = ep_square + 7; r_sqr = ep_square + 9; pawn_piece_idx = 6;
+            mover_pawns = board.pieces[6];
+            l_sqr = ep_square + 7;
+            r_sqr = ep_square + 9;
+            pawn_piece_idx = 6;
         }
-        if !bitboard::contains_square(FILES[0], ep_square) && bitboard::contains_square(mover_pawns, l_sqr) {
-            move_vec.push(_move::create_en_passant(l_sqr, ep_square, mover, pawn_piece_idx))
+        if !bitboard::contains_square(FILES[0], ep_square)
+            && bitboard::contains_square(mover_pawns, l_sqr)
+        {
+            move_vec.push(_move::create_en_passant(
+                l_sqr,
+                ep_square,
+                mover,
+                pawn_piece_idx,
+            ))
         }
-        if !bitboard::contains_square(FILES[7], ep_square) && bitboard::contains_square(mover_pawns, r_sqr) {
-            move_vec.push(_move::create_en_passant(r_sqr, ep_square, mover, pawn_piece_idx))
+        if !bitboard::contains_square(FILES[7], ep_square)
+            && bitboard::contains_square(mover_pawns, r_sqr)
+        {
+            move_vec.push(_move::create_en_passant(
+                r_sqr,
+                ep_square,
+                mover,
+                pawn_piece_idx,
+            ))
         }
     }
 }
@@ -609,7 +846,15 @@ pub fn add_en_passant(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
 /// Add all pseudolegal pawn moves for pawn on square **from** and color **mover** on **board** to **move_vec** . <br>
 /// if **in_search**, only queen and knight promotions are generated
 /// NO EN PASSANT
-pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen, move_vec: &mut Vec<u32>, in_search: bool, in_perft_debug: bool) {
+pub fn pseudolegal_pawn(
+    from: u32,
+    mover: u32,
+    board: &Board,
+    move_gen: &MoveGen,
+    move_vec: &mut Vec<u32>,
+    in_search: bool,
+    in_perft_debug: bool,
+) {
     //following are relative to color:
     let is_promotion: bool;
     let forward: u32;
@@ -617,26 +862,43 @@ pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen
     let pawn_start_rank: u64;
     let pawn_piece_idx: usize;
     let enemy_occupied: u64;
-    if mover == WHITE { 
+    if mover == WHITE {
         is_promotion = bitboard::contains_square(RANKS[6], from);
-        forward = from + 8; forward2 = from + 16; pawn_start_rank = RANKS[1]; pawn_piece_idx = 0; enemy_occupied = board.black_occupation;
-    } else { //for black
+        forward = from + 8;
+        forward2 = from + 16;
+        pawn_start_rank = RANKS[1];
+        pawn_piece_idx = 0;
+        enemy_occupied = board.black_occupation;
+    } else {
+        //for black
         is_promotion = bitboard::contains_square(RANKS[1], from);
-        forward = from - 8; forward2 = from.wrapping_sub(16); pawn_start_rank = RANKS[6]; pawn_piece_idx = 6; enemy_occupied = board.white_occupation;
+        forward = from - 8;
+        forward2 = from.wrapping_sub(16);
+        pawn_start_rank = RANKS[6];
+        pawn_piece_idx = 6;
+        enemy_occupied = board.white_occupation;
     }
     //add attacking moves
     let mut characteristic_attacks: u64 = move_gen.attack_bbs[pawn_piece_idx][from as usize]; //bitboard
-    while characteristic_attacks != 0 { //check each attack
+    while characteristic_attacks != 0 {
+        //check each attack
         let attack_sqr: u32 = bitboard::pop_lsb(&mut characteristic_attacks);
-        if bitboard::contains_square(enemy_occupied, attack_sqr) { //is pseudolegal
+        if bitboard::contains_square(enemy_occupied, attack_sqr) {
+            //is pseudolegal
             if is_promotion {
                 if in_search && !in_perft_debug {
                     add_search_promotions(from, attack_sqr, true, mover, move_vec);
                 } else {
                     add_all_promotions(from, attack_sqr, true, mover, move_vec);
-                } 
+                }
             } else {
-                move_vec.push(_move::create(from, attack_sqr, true, mover, pawn_piece_idx as u32));
+                move_vec.push(_move::create(
+                    from,
+                    attack_sqr,
+                    true,
+                    mover,
+                    pawn_piece_idx as u32,
+                ));
             }
         }
     }
@@ -646,11 +908,22 @@ pub fn pseudolegal_pawn(from: u32, mover: u32, board: &Board, move_gen: &MoveGen
         if is_promotion {
             _move::add_all_promotions(from, forward, false, mover, move_vec);
         } else {
-            move_vec.push(_move::create(from, forward, false, mover, pawn_piece_idx as u32))
+            move_vec.push(_move::create(
+                from,
+                forward,
+                false,
+                mover,
+                pawn_piece_idx as u32,
+            ))
         }
         //can go forward 2 if also no piece on forward2 and pawn on pawn_start_rank
         if bitboard::contains_square(pawn_start_rank, from) && !board.is_occupied(forward2) {
-            move_vec.push(_move::create_double_push(from, forward2, mover, pawn_piece_idx as u32))
+            move_vec.push(_move::create_double_push(
+                from,
+                forward2,
+                mover,
+                pawn_piece_idx as u32,
+            ))
         }
     }
     //NO EN PASSANT FROM THIS
@@ -665,9 +938,15 @@ pub fn pawn_attacked(board: &Board, side: u32) -> u64 {
     let shift_op: fn(u64, u32) -> u64;
     let mut res: u64 = 0;
     if side == WHITE {
-        pawn_occupation = board.pieces[0]; left_attack_shift = 7; right_attack_shift = 9; shift_op = |x, n| x << n;
+        pawn_occupation = board.pieces[0];
+        left_attack_shift = 7;
+        right_attack_shift = 9;
+        shift_op = |x, n| x << n;
     } else {
-        pawn_occupation = board.pieces[6]; left_attack_shift = 9; right_attack_shift = 7; shift_op = |x, n| x >> n;
+        pawn_occupation = board.pieces[6];
+        left_attack_shift = 9;
+        right_attack_shift = 7;
+        shift_op = |x, n| x >> n;
     };
     res |= shift_op(pawn_occupation & !FILES[0], left_attack_shift);
     res |= shift_op(pawn_occupation & !FILES[7], right_attack_shift);

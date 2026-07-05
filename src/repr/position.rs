@@ -1,5 +1,13 @@
-use crate::{repr::{_move::NULL_MOVE, board::Board, move_gen::{AVG_BRANCH_FAC, MoveGen}, types::{B_PAWN, BLACK, BoardStateInfo, W_PAWN, WHITE}}, utils::zobrist::Zobrist};
 use crate::repr::*;
+use crate::{
+    repr::{
+        _move::NULL_MOVE,
+        board::Board,
+        move_gen::{MoveGen, AVG_BRANCH_FAC},
+        types::{BoardStateInfo, BLACK, B_PAWN, WHITE, W_PAWN},
+    },
+    utils::zobrist::Zobrist,
+};
 
 use crate::utils::fen_tool::fen_to_board;
 
@@ -7,46 +15,60 @@ pub const MOVE_ARR_SIZE: usize = AVG_BRANCH_FAC * 40; //supports 40 ply deep sea
 
 pub struct Position {
     pub board: Board,
-    pub move_arr: [u32 ; AVG_BRANCH_FAC * 40],
+    pub move_arr: [u32; AVG_BRANCH_FAC * 40],
     pub move_arr_idx: Vec<usize>, //move_arr end idx by ply, so e.g. 0..move_arr_idx[0] is first ply idx range (idx is exclusive)
     pub board_state_info_stack: Vec<BoardStateInfo>, //previous board states, allows efficient unmaking of moves
     pub played_moves_stack: Vec<u32>,
-    pub last_target: u32
+    pub last_target: u32,
 }
 
-
 impl Position {
-    
     pub fn default(move_gen: &MoveGen, zobrist: &Zobrist) -> Position {
         let board: Board = Board::default_board(move_gen, zobrist);
         let turn: u32 = board.turn;
-        let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [NULL_MOVE ; MOVE_ARR_SIZE];
-        let generated: usize = move_gen.generate_legal(&board, turn, &mut move_arr, 0, false, false);
+        let mut move_arr: [u32; MOVE_ARR_SIZE] = [NULL_MOVE; MOVE_ARR_SIZE];
+        let generated: usize =
+            move_gen.generate_legal(&board, turn, &mut move_arr, 0, false, false);
         let move_arr_idx: Vec<usize> = vec![0, generated];
         let board_state_info_stack: Vec<BoardStateInfo> = vec![];
         let played_moves_stack: Vec<u32> = Vec::new();
         let last_target: u32 = NULL_MOVE;
         return Self {
-            board, board_state_info_stack, played_moves_stack, move_arr, move_arr_idx, last_target
-        }
+            board,
+            board_state_info_stack,
+            played_moves_stack,
+            move_arr,
+            move_arr_idx,
+            last_target,
+        };
     }
 
-    pub fn position_with(fen: &str, move_gen: &MoveGen, zobrist: &Zobrist) -> Result<Self, &'static str> {
+    pub fn position_with(
+        fen: &str,
+        move_gen: &MoveGen,
+        zobrist: &Zobrist,
+    ) -> Result<Self, &'static str> {
         let board: Board;
         match fen_to_board(fen.to_string(), move_gen, zobrist) {
             Ok(b) => board = b,
-            Err(_) => return Err("Fen error")
+            Err(_) => return Err("Fen error"),
         }
-        let mut move_arr: [u32 ; MOVE_ARR_SIZE] = [NULL_MOVE ; MOVE_ARR_SIZE];
-        let generated: usize = move_gen.generate_legal(&board, board.turn, &mut move_arr, 0, false, false);
+        let mut move_arr: [u32; MOVE_ARR_SIZE] = [NULL_MOVE; MOVE_ARR_SIZE];
+        let generated: usize =
+            move_gen.generate_legal(&board, board.turn, &mut move_arr, 0, false, false);
         let move_arr_idx: Vec<usize> = vec![0, generated];
 
         let board_state_info_stack: Vec<BoardStateInfo> = vec![];
         let played_moves_stack: Vec<u32> = Vec::new();
         let last_target: u32 = NULL_MOVE;
         return Ok(Self {
-            board, board_state_info_stack, played_moves_stack, move_arr, move_arr_idx, last_target
-        })
+            board,
+            board_state_info_stack,
+            played_moves_stack,
+            move_arr,
+            move_arr_idx,
+            last_target,
+        });
     }
 
     ///Returns slice to current legal moves (ply 1)
@@ -65,7 +87,10 @@ impl Position {
     ///The search bounds of current search moves in move_arr (last ply)
     ///end is exclusive
     pub fn search_move_bounds(&self) -> (usize, usize) {
-        return (self.move_arr_idx[self.move_arr_idx.len() - 2], self.move_arr_idx[self.move_arr_idx.len() - 1]);
+        return (
+            self.move_arr_idx[self.move_arr_idx.len() - 2],
+            self.move_arr_idx[self.move_arr_idx.len() - 1],
+        );
     }
 
     pub fn is_late_game(&self) -> bool {
@@ -73,7 +98,14 @@ impl Position {
     }
 
     ///Board state is modified and legal_moves is updated, assumes mov is legal
-    pub fn make_move(&mut self, mov: u32, in_search: bool, in_perft_debug: bool, move_gen: &MoveGen, zobrist: &Zobrist) {
+    pub fn make_move(
+        &mut self,
+        mov: u32,
+        in_search: bool,
+        in_perft_debug: bool,
+        move_gen: &MoveGen,
+        zobrist: &Zobrist,
+    ) {
         let is_white_turn: bool = self.board.turn == WHITE;
         let is_promotion: bool = _move::is_promotion(mov);
         let from: u32 = _move::get_init(mov);
@@ -97,30 +129,45 @@ impl Position {
         let own_occupation: &mut u64;
         let opponent_occupation: &mut u64;
         if is_white_turn {
-            own_occupation = &mut self.board.white_occupation; opponent_occupation = &mut self.board.black_occupation;
+            own_occupation = &mut self.board.white_occupation;
+            opponent_occupation = &mut self.board.black_occupation;
         } else {
-            own_occupation = &mut self.board.black_occupation; opponent_occupation = &mut self.board.white_occupation;
+            own_occupation = &mut self.board.black_occupation;
+            opponent_occupation = &mut self.board.white_occupation;
         }
 
         let cur_board_state_info: BoardStateInfo = BoardStateInfo {
             ep_sqr: self.board.ep_square,
             nof_checkers: self.board.nof_checkers,
             check_block_sqrs: self.board.check_block_sqrs,
-            mover_pinned: if is_white_turn {self.board.white_pinned} else {self.board.black_pinned},
-            mover_pinned_restrictions: if is_white_turn {self.board.white_pinned_restrictions} else {self.board.black_pinned_restrictions},
+            mover_pinned: if is_white_turn {
+                self.board.white_pinned
+            } else {
+                self.board.black_pinned
+            },
+            mover_pinned_restrictions: if is_white_turn {
+                self.board.white_pinned_restrictions
+            } else {
+                self.board.black_pinned_restrictions
+            },
             meta_attacks: self.board.meta_attacks,
-            opponent_attacked: if is_white_turn {self.board.black_attacks} else {self.board.white_attacks},
+            opponent_attacked: if is_white_turn {
+                self.board.black_attacks
+            } else {
+                self.board.white_attacks
+            },
             half_move_clock: self.board.half_move_clock,
         };
 
         self.board_state_info_stack.push(cur_board_state_info);
-        
+
         /*
-         * 
-         * 1. Set and clear pieces according to move      
-         * 
+         *
+         * 1. Set and clear pieces according to move
+         *
          */
-        if is_eating && !is_en_passant { //clear eaten piece, en passant has own clearing logic
+        if is_eating && !is_en_passant {
+            //clear eaten piece, en passant has own clearing logic
             let eaten_piece: usize = eaten_piece.expect("Was eating but no eating piece found");
             bitboard::clear_square(&mut self.board.pieces[eaten_piece], to);
             bitboard::clear_square(opponent_occupation, to);
@@ -136,16 +183,33 @@ impl Position {
         }
 
         if is_promotion {
-            let promotion_piece: usize = promotion_piece.expect("Was promotion but no promotion piece found");
+            let promotion_piece: usize =
+                promotion_piece.expect("Was promotion but no promotion piece found");
             bitboard::set_square(&mut self.board.pieces[promotion_piece], to);
         } else if is_castle {
             let rook_from: u32;
             let rook_to: u32;
             let rook_piece_idx: usize;
             if is_short_castle {
-                if is_white_turn {rook_from = 7; rook_to = 5; rook_piece_idx = 3;} else {rook_from = 63; rook_to = 61; rook_piece_idx = 9;}
+                if is_white_turn {
+                    rook_from = 7;
+                    rook_to = 5;
+                    rook_piece_idx = 3;
+                } else {
+                    rook_from = 63;
+                    rook_to = 61;
+                    rook_piece_idx = 9;
+                }
             } else {
-                if is_white_turn {rook_from = 0; rook_to = 3; rook_piece_idx = 3;} else {rook_from = 56; rook_to = 59; rook_piece_idx = 9;}
+                if is_white_turn {
+                    rook_from = 0;
+                    rook_to = 3;
+                    rook_piece_idx = 3;
+                } else {
+                    rook_from = 56;
+                    rook_to = 59;
+                    rook_piece_idx = 9;
+                }
             }
             bitboard::clear_square(&mut self.board.pieces[rook_piece_idx], rook_from);
             bitboard::set_square(&mut self.board.pieces[rook_piece_idx], rook_to);
@@ -153,21 +217,34 @@ impl Position {
             bitboard::set_square(own_occupation, rook_to);
         }
 
-        if is_en_passant { //clear ep_square
+        if is_en_passant {
+            //clear ep_square
             let opponent_pawns: &mut u64;
             let offset: i32;
-            if is_white_turn {opponent_pawns = &mut self.board.pieces[6]; offset = -8} else {opponent_pawns = &mut self.board.pieces[0]; offset = 8;}
-            let eating_sqr: u32 = (self.board.ep_square.expect("Made en passant, but ep_square was none") as i32 + offset) as u32;
+            if is_white_turn {
+                opponent_pawns = &mut self.board.pieces[6];
+                offset = -8
+            } else {
+                opponent_pawns = &mut self.board.pieces[0];
+                offset = 8;
+            }
+            let eating_sqr: u32 = (self
+                .board
+                .ep_square
+                .expect("Made en passant, but ep_square was none")
+                as i32
+                + offset) as u32;
             bitboard::clear_square(opponent_pawns, eating_sqr);
             bitboard::clear_square(opponent_occupation, eating_sqr);
         }
         /*
-         * 
-         * 2. Update rest of board state  
-         * 
+         *
+         * 2. Update rest of board state
+         *
          */
         let lost_ep: Option<u32> = self.board.ep_square;
-        if is_double_push { //update board ep_square
+        if is_double_push {
+            //update board ep_square
             if is_white_turn {
                 self.board.ep_square = Some(to - 8);
             } else {
@@ -182,8 +259,12 @@ impl Position {
             self.board.half_move_clock += 1;
         }
 
-        let had_ws: bool = self.board.ws(); let had_wl: bool = self.board.wl(); let had_bs: bool = self.board.bs(); let had_bl: bool = self.board.bl();
-        self.board.update_castling_rights_make(from, to, is_white_turn, moved_piece as u32);
+        let had_ws: bool = self.board.ws();
+        let had_wl: bool = self.board.wl();
+        let had_bs: bool = self.board.bs();
+        let had_bl: bool = self.board.bl();
+        self.board
+            .update_castling_rights_make(from, to, is_white_turn, moved_piece as u32);
         let lost_ws: bool = had_ws && !self.board.ws();
         let lost_wl: bool = had_wl && !self.board.wl();
         let lost_bs: bool = had_bs && !self.board.bs();
@@ -218,27 +299,39 @@ impl Position {
         } else {
             self.board.black_attacks = move_gen.compute_attacked(&mut self.board, BLACK);
         }
-        
+
         self.board.turn = self.board.turn ^ 1;
         let turn: u32 = self.board.turn;
-        
+
         //compute pinned
         //in board updates check_block_sqrs, mover_pinned, mover_pinned_restrictions and meta_attacks
         move_gen.compute_pinned(&mut self.board, turn);
         /*
-         * 
+         *
          * 2. Update self state
-         * 
+         *
          */
         let move_arr_s_idx: usize;
         if in_search {
-            move_arr_s_idx = self.move_arr_idx.last().copied().expect("move_arr_idx was empty");
-        } else { //root shifts
+            move_arr_s_idx = self
+                .move_arr_idx
+                .last()
+                .copied()
+                .expect("move_arr_idx was empty");
+        } else {
+            //root shifts
             move_arr_s_idx = 0;
             self.move_arr_idx.clear();
             self.move_arr_idx.push(0); // 0 ply ends at 0 (exclusive)
         }
-        let generated: usize = move_gen.generate_legal(&self.board, turn, &mut self.move_arr, move_arr_s_idx, in_search, in_perft_debug);
+        let generated: usize = move_gen.generate_legal(
+            &self.board,
+            turn,
+            &mut self.move_arr,
+            move_arr_s_idx,
+            in_search,
+            in_perft_debug,
+        );
         self.move_arr_idx.push(move_arr_s_idx + generated);
         self.played_moves_stack.push(mov);
         self.last_target = to;
@@ -271,18 +364,21 @@ impl Position {
         let own_occupation: &mut u64;
         let opponent_occupation: &mut u64;
         if unmaking_white_move {
-            own_occupation = &mut self.board.white_occupation; opponent_occupation = &mut self.board.black_occupation;
+            own_occupation = &mut self.board.white_occupation;
+            opponent_occupation = &mut self.board.black_occupation;
         } else {
-            own_occupation = &mut self.board.black_occupation; opponent_occupation = &mut self.board.white_occupation;
+            own_occupation = &mut self.board.black_occupation;
+            opponent_occupation = &mut self.board.white_occupation;
         }
 
         /*
-         * 
-         * 1. Set and clear pieces according to move      
-         * 
+         *
+         * 1. Set and clear pieces according to move
+         *
          */
 
-        if let Some(p) = eaten_piece { //return eaten piece, en passant has own returning logic
+        if let Some(p) = eaten_piece {
+            //return eaten piece, en passant has own returning logic
             bitboard::set_square(&mut self.board.pieces[p], to);
             bitboard::set_square(opponent_occupation, to);
             if p as u32 != W_PAWN && p as u32 != B_PAWN {
@@ -296,7 +392,8 @@ impl Position {
             bitboard::clear_square(&mut self.board.pieces[moved_piece], to);
             bitboard::set_square(&mut self.board.pieces[moved_piece], from);
         } else {
-            let promotion_piece: usize = promotion_piece.expect("Was promotion but no promotion piece found");
+            let promotion_piece: usize =
+                promotion_piece.expect("Was promotion but no promotion piece found");
             bitboard::clear_square(&mut self.board.pieces[promotion_piece], to);
             bitboard::set_square(&mut self.board.pieces[moved_piece], from);
         }
@@ -306,9 +403,25 @@ impl Position {
             let rook_to: u32;
             let rook_piece_idx: usize;
             if is_short_castle {
-                if unmaking_white_move {rook_from = 7; rook_to = 5; rook_piece_idx = 3;} else {rook_from = 63; rook_to = 61; rook_piece_idx = 9;}
+                if unmaking_white_move {
+                    rook_from = 7;
+                    rook_to = 5;
+                    rook_piece_idx = 3;
+                } else {
+                    rook_from = 63;
+                    rook_to = 61;
+                    rook_piece_idx = 9;
+                }
             } else {
-                if unmaking_white_move {rook_from = 0; rook_to = 3; rook_piece_idx = 3;} else {rook_from = 56; rook_to = 59; rook_piece_idx = 9;}
+                if unmaking_white_move {
+                    rook_from = 0;
+                    rook_to = 3;
+                    rook_piece_idx = 3;
+                } else {
+                    rook_from = 56;
+                    rook_to = 59;
+                    rook_piece_idx = 9;
+                }
             }
             bitboard::clear_square(&mut self.board.pieces[rook_piece_idx], rook_to);
             bitboard::set_square(&mut self.board.pieces[rook_piece_idx], rook_from);
@@ -316,26 +429,39 @@ impl Position {
             bitboard::set_square(own_occupation, rook_from);
         }
 
-        if is_en_passant { //return ep'd pawn to correct sqr
+        if is_en_passant {
+            //return ep'd pawn to correct sqr
             let opponent_pawns: &mut u64;
             let offset: i32;
-            if unmaking_white_move {opponent_pawns = &mut self.board.pieces[6]; offset = -8} else {opponent_pawns = &mut self.board.pieces[0]; offset = 8;}
+            if unmaking_white_move {
+                opponent_pawns = &mut self.board.pieces[6];
+                offset = -8
+            } else {
+                opponent_pawns = &mut self.board.pieces[0];
+                offset = 8;
+            }
             let eating_sqr: u32 = (to as i32 + offset) as u32;
             bitboard::set_square(opponent_pawns, eating_sqr);
             bitboard::set_square(opponent_occupation, eating_sqr);
         }
         /*
-         * 
-         * 2. Update rest of board state 
-         * 
-         */        
-        let board_state_info: BoardStateInfo = self.board_state_info_stack.pop().expect("board state info stack was empty");
+         *
+         * 2. Update rest of board state
+         *
+         */
+        let board_state_info: BoardStateInfo = self
+            .board_state_info_stack
+            .pop()
+            .expect("board state info stack was empty");
 
         self.board.ep_square = board_state_info.ep_sqr;
         self.board.half_move_clock = board_state_info.half_move_clock;
 
         let gained_ep: Option<u32> = self.board.ep_square;
-        let had_ws: bool = self.board.ws(); let had_wl: bool = self.board.wl(); let had_bs: bool = self.board.bs(); let had_bl: bool = self.board.bl();
+        let had_ws: bool = self.board.ws();
+        let had_wl: bool = self.board.wl();
+        let had_bs: bool = self.board.bs();
+        let had_bl: bool = self.board.bl();
         self.board.update_castling_rights_unmake();
         let gained_ws: bool = !had_ws && self.board.ws();
         let gained_wl: bool = !had_wl && self.board.wl();
@@ -368,7 +494,6 @@ impl Position {
             self.board.white_pinned = board_state_info.mover_pinned;
             self.board.white_pinned_restrictions = board_state_info.mover_pinned_restrictions;
             self.board.black_attacks = board_state_info.opponent_attacked;
-            
         } else {
             self.board.black_pinned = board_state_info.mover_pinned;
             self.board.black_pinned_restrictions = board_state_info.mover_pinned_restrictions;
@@ -378,9 +503,9 @@ impl Position {
 
         self.board.turn = self.board.turn ^ 1;
         /*
-         * 
+         *
          * 3. Update self state
-         * 
+         *
          */
         self.move_arr_idx.pop().expect("move_arr_idx was empty"); //"pops legal moves"
         self.played_moves_stack.pop();
@@ -399,20 +524,17 @@ impl Position {
     pub fn in_stalemate(&self) -> bool {
         return self.board.nof_checkers == 0 && self.legal_moves().is_empty();
     }
-
 }
 
 impl Clone for Position {
     fn clone(&self) -> Self {
-        
         return Self {
             board: self.board.clone(),
             move_arr: self.move_arr.clone(),
             move_arr_idx: self.move_arr_idx.clone(),
             board_state_info_stack: self.board_state_info_stack.clone(),
             played_moves_stack: self.played_moves_stack.clone(),
-            last_target: self.last_target.clone()
-        }
+            last_target: self.last_target.clone(),
+        };
     }
 }
-

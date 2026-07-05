@@ -1,13 +1,13 @@
-use crate::repr::move_gen::MoveGen;
 use crate::repr::board::Board;
+use crate::repr::move_gen::MoveGen;
 use crate::repr::types::{BLACK, WHITE};
 use crate::utils::zobrist::Zobrist;
 
-const VALID_PIECE_CHARS: [char ; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
-const VALID_MOVER_CHARS: [char ; 2] = ['w', 'b'];
-const VALID_CASTLING_CHARS: [char ; 4] = ['K', 'Q', 'k', 'q'];
+const VALID_PIECE_CHARS: [char; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
+const VALID_MOVER_CHARS: [char; 2] = ['w', 'b'];
+const VALID_CASTLING_CHARS: [char; 4] = ['K', 'Q', 'k', 'q'];
 const FILE_CHARS: [char; 8] = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-pub const MAJOR_MINOR_PIECES: [char ; 8] = ['N', 'B', 'R', 'Q', 'n', 'b', 'r', 'q'];
+pub const MAJOR_MINOR_PIECES: [char; 8] = ['N', 'B', 'R', 'Q', 'n', 'b', 'r', 'q'];
 
 pub fn is_valid_fen(fen: &String) -> bool {
     let mut sections = fen.split_whitespace();
@@ -15,7 +15,9 @@ pub fn is_valid_fen(fen: &String) -> bool {
     if sec_count < 4 || sec_count > 6 {
         return false;
     }
-    let pieces: &str = sections.next().expect("Was long enough but iterator ended.");
+    let pieces: &str = sections
+        .next()
+        .expect("Was long enough but iterator ended.");
     let rows = pieces.split('/');
     if rows.clone().count() != 8 {
         return false;
@@ -26,20 +28,28 @@ pub fn is_valid_fen(fen: &String) -> bool {
         if !is_legal_piece_row(row) {
             return false;
         }
-        if row.contains('K') {white_king = true;}
-        if row.contains('k') {black_king = true;}
+        if row.contains('K') {
+            white_king = true;
+        }
+        if row.contains('k') {
+            black_king = true;
+        }
     }
     //both sides must have king
     if !white_king || !black_king {
         return false;
     }
     //second section is mover
-    let mover: &str = sections.next().expect("Was long enough but iterator ended.");
+    let mover: &str = sections
+        .next()
+        .expect("Was long enough but iterator ended.");
     if mover.len() != 1 || !VALID_MOVER_CHARS.contains(&mover.chars().collect::<Vec<char>>()[0]) {
         return false;
     }
     //third section castling rights
-    let castling_rights: &str = sections.next().expect("Was long enough but iterator ended.");
+    let castling_rights: &str = sections
+        .next()
+        .expect("Was long enough but iterator ended.");
     if castling_rights != "-" {
         if castling_rights.len() > 4 {
             return false;
@@ -49,11 +59,15 @@ pub fn is_valid_fen(fen: &String) -> bool {
             if (c.is_uppercase() && lowercase_seen) || !VALID_CASTLING_CHARS.contains(&c) {
                 return false;
             }
-            if c.is_lowercase() {lowercase_seen = true;}
+            if c.is_lowercase() {
+                lowercase_seen = true;
+            }
         }
     }
     //last section en passant
-    let ep: &str = sections.next().expect("Was long enough but iterator ended.");
+    let ep: &str = sections
+        .next()
+        .expect("Was long enough but iterator ended.");
     if ep != "-" {
         if ep.len() != 2 {
             return false;
@@ -80,12 +94,12 @@ pub fn is_valid_fen(fen: &String) -> bool {
     return true;
 }
 
-
 pub fn is_legal_piece_row(row: &str) -> bool {
     let mut piece_count: u32 = 0;
 
     for c in row.chars() {
-        if c.is_digit(10) { //empty spaces
+        if c.is_digit(10) {
+            //empty spaces
             piece_count += c.to_digit(10).expect("Checked is_digit but wasn't");
         } else if VALID_PIECE_CHARS.contains(&c) {
             piece_count += 1;
@@ -100,20 +114,30 @@ pub fn is_legal_piece_row(row: &str) -> bool {
 }
 
 ///returns major minor count
-pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: &mut u64, black_occupation: &mut u64) -> u32 {
+pub fn parse_pieces(
+    piece_str: &str,
+    pieces: &mut [u64; 12],
+    white_occupation: &mut u64,
+    black_occupation: &mut u64,
+) -> u32 {
     let rows = piece_str.split('/');
     let mut sqr_idx: i32 = 56;
     let mut major_minor_count = 0;
     for row in rows.clone() {
         for c in row.chars() {
             if c.is_alphabetic() {
-                let piece_type: usize = VALID_PIECE_CHARS.iter().position(|p| *p == c).expect("Was valid fen but unknown piece type");
+                let piece_type: usize = VALID_PIECE_CHARS
+                    .iter()
+                    .position(|p| *p == c)
+                    .expect("Was valid fen but unknown piece type");
                 //bitboard::set_square(&mut pieces[piece_type], sqr_idx as u32);
                 pieces[piece_type] |= 1 << sqr_idx;
-                if c.is_uppercase() { //white
+                if c.is_uppercase() {
+                    //white
                     //bitboard::set_square(white_occupation, sqr_idx as u32);
                     *white_occupation |= 1 << sqr_idx;
-                } else { //black
+                } else {
+                    //black
                     //bitboard::set_square(black_occupation, sqr_idx as u32);
                     *black_occupation |= 1 << sqr_idx;
                 }
@@ -121,8 +145,11 @@ pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: 
                     major_minor_count += 1;
                 }
                 sqr_idx += 1;
-            } else { //empty for c spaces
-                let spaces: u32 = c.to_digit(10).expect("Was valid fen but invalid space count");
+            } else {
+                //empty for c spaces
+                let spaces: u32 = c
+                    .to_digit(10)
+                    .expect("Was valid fen but invalid space count");
                 sqr_idx += spaces as i32;
             }
         }
@@ -133,20 +160,31 @@ pub fn parse_pieces(piece_str: &str, pieces: &mut [u64 ; 12], white_occupation: 
 
 ///Ok(board) with board being filled in valid state board, if fen valid <br>
 ///Else Err(FenError)
-pub fn fen_to_board(fen: String, move_gen: &MoveGen, zobrist: &Zobrist) -> Result<Board, &'static str> {
+pub fn fen_to_board(
+    fen: String,
+    move_gen: &MoveGen,
+    zobrist: &Zobrist,
+) -> Result<Board, &'static str> {
     if !is_valid_fen(&fen) {
         return Err("Fen error");
     }
-    let mut pieces: [u64; 12] = [0 ; 12];
+    let mut pieces: [u64; 12] = [0; 12];
     let mut white_occupation: u64 = 0;
     let mut black_occupation: u64 = 0;
     let mut sections = fen.split_whitespace();
-    let piece_str: &str = sections.next().expect("Was long enough but iterator ended.");
-    let major_minor_count: u32 = parse_pieces(piece_str, &mut pieces, &mut white_occupation, &mut black_occupation);
+    let piece_str: &str = sections
+        .next()
+        .expect("Was long enough but iterator ended.");
+    let major_minor_count: u32 = parse_pieces(
+        piece_str,
+        &mut pieces,
+        &mut white_occupation,
+        &mut black_occupation,
+    );
     let turn: u32 = match sections.next().expect("Was valid but sections ran out") {
         "w" => WHITE,
         "b" => BLACK,
-        _ => panic!("Turn was not 'w' or 'b' in fen that was valid.")
+        _ => panic!("Turn was not 'w' or 'b' in fen that was valid."),
     };
     let castling_string: &str = sections.next().expect("Was valid but sections ran out");
     let ws: bool = castling_string.contains('K');
@@ -162,14 +200,30 @@ pub fn fen_to_board(fen: String, move_gen: &MoveGen, zobrist: &Zobrist) -> Resul
         let mut char_iter = ep_string.chars();
         let file: char = char_iter.next().expect("ep wasn't valid");
         let rank: u32 = char_iter.next().expect("ep wasn't valid") as u32 - b'1' as u32;
-        ep_square = Some(file as u32 - 'a' as u32 + 8 * rank); 
+        ep_square = Some(file as u32 - 'a' as u32 + 8 * rank);
     }
     let half_move_clock: u32 = match sections.next() {
-        Some(half_move_clock_string) => half_move_clock_string.parse::<u32>().expect("Was valid but half move clock wasn't a u32"),
+        Some(half_move_clock_string) => half_move_clock_string
+            .parse::<u32>()
+            .expect("Was valid but half move clock wasn't a u32"),
         None => 0,
     };
 
-    return Ok(Board::board_with(pieces, white_occupation, black_occupation, turn, !ws as u32, !wl as u32, !bs as u32, !bl as u32, ep_square, major_minor_count, move_gen, zobrist, half_move_clock));
+    return Ok(Board::board_with(
+        pieces,
+        white_occupation,
+        black_occupation,
+        turn,
+        !ws as u32,
+        !wl as u32,
+        !bs as u32,
+        !bl as u32,
+        ep_square,
+        major_minor_count,
+        move_gen,
+        zobrist,
+        half_move_clock,
+    ));
 }
 
 pub fn board_to_fen(board: &Board) -> String {

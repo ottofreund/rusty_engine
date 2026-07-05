@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use rusty_engine::{
-    repr::types::{B_KING, B_PAWN, BLACK, W_KING, W_PAWN, WHITE},
+    repr::types::{BLACK, B_KING, B_PAWN, WHITE, W_KING, W_PAWN},
     search::{eval::Evaluator, table_loader::read_table_value_file},
 };
 

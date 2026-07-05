@@ -1,5 +1,5 @@
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 use crate::repr::bitboard;
 use crate::repr::board::Board;
@@ -10,15 +10,14 @@ const NOF_SQUARES: usize = 64;
 const ROW_LEN: usize = 8;
 
 pub struct Zobrist {
-    piece_rands: [u64 ; PIECE_RANDS_LEN],
-    en_passant_file_rands: [u64 ; 8],
+    piece_rands: [u64; PIECE_RANDS_LEN],
+    en_passant_file_rands: [u64; 8],
     black_turn_rand: u64,
     ws_rand: u64,
     wl_rand: u64,
     bs_rand: u64,
-    bl_rand: u64
+    bl_rand: u64,
 }
-
 
 impl Zobrist {
     pub fn init_hash(&self, board: &Board) -> u64 {
@@ -79,7 +78,8 @@ impl Zobrist {
     ) -> u64 {
         let mut new: u64 = cur;
 
-        if is_eating && !is_en_passant { //clear eaten piece, en passant has own clearing logic
+        if is_eating && !is_en_passant {
+            //clear eaten piece, en passant has own clearing logic
             let eaten_piece: usize = eaten_piece.expect("Was eating but no eating piece found");
             new ^= self.piece_rands[eaten_piece * NOF_SQUARES + to];
         }
@@ -89,7 +89,8 @@ impl Zobrist {
         }
 
         if is_promotion {
-            let promotion_piece: usize = promotion_piece.expect("Was promotion but no promotion piece found");
+            let promotion_piece: usize =
+                promotion_piece.expect("Was promotion but no promotion piece found");
             new ^= self.piece_rands[promotion_piece * NOF_SQUARES + to];
         } else if is_castle {
             let rook_from: usize;
@@ -97,31 +98,55 @@ impl Zobrist {
             let rook_piece_idx: usize;
             if is_short_castle {
                 if is_white_turn {
-                    rook_from = 7; rook_to = 5; rook_piece_idx = 3;
+                    rook_from = 7;
+                    rook_to = 5;
+                    rook_piece_idx = 3;
                 } else {
-                    rook_from = 63; rook_to = 61; rook_piece_idx = 9;
+                    rook_from = 63;
+                    rook_to = 61;
+                    rook_piece_idx = 9;
                 }
             } else {
                 if is_white_turn {
-                    rook_from = 0; rook_to = 3; rook_piece_idx = 3;
+                    rook_from = 0;
+                    rook_to = 3;
+                    rook_piece_idx = 3;
                 } else {
-                    rook_from = 56; rook_to = 59; rook_piece_idx = 9;
+                    rook_from = 56;
+                    rook_to = 59;
+                    rook_piece_idx = 9;
                 }
             }
             new ^= self.piece_rands[rook_piece_idx * NOF_SQUARES + rook_from];
             new ^= self.piece_rands[rook_piece_idx * NOF_SQUARES + rook_to];
         }
 
-        if lost_ws { new ^= self.ws_rand; }
-        if lost_wl { new ^= self.wl_rand; }
-        if lost_bs { new ^= self.bs_rand; }
-        if lost_bl { new ^= self.bl_rand; }
+        if lost_ws {
+            new ^= self.ws_rand;
+        }
+        if lost_wl {
+            new ^= self.wl_rand;
+        }
+        if lost_bs {
+            new ^= self.bs_rand;
+        }
+        if lost_bl {
+            new ^= self.bl_rand;
+        }
 
-        if is_en_passant { //clear ep_square
+        if is_en_passant {
+            //clear ep_square
             let opponent_pawn_idx: usize;
             let offset: usize;
-            if is_white_turn {opponent_pawn_idx = 6; offset = 4 * ROW_LEN} else {opponent_pawn_idx = 0; offset = 3* ROW_LEN;}
-            let eating_sqr: usize = lost_ep.expect("Was ep but lost_ep was None") as usize % 8 + offset; //file idx + row offset
+            if is_white_turn {
+                opponent_pawn_idx = 6;
+                offset = 4 * ROW_LEN
+            } else {
+                opponent_pawn_idx = 0;
+                offset = 3 * ROW_LEN;
+            }
+            let eating_sqr: usize =
+                lost_ep.expect("Was ep but lost_ep was None") as usize % 8 + offset; //file idx + row offset
             new ^= self.piece_rands[opponent_pawn_idx * NOF_SQUARES + eating_sqr];
         }
 
@@ -136,7 +161,7 @@ impl Zobrist {
         new ^= self.black_turn_rand;
         return new;
     }
-    
+
     /// when unmaking move
     /// gained_ep <==> if position after unmaking this move has ep sqr, then Some(ep_sqr) else None
     pub fn updated_hash_backward(
@@ -174,7 +199,8 @@ impl Zobrist {
         }
 
         if is_promotion {
-            let promotion_piece: usize = promotion_piece.expect("Was promotion but no promotion piece found");
+            let promotion_piece: usize =
+                promotion_piece.expect("Was promotion but no promotion piece found");
             new ^= self.piece_rands[promotion_piece * NOF_SQUARES + to];
         } else if is_castle {
             let rook_from: usize;
@@ -183,15 +209,23 @@ impl Zobrist {
 
             if is_short_castle {
                 if is_white_turn {
-                    rook_from = 7; rook_to = 5; rook_piece_idx = 3;
+                    rook_from = 7;
+                    rook_to = 5;
+                    rook_piece_idx = 3;
                 } else {
-                    rook_from = 63; rook_to = 61; rook_piece_idx = 9;
+                    rook_from = 63;
+                    rook_to = 61;
+                    rook_piece_idx = 9;
                 }
             } else {
                 if is_white_turn {
-                    rook_from = 0; rook_to = 3; rook_piece_idx = 3;
+                    rook_from = 0;
+                    rook_to = 3;
+                    rook_piece_idx = 3;
                 } else {
-                    rook_from = 56; rook_to = 59; rook_piece_idx = 9;
+                    rook_from = 56;
+                    rook_to = 59;
+                    rook_piece_idx = 9;
                 }
             }
 
@@ -199,10 +233,18 @@ impl Zobrist {
             new ^= self.piece_rands[rook_piece_idx * NOF_SQUARES + rook_to];
         }
 
-        if gained_ws { new ^= self.ws_rand; }
-        if gained_wl { new ^= self.wl_rand; }
-        if gained_bs { new ^= self.bs_rand; }
-        if gained_bl { new ^= self.bl_rand; }
+        if gained_ws {
+            new ^= self.ws_rand;
+        }
+        if gained_wl {
+            new ^= self.wl_rand;
+        }
+        if gained_bs {
+            new ^= self.bs_rand;
+        }
+        if gained_bl {
+            new ^= self.bl_rand;
+        }
 
         if is_en_passant {
             let opponent_pawn_idx: usize;
@@ -216,8 +258,8 @@ impl Zobrist {
                 offset = 3 * ROW_LEN;
             }
 
-            let eating_sqr: usize = gained_ep
-                .expect("Was ep but gained_ep was None") as usize % 8 + offset;
+            let eating_sqr: usize =
+                gained_ep.expect("Was ep but gained_ep was None") as usize % 8 + offset;
 
             new ^= self.piece_rands[opponent_pawn_idx * NOF_SQUARES + eating_sqr];
         }
@@ -234,16 +276,13 @@ impl Zobrist {
 
         return new;
     }
-
-
 }
-
 
 impl Default for Zobrist {
     fn default() -> Self {
         let mut rng: StdRng = StdRng::seed_from_u64(12345);
-        let piece_rands: [u64 ; PIECE_RANDS_LEN] = std::array::from_fn(|_| rng.random::<u64>());
-        let en_passant_file_rands: [u64 ; 8] = std::array::from_fn(|_| rng.random::<u64>());
+        let piece_rands: [u64; PIECE_RANDS_LEN] = std::array::from_fn(|_| rng.random::<u64>());
+        let en_passant_file_rands: [u64; 8] = std::array::from_fn(|_| rng.random::<u64>());
         return Self {
             piece_rands,
             en_passant_file_rands,
@@ -251,7 +290,7 @@ impl Default for Zobrist {
             ws_rand: rng.random::<u64>(),
             wl_rand: rng.random::<u64>(),
             bs_rand: rng.random::<u64>(),
-            bl_rand: rng.random::<u64>()
-        }
+            bl_rand: rng.random::<u64>(),
+        };
     }
 }

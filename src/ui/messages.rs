@@ -1,5 +1,3 @@
-
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     SquareClicked(u32),
@@ -12,5 +10,5 @@ pub enum Message {
     InputSideWhitePressed,
     InputSideBlackPressed,
     Event(iced::Event),
-    SearchStart
+    SearchStart,
 }

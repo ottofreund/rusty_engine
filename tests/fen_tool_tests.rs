@@ -30,10 +30,7 @@ fn encoding_works() {
     let engine = TestEngine::new();
     let board = engine.default_board();
 
-    assert_eq!(
-        fen_tool::board_to_fen(&board),
-        DEFAULT_FEN
-    );
+    assert_eq!(fen_tool::board_to_fen(&board), DEFAULT_FEN);
 
     let en_passant_fen = "rnbqkbnr/pppppppp/8/8/4Pp2/8/PPPP2PP/RNBQKBNR w KQkq f6 0 1";
     let en_passant_board = engine.board(en_passant_fen);

@@ -1,4 +1,7 @@
-use rusty_engine::repr::{types::{BLACK, WHITE}, *};
+use rusty_engine::repr::{
+    types::{BLACK, WHITE},
+    *,
+};
 
 #[test]
 fn encoding_works() {
@@ -8,9 +11,15 @@ fn encoding_works() {
     //eating
     assert_eq!(_move::create(57, 42, true, BLACK, 6), 402660025); //eat white queen
     assert_eq!(_move::create(0, 63, true, WHITE, 0), 2147491776); //eat black rook
-    //promoting
-    assert_eq!(_move::create_promotion(49, 57, false, 10, BLACK, 6), 446697073); //to black queen
-    assert_eq!(_move::with_eaten_piece(_move::create_promotion(49, 58, true, 4, WHITE, 0), 9), 2166513329); //to white queen, eating a black rook
+                                                                  //promoting
+    assert_eq!(
+        _move::create_promotion(49, 57, false, 10, BLACK, 6),
+        446697073
+    ); //to black queen
+    assert_eq!(
+        _move::with_eaten_piece(_move::create_promotion(49, 58, true, 4, WHITE, 0), 9),
+        2166513329
+    ); //to white queen, eating a black rook
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use crate::repr::{board::{square_to_string}, types::*};
+use crate::repr::{board::square_to_string, types::*};
 //moves are represented with 32 bit integers
 //0-5: source square
 //6-11: target square
@@ -19,7 +19,6 @@ pub const WHITE_SHORT: u32 = 2483159428; //1 0010100 0000 0 0 1 0000 0 000110 00
 pub const WHITE_LONG: u32 = 2483290244; //1 0010100 0000 0 1 0 0000 0 000010 000100
 pub const BLACK_SHORT: u32 = 738332604; //0 0101100 0000 0 0 1 0000 0 111110 111100
 pub const BLACK_LONG: u32 = 738463420; //0 0101100 0000 0 1 0 0000 0 111010 111100
-
 
 ///Encode move to u32 <br>
 ///taken piece idx is found and added after checking pseudolegal is legal to save compute
@@ -57,15 +56,22 @@ pub fn create_double_push(from: u32, to: u32, mover: u32, moved_piece: u32) -> u
     return create(from, to, false, mover, moved_piece) | 8192; // | 2^13
 }
 
-
 ///**to** is the ep_square the pawn ends up on, eaten pawn must be cleared in make_move with some extra logic
 pub fn create_en_passant(from: u32, to: u32, mover: u32, moved_piece: u32) -> u32 {
     return create(from, to, true, mover, moved_piece) | 1073741824; // | 2^30
 }
 
 /// Promotion move creator
-pub fn create_promotion(from: u32, to: u32, is_take: bool, promotion_piece: u32, mover: u32, moved_piece: u32) -> u32 {
-    return (create(from, to, is_take, mover, moved_piece) | 2097152) | (promotion_piece << 22); //2097152 == 2^21
+pub fn create_promotion(
+    from: u32,
+    to: u32,
+    is_take: bool,
+    promotion_piece: u32,
+    mover: u32,
+    moved_piece: u32,
+) -> u32 {
+    return (create(from, to, is_take, mover, moved_piece) | 2097152) | (promotion_piece << 22);
+    //2097152 == 2^21
 }
 ///Add all promotions for this pawn to a mutably borrowed move vector **vec**. Doesn't validate input, assumes correct usage
 pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: &mut Vec<u32>) {
@@ -73,7 +79,15 @@ pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: 
     let e: u32;
     let moved_piece: u32;
     //start and end indices of piece based off color. Also moved piece
-    if mover == WHITE { p = W_KNIGHT; e = W_KING; moved_piece = W_PAWN; } else { p = B_KNIGHT; e = B_KING; moved_piece = B_PAWN; }; 
+    if mover == WHITE {
+        p = W_KNIGHT;
+        e = W_KING;
+        moved_piece = W_PAWN;
+    } else {
+        p = B_KNIGHT;
+        e = B_KING;
+        moved_piece = B_PAWN;
+    };
     while p < e {
         moves.push(create_promotion(from, to, is_take, p, mover, moved_piece));
         p += 1
@@ -85,23 +99,44 @@ pub fn add_search_promotions(from: u32, to: u32, is_take: bool, mover: u32, move
     let moved_pawn_idx: u32;
     let queen_piece_idx: u32;
     let knight_piece_idx: u32;
-    if mover == WHITE {moved_pawn_idx = W_PAWN; queen_piece_idx = W_QUEEN; knight_piece_idx = W_KNIGHT;} 
-    else {moved_pawn_idx = B_PAWN; queen_piece_idx = B_QUEEN; knight_piece_idx = B_KNIGHT;}
-    moves.push(create_promotion(from, to, is_take, queen_piece_idx, mover, moved_pawn_idx));
-    moves.push(create_promotion(from, to, is_take, knight_piece_idx, mover, moved_pawn_idx));
+    if mover == WHITE {
+        moved_pawn_idx = W_PAWN;
+        queen_piece_idx = W_QUEEN;
+        knight_piece_idx = W_KNIGHT;
+    } else {
+        moved_pawn_idx = B_PAWN;
+        queen_piece_idx = B_QUEEN;
+        knight_piece_idx = B_KNIGHT;
+    }
+    moves.push(create_promotion(
+        from,
+        to,
+        is_take,
+        queen_piece_idx,
+        mover,
+        moved_pawn_idx,
+    ));
+    moves.push(create_promotion(
+        from,
+        to,
+        is_take,
+        knight_piece_idx,
+        mover,
+        moved_pawn_idx,
+    ));
     return;
 }
 
 //decoding methods
 /// Get square moved from / init square
 #[inline]
-pub fn get_init(mov: u32) -> u32  {
+pub fn get_init(mov: u32) -> u32 {
     return mov & 0x3F;
 }
 
-///Get square moved to / target square 
+///Get square moved to / target square
 #[inline]
-pub fn get_target(mov: u32) -> u32  {
+pub fn get_target(mov: u32) -> u32 {
     return (mov & 0xFC0) >> 6;
 }
 
@@ -153,7 +188,7 @@ pub fn is_en_passant(mov: u32) -> bool {
 
 #[inline]
 pub fn is_double_push(mov: u32) -> bool {
-    return (mov & 8192) > 0
+    return (mov & 8192) > 0;
 }
 
 pub fn eaten_piece(mov: u32) -> Option<u32> {

@@ -6,27 +6,38 @@ const DEFAULT_STATIC_DEPTH: usize = 8;
 pub struct SearchConfig {
     pub search_mode: SearchMode,
     pub quiescence: bool,
-    pub log_performance: bool
+    pub log_performance: bool,
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
-        Self { search_mode: SearchMode::StaticDepth(DEFAULT_STATIC_DEPTH), quiescence: true, log_performance: false }
+        Self {
+            search_mode: SearchMode::StaticDepth(DEFAULT_STATIC_DEPTH),
+            quiescence: true,
+            log_performance: false,
+        }
     }
 }
 
 impl SearchConfig {
     fn with_d(d: usize) -> Self {
-        Self {search_mode: SearchMode::StaticDepth(d), quiescence: true, log_performance: false}
+        Self {
+            search_mode: SearchMode::StaticDepth(d),
+            quiescence: true,
+            log_performance: false,
+        }
     }
 
     fn with_performance_logging() -> Self {
-        Self {search_mode: SearchMode::StaticDepth(DEFAULT_STATIC_DEPTH), quiescence: true, log_performance: true}
+        Self {
+            search_mode: SearchMode::StaticDepth(DEFAULT_STATIC_DEPTH),
+            quiescence: true,
+            log_performance: true,
+        }
     }
-
 }
 
 pub enum SearchMode {
     StaticDepth(usize),
-    StaticTime(f32) //ms
+    StaticTime(f32), //ms
 }
