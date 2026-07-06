@@ -40,7 +40,7 @@ impl Game {
                 //println!("Successfully moved: {}", _move::to_string(m));
                 self.position
                     .make_move(m, false, false, &self.move_gen, &self.zobrist);
-                self.searcher.sync_new_move(&self.position, m);
+                self.searcher.sync_new_move(&self.position, Some(m));
                 if _move::is_unrepeatable(m) {
                     println!("move was unrepeatable");
                     self.repetition_relevant_history_idx = self.board_history.len();

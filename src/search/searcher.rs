@@ -49,28 +49,22 @@ impl Searcher {
     }
 
     ///Both engine moves and user moves are synced
-    pub fn sync_new_move(&mut self, new_pos: &Position, mov: u32) {
+    /// In UCI mov is not always defined, may be just position
+    pub fn sync_new_move(&mut self, new_pos: &Position, mov: Option<u32>) {
         self.last_sync_deviates_from_pv = match self.collect_best_move() {
-            Some(bm) => bm != mov,
-            None => true
+            Some(bm) if mov.is_some() => bm != mov.unwrap(),
+            _ => true
         };
         println!("last sync deviates from pv: {}", self.last_sync_deviates_from_pv);
         for i in 0..THREAD_COUNT {
             self.positions[i] = (*new_pos).clone();
-            if _move::is_unrepeatable(mov) {
+            if mov.is_some() && _move::is_unrepeatable(mov.unwrap()) {
                 self.search_data[i].board_hash_history.clear();
-                self.search_data[i]
-                    .board_hash_history
-                    .push(new_pos.board.zhash);
-            } else {
-                self.search_data[i]
-                    .board_hash_history
-                    .push(new_pos.board.zhash);
             }
-            //Here can be distinguished if new move was according to the best variation or deviated
-            //If according to pv, then can skip lower depths of iterative deepening as much as possible,
-            //since would get the same result anyways
-            //Else if deviates, just start null out PV and start from scratch ig, engine probably has some punishing move now
+            self.search_data[i]
+                .board_hash_history
+                .push(new_pos.board.zhash);
+
             if self.last_sync_deviates_from_pv {
                 self.search_data[i].pv.fill(NULL_MOVE);
             } else {

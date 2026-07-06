@@ -122,7 +122,7 @@ fn search_benchmark_pos(
                     _move::to_string(m)
                 );
                 pos.make_move(m, false, false, &engine.move_gen, &engine.zobrist);
-                searcher.sync_new_move(&pos, m);
+                searcher.sync_new_move(&pos, Some(m));
             }
             None => {
                 println!("game ended, stopping after search {}", rep + 1);
