@@ -119,7 +119,7 @@ fn search_benchmark_pos(
                     rep + 1,
                     reps,
                     time_took.as_secs_f64(),
-                    _move::to_string(m)
+                    _move::to_string(m, false)
                 );
                 pos.make_move(m, false, false, &engine.move_gen, &engine.zobrist);
                 searcher.sync_new_move(&pos, Some(m));

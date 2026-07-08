@@ -217,10 +217,22 @@ pub fn breaks_fifty_counter(mov: u32) -> bool {
 
 const PIECE_CHARS: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
 
-pub fn to_string(mov: u32) -> String {
+pub fn to_string(mov: u32, uci: bool) -> String {
     if mov == NULL_MOVE {
+        if uci {
+            return "0000".to_string();
+        }
         return "NULL_MOVE".to_string();
     }
+    if uci {
+        let mut res = square_to_string(get_init(mov));
+        res.push_str(&square_to_string(get_target(mov)));
+        if is_promotion(mov) {
+            res.push_str(&PIECE_CHARS[get_promoted_piece(mov) as usize].to_ascii_lowercase());
+        }
+        return res;
+    }
+    //verbose, good for debugging
     let mut res = String::new();
     let piece: usize = get_moved_piece(mov) as usize;
     res.push_str(PIECE_CHARS[piece]);

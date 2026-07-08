@@ -1,5 +1,5 @@
 use rusty_engine::repr::{
-    types::{BLACK, WHITE},
+    types::{BLACK, WHITE, W_PAWN, W_QUEEN},
     *,
 };
 
@@ -43,4 +43,29 @@ fn decoding_works() {
     assert_eq!(_move::is_castle(m3), true);
     assert_eq!(_move::is_short_castle(m3), true);
     assert_eq!(_move::is_long_castle(m3), false)
+}
+
+#[test]
+fn to_string_supports_readable_and_uci_formats() {
+    let quiet = _move::create(12, 28, false, WHITE, W_PAWN);
+    assert_eq!(_move::to_string(quiet, false), "P(e2) -> e4");
+    assert_eq!(_move::to_string(quiet, true), "e2e4");
+
+    let capture = _move::create(12, 28, true, WHITE, W_PAWN);
+    assert_eq!(_move::to_string(capture, false), "P(e2) x e4");
+    assert_eq!(_move::to_string(capture, true), "e2e4");
+
+    let promotion = _move::create_promotion(52, 60, false, W_QUEEN, WHITE, W_PAWN);
+    assert_eq!(
+        _move::to_string(promotion, false),
+        "P(e7) -> e8 -- promoting to Q"
+    );
+    assert_eq!(_move::to_string(promotion, true), "e7e8q");
+
+    assert_eq!(
+        _move::to_string(_move::create_castling(WHITE, true), true),
+        "e1g1"
+    );
+    assert_eq!(_move::to_string(_move::NULL_MOVE, false), "NULL_MOVE");
+    assert_eq!(_move::to_string(_move::NULL_MOVE, true), "0000");
 }

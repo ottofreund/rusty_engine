@@ -6,6 +6,7 @@ use crate::{
 };
 use std::fmt::Error;
 
+///Game object that is also compatible for UI on-board-games
 pub struct Game {
     pub position: Position,
     pub searcher: Searcher,
@@ -37,7 +38,7 @@ impl Game {
             });
         match mov {
             Some(m) => {
-                //println!("Successfully moved: {}", _move::to_string(m));
+                //println!("Successfully moved: {}", _move::to_string(m, true));
                 self.position
                     .make_move(m, false, false, &self.move_gen, &self.zobrist);
                 self.searcher.sync_new_move(&self.position, Some(m));
@@ -83,7 +84,7 @@ impl Game {
         let mov: Option<u32> = self.played_moves_stack.last().copied();
         match mov {
             Some(m) => {
-                println!("Successfully unmade: {}", _move::to_string(m));
+                println!("Successfully unmade: {}", _move::to_string(m, true));
                 self.unmake_move(m);
                 return Ok(m);
             },

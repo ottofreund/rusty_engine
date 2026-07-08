@@ -140,7 +140,7 @@ where
         pos.board.zhash,
         before_hash,
         "hash should change after {}",
-        _move::to_string(mov)
+        _move::to_string(mov, false)
     );
 
     engine.unmake_move(&mut pos, mov);
@@ -165,7 +165,7 @@ where
             let legal_moves = pos
                 .legal_search_moves()
                 .iter()
-                .map(|mov| _move::to_string(*mov))
+                .map(|mov| _move::to_string(*mov, false))
                 .collect::<Vec<_>>()
                 .join(", ");
             panic!("no matching legal move found. Legal moves: {legal_moves}");
