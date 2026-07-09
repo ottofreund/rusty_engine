@@ -1,4 +1,4 @@
-use std::io::*;
+use std::{io::*, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}};
 
 use crate::{
     game::cpu_game::CpuGame,
@@ -11,6 +11,7 @@ pub fn listen(cpu_game: CpuGame) {
     let stdin = std::io::stdin();
     let mut active_search_thread: Option<std::thread::JoinHandle<CpuGame>> = None;
     let mut cpu_game: Option<CpuGame> = Some(cpu_game);
+    let search_kill_switch: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     for line in stdin.lock().lines() {
         let line = line.unwrap();
         let command = parse_command(&line);
@@ -32,13 +33,14 @@ pub fn listen(cpu_game: CpuGame) {
                         //TODO
                     }
                     ArbiterCommand::Go(g) if g.is_valid() => {
+                        //TODO add ponder case
                         //join possible previous search thread before starting a new one
                         if let Some(handle) = active_search_thread.take() {
                             cpu_game = Some(handle.join().unwrap());
                         }
 
                         let mut game: CpuGame = cpu_game.take().unwrap();
-
+                        let kill_switch_clone = search_kill_switch.clone();
                         active_search_thread = Some(std::thread::spawn(move || {
                             if g.movetime.is_some() {
                                 game.searcher.search_config.search_mode =
@@ -53,7 +55,7 @@ pub fn listen(cpu_game: CpuGame) {
                                         game.searcher.positions[0].board.turn == WHITE,
                                     );
                             }
-                            game.searcher.start_search(&game.move_gen, &game.zobrist);
+                            game.searcher.start_search(&game.move_gen, &game.zobrist, Some(kill_switch_clone));
                             let best_move: u32 = game.searcher.collect_best_move().unwrap();
                             println!("bestmove {}", _move::to_string(best_move, true));
                             game.position.make_move(
@@ -74,11 +76,16 @@ pub fn listen(cpu_game: CpuGame) {
                         //TODO
                     }
                     ArbiterCommand::Quit => {
-                        //terminate active search threads
+                        let kill_switch_clone = search_kill_switch.clone();
+                        kill_switch_clone.store(true, Relaxed);
+                        active_search_thread
+                            .take()
+                            .map(|handle| handle.join().unwrap());
                         return;
                     }
                     ArbiterCommand::Stop => {
-                        //TODO
+                        let kill_switch_clone = search_kill_switch.clone();
+                        kill_switch_clone.store(true, Relaxed);
                     }
                     _ => {
                         println!("Invalid arguments: {}", line);

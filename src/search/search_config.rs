@@ -14,7 +14,7 @@ pub struct SearchConfig {
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
-            search_mode: SearchMode::StaticDepth(DEFAULT_STATIC_DEPTH),
+            search_mode: SearchMode::StaticTime(5000),
             quiescence: true,
             log_diagnostics: false,
         }
@@ -22,6 +22,7 @@ impl Default for SearchConfig {
 }
 
 impl SearchConfig {
+
     pub fn with_d(d: usize) -> Self {
         Self {
             search_mode: SearchMode::StaticDepth(d),
@@ -30,13 +31,6 @@ impl SearchConfig {
         }
     }
 
-    fn with_diagnostics() -> Self {
-        Self {
-            search_mode: SearchMode::StaticDepth(DEFAULT_STATIC_DEPTH),
-            quiescence: true,
-            log_diagnostics: true,
-        }
-    }
 }
 
 pub enum SearchMode {

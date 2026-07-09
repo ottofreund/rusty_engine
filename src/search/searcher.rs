@@ -1,4 +1,4 @@
-use std::{cmp::max, time::Instant};
+use std::{cmp::max, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}, time::Instant};
 
 use crate::{
     repr::{
@@ -84,40 +84,42 @@ impl Searcher {
         let search_data: [SearchData; THREAD_COUNT] = std::array::from_fn(|_| {
             return SearchData::new(pos);
         });
+        let mut search_config = SearchConfig::default();
+        search_config.log_diagnostics = true;
         return Self {
             positions,
             search_data,
             multithreaded: false,
-            search_config: SearchConfig::default(),
+            search_config,
             evaluator: Evaluator::default(),
             last_sync_deviates_from_pv: true,
         };
     }
 
-    pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist) {
+    pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<Arc<AtomicBool>>) {
         if self.multithreaded {
             panic!("multithreaded search");
             //PRAGMA FOR LOOP HERE
             for i in 0..THREAD_COUNT {
-                self.start_search_node(i, move_gen, zobrist);
+                self.start_search_node(i, move_gen, zobrist, kill_switch.clone());
             }
         } else {
-            self.start_search_node(0, move_gen, zobrist);
+            self.start_search_node(0, move_gen, zobrist, kill_switch);
         }
     }
 
-    fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist) {
+    fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<Arc<AtomicBool>>) {
         match self.search_config.search_mode {
             SearchMode::StaticDepth(d) => {
                 self.search_static_d(d, idx, move_gen, zobrist);
             }
             SearchMode::StaticTime(t) => {
-                self.search_static_time(t, idx, move_gen, zobrist);
+                self.search_static_time(t, idx, move_gen, zobrist, kill_switch);
             }
         }
         return;
     }
-
+ 
     ///alpha-beta pruned negamax algorithm with iterative deepening
     fn search_static_d(
         &mut self,
@@ -245,6 +247,7 @@ impl Searcher {
         idx: usize,
         move_gen: &MoveGen,
         zobrist: &Zobrist,
+        kill_switch: Option<Arc<AtomicBool>>
     ) {
         let start: Instant = Instant::now();
         //cv: current variation, pv: primary variation
@@ -262,10 +265,15 @@ impl Searcher {
             search_data: &mut SearchData,
             move_gen: &MoveGen,
             zobrist: &Zobrist,
+            kill_switch: Option<Arc<AtomicBool>>
         ) -> i32 {
             if search_data.positions_searched != 0
-                && search_data.positions_searched % 1024 == 0
-                && start_t.elapsed().as_millis() as u64 > target_t
+                && ((search_data.positions_searched % 8192 == 0
+                     && start_t.elapsed().as_millis() as u64 > target_t
+                    ) || (
+                     kill_switch.is_some() 
+                     && kill_switch.as_ref().unwrap().load(Relaxed))
+                    )
             {
                 return EVAL_QUIT;
             }
@@ -306,6 +314,7 @@ impl Searcher {
                     search_data,
                     move_gen,
                     zobrist,
+                    kill_switch.clone()
                 );
                 search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
@@ -353,6 +362,7 @@ impl Searcher {
                 search_data,
                 move_gen,
                 zobrist,
+                kill_switch.clone()
             );
             search_data.cumul_positions_searched += search_data.positions_searched;
             if eval == EVAL_QUIT {

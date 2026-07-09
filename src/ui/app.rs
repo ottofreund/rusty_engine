@@ -272,7 +272,7 @@ pub fn update(state: &mut AppState, msg: Message) {
             state
                 .game
                 .searcher
-                .start_search(&state.game.move_gen, &state.game.zobrist);
+                .start_search(&state.game.move_gen, &state.game.zobrist, None);
             let time_took: Duration = start.elapsed();
             println!("Search finished in {} ms", time_took.as_millis());
         }
