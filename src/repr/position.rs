@@ -43,7 +43,7 @@ impl Position {
         };
     }
 
-    pub fn position_with(
+    pub fn from(
         fen: &str,
         move_gen: &MoveGen,
         zobrist: &Zobrist,

@@ -20,7 +20,7 @@ pub struct Game {
 impl Game {
     ///also imports to searcher to stay in sync
     pub fn import_position(&mut self, position: Position) {
-        self.searcher.import_position(&position);
+        self.searcher.import_position(&position, None);
         self.position = position;
         self.board_history.clear();
         self.board_history.push(self.position.board.clone());

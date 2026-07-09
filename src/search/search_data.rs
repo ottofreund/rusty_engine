@@ -26,6 +26,13 @@ impl SearchData {
         };
     }
 
+    pub fn with_board_hash_history(pos: &Position, board_hash_history: Vec<u64>) -> Self {
+        Self {
+            board_hash_history,
+            ..Self::new(pos)
+        }
+    }
+
     pub fn in_three_fold(&self, pos: &Position) -> bool {
         let mut count: u32 = 1;
         let mut i: usize;

@@ -242,7 +242,7 @@ pub fn update(state: &mut AppState, msg: Message) {
                 .import_position(Position::default(&state.game.move_gen, &state.game.zobrist));
         }
         Message::NewFenPosPressed => {
-            match Position::position_with(
+            match Position::from(
                 &state.fen_input.trim(),
                 &state.game.move_gen,
                 &state.game.zobrist,

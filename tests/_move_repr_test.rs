@@ -1,5 +1,5 @@
 use rusty_engine::repr::{
-    types::{BLACK, WHITE, W_PAWN, W_QUEEN},
+    types::{BLACK, B_KNIGHT, WHITE, W_PAWN, W_QUEEN},
     *,
 };
 
@@ -68,4 +68,26 @@ fn to_string_supports_readable_and_uci_formats() {
     );
     assert_eq!(_move::to_string(_move::NULL_MOVE, false), "NULL_MOVE");
     assert_eq!(_move::to_string(_move::NULL_MOVE, true), "0000");
+}
+
+#[test]
+fn from_string_parses_uci_square_pairs() {
+    assert_eq!(_move::from_string("e2e4"), Ok((12, 28, None)));
+    assert_eq!(_move::from_string("b8c6"), Ok((57, 42, None)));
+    assert_eq!(_move::from_string("e1g1"), Ok((4, 6, None)));
+    assert_eq!(_move::from_string("e7e8q"), Ok((52, 60, Some(W_QUEEN))));
+    assert_eq!(_move::from_string("b2b1n"), Ok((9, 1, Some(B_KNIGHT))));
+}
+
+#[test]
+fn from_string_rejects_invalid_uci_moves() {
+    assert!(_move::from_string("").is_err());
+    assert!(_move::from_string("0000").is_err());
+    assert!(_move::from_string("e2e9").is_err());
+    assert!(_move::from_string("i2e4").is_err());
+    assert!(_move::from_string("E2E4").is_err());
+    assert!(_move::from_string("e2e2").is_err());
+    assert!(_move::from_string("e2e4q").is_err());
+    assert!(_move::from_string("e7e8k").is_err());
+    assert!(_move::from_string("e2e4queen").is_err());
 }

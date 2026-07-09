@@ -215,7 +215,66 @@ pub fn breaks_fifty_counter(mov: u32) -> bool {
     return is_eating(mov) || (get_moved_piece(mov) % 6) == W_PAWN;
 }
 
+pub fn promotion_matches(mov: u32, promotion: Option<u32>) -> bool {
+    match promotion {
+        Some(piece) => return is_promotion(mov) && get_promoted_piece(mov) == piece,
+        None => return !is_promotion(mov),
+    }
+}
+
 const PIECE_CHARS: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
+
+pub fn from_string(mov: &str) -> Result<(u32, u32, Option<u32>), &'static str> {
+    let bytes = mov.as_bytes();
+    if bytes.len() != 4 && bytes.len() != 5 {
+        return Err("Invalid UCI move length");
+    }
+
+    let from: u32 = parse_square(bytes[0], bytes[1])?;
+    let to: u32 = parse_square(bytes[2], bytes[3])?;
+    if from == to {
+        return Err("Invalid UCI move target");
+    }
+
+    let promotion: Option<u32> = if bytes.len() == 5 {
+        Some(parse_promotion_piece(bytes[4], bytes[3])?)
+    } else {
+        None
+    };
+
+    return Ok((from, to, promotion));
+}
+
+fn parse_square(file: u8, rank: u8) -> Result<u32, &'static str> {
+    if file < b'a' || file > b'h' {
+        return Err("Invalid UCI file");
+    }
+    if rank < b'1' || rank > b'8' {
+        return Err("Invalid UCI rank");
+    }
+
+    return Ok(((rank - b'1') as u32) * 8 + (file - b'a') as u32);
+}
+
+fn parse_promotion_piece(piece: u8, target_rank: u8) -> Result<u32, &'static str> {
+    let promotes_to_white_piece: bool = match target_rank {
+        b'8' => true,
+        b'1' => false,
+        _ => return Err("Invalid UCI promotion target"),
+    };
+
+    return match (piece, promotes_to_white_piece) {
+        (b'n', true) => Ok(W_KNIGHT),
+        (b'b', true) => Ok(W_BISHOP),
+        (b'r', true) => Ok(W_ROOK),
+        (b'q', true) => Ok(W_QUEEN),
+        (b'n', false) => Ok(B_KNIGHT),
+        (b'b', false) => Ok(B_BISHOP),
+        (b'r', false) => Ok(B_ROOK),
+        (b'q', false) => Ok(B_QUEEN),
+        _ => Err("Invalid UCI promotion piece"),
+    };
+}
 
 pub fn to_string(mov: u32, uci: bool) -> String {
     if mov == NULL_MOVE {

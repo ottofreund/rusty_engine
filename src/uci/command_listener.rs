@@ -1,16 +1,22 @@
-use std::{io::*, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}};
+use std::{
+    io::*,
+    sync::{
+        atomic::{AtomicBool, Ordering::Relaxed},
+        Arc,
+    },
+};
 
 use crate::{
-    game::cpu_game::CpuGame,
-    repr::{_move, types::WHITE},
-    search::search_config::SearchMode,
-    uci::uci_command::{ArbiterCommand, PositionCommand},
+    game::cpu_game::CpuGame, repr::{
+        _move::{self, NULL_MOVE}, position::Position, types::WHITE,
+    }, search::search_config::SearchMode, uci::uci_command::{ArbiterCommand, PositionCommand}, utils::fen_tool::is_valid_fen,
 };
 
 pub fn listen(cpu_game: CpuGame) {
     let stdin = std::io::stdin();
     let mut active_search_thread: Option<std::thread::JoinHandle<CpuGame>> = None;
     let mut cpu_game: Option<CpuGame> = Some(cpu_game);
+    println!("CpuGame size: {}", std::mem::size_of::<CpuGame>());
     let search_kill_switch: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     for line in stdin.lock().lines() {
         let line = line.unwrap();
@@ -32,7 +38,7 @@ pub fn listen(cpu_game: CpuGame) {
                     ArbiterCommand::UCINewGame => {
                         //TODO
                     }
-                    ArbiterCommand::Go(g) if g.is_valid() => {
+                    ArbiterCommand::Go(gc) if gc.is_valid() => {
                         //TODO add ponder case
                         //join possible previous search thread before starting a new one
                         if let Some(handle) = active_search_thread.take() {
@@ -41,39 +47,58 @@ pub fn listen(cpu_game: CpuGame) {
 
                         let mut game: CpuGame = cpu_game.take().unwrap();
                         let kill_switch_clone = search_kill_switch.clone();
-                        active_search_thread = Some(std::thread::spawn(move || {
-                            if g.movetime.is_some() {
+                        kill_switch_clone.store(false, Relaxed);
+                        active_search_thread = Some(std::thread::Builder::new()
+                                .name("uci-search-thread".into())
+                                .stack_size(32 * 1024 * 1024)
+                                .spawn(move || {
+                            if gc.movetime.is_some() {
                                 game.searcher.search_config.search_mode =
-                                    SearchMode::static_time_with_margin(g.movetime.unwrap());
+                                    SearchMode::static_time_with_margin(gc.movetime.unwrap());
                             } else {
                                 game.searcher.search_config.search_mode =
                                     SearchMode::time_control_with_margin(
-                                        g.wtime.unwrap(),
-                                        g.btime.unwrap(),
-                                        g.winc.unwrap_or(0),
-                                        g.binc.unwrap_or(0),
+                                        gc.wtime.unwrap(),
+                                        gc.btime.unwrap(),
+                                        gc.winc.unwrap_or(0),
+                                        gc.binc.unwrap_or(0),
                                         game.searcher.positions[0].board.turn == WHITE,
                                     );
                             }
-                            game.searcher.start_search(&game.move_gen, &game.zobrist, Some(kill_switch_clone));
-                            let best_move: u32 = game.searcher.collect_best_move().unwrap();
-                            println!("bestmove {}", _move::to_string(best_move, true));
-                            game.position.make_move(
-                                best_move,
-                                false,
-                                false,
+                            game.searcher.start_search(
                                 &game.move_gen,
                                 &game.zobrist,
+                                Some(kill_switch_clone),
                             );
-                            game.searcher.sync_new_move(&game.position, Some(best_move));
+                            let best_move: u32 = game.searcher.collect_best_move().unwrap_or(NULL_MOVE);
+                            println!("bestmove {}", _move::to_string(best_move, true));
                             return game;
-                        }));
+                        }).unwrap());
                     }
                     ArbiterCommand::PonderHit => {
                         //TODO
                     }
-                    ArbiterCommand::Position(_) => {
-                        //TODO
+                    ArbiterCommand::Position(pc) => {
+                        match active_search_thread.take() {
+                            Some(handle) => {
+                                search_kill_switch.store(true, Relaxed);
+                                cpu_game = Some(handle.join().unwrap());
+                            }
+                            None => {}
+                        }
+                        let cpu_g: &mut CpuGame = cpu_game.as_mut().unwrap();
+                        let position =
+                            match Position::from(&pc.fen, &cpu_g.move_gen, &cpu_g.zobrist) {
+                                Ok(position) => position,
+                                Err(err) => {
+                                    println!("Invalid position: {}", err);
+                                    continue;
+                                }
+                            };
+                        
+                        cpu_g.import_position(position, pc.moves).unwrap_or_else(|err| {
+                            println!("Error importing position: {}", err);
+                        });
                     }
                     ArbiterCommand::Quit => {
                         let kill_switch_clone = search_kill_switch.clone();
@@ -101,12 +126,14 @@ pub fn listen(cpu_game: CpuGame) {
 
 fn parse_command(line: &str) -> Option<ArbiterCommand> {
     let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.is_empty() {
+        return None;
+    }
     match parts[0] {
         "uci" => Some(ArbiterCommand::UCI),
         "isready" => Some(ArbiterCommand::IsReady),
-        "position" => {
+        "position" if !is_invalid_pos_command(&parts) => {
             let moves_idx: Option<usize> = parts.iter().position(|&x| x == "moves");
-            assert!(!is_invalid_pos_command(&parts, moves_idx.is_some()));
             let moves: Vec<String> = match moves_idx {
                 Some(idx) => parts[idx + 1..]
                     .to_vec()
@@ -126,10 +153,14 @@ fn parse_command(line: &str) -> Option<ArbiterCommand> {
                 } else {
                     fen_str = parts[2..].join(" ");
                 }
-                return Some(ArbiterCommand::Position(PositionCommand::new(
-                    Some(fen_str),
-                    moves,
-                )));
+                if is_valid_fen(&fen_str) {
+                    return Some(ArbiterCommand::Position(PositionCommand::new(
+                        Some(fen_str),
+                        moves,
+                    )));
+                } else {
+                    return None;
+                }
             }
         }
         "go" => {
@@ -187,8 +218,8 @@ fn parse_command(line: &str) -> Option<ArbiterCommand> {
 }
 
 /// Assumes that possible FEN and moves are valid, only checks for correct command structure
-fn is_invalid_pos_command(parts: &Vec<&str>, contains_moves: bool) -> bool {
-    if parts.len() < 2 || parts.len() > 3 {
+fn is_invalid_pos_command(parts: &Vec<&str>) -> bool {
+    if parts.len() < 2 {
         return true;
     }
     if parts[1] != "startpos" && parts[1] != "fen" {
@@ -196,12 +227,6 @@ fn is_invalid_pos_command(parts: &Vec<&str>, contains_moves: bool) -> bool {
     }
 
     if parts[1] == "fen" && parts.len() < 3 {
-        return true;
-    } else if parts[1] != "startpos" {
-        return true;
-    }
-
-    if parts.len() > 3 && !contains_moves {
         return true;
     }
 

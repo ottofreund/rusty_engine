@@ -4,6 +4,8 @@
 - Quiescence search
 - Transposition table
 
+- Try make move to distinguish between promotions (allow promotion selection in GUI game)
+
 - Move selection sort pick in search can be maybe optimized
 
 Reminders:

@@ -136,7 +136,7 @@ fn search_repetition_history_resets_after_unrepeatable_move() {
 
 fn import_position(game: &mut Game, fen: &str) {
     let position =
-        Position::position_with(fen, &game.move_gen, &game.zobrist).expect("valid FEN position");
+        Position::from(fen, &game.move_gen, &game.zobrist).expect("valid FEN position");
     game.import_position(position);
 }
 

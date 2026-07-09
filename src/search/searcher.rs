@@ -39,12 +39,16 @@ pub struct Searcher {
 //minimax with alpha beta pruning, ran by iterative deepening
 //search heuristics in ordering of moves
 impl Searcher {
-    pub fn import_position(&mut self, pos: &Position) {
+    pub fn import_position(&mut self, pos: &Position, board_hash_history: Option<Vec<u64>>) {
         for i in 0..THREAD_COUNT {
             self.positions[i] = (*pos).clone();
         }
         self.search_data = std::array::from_fn(|_| {
-            return SearchData::new(pos);
+            if let Some(bhh) = &board_hash_history {
+                return SearchData::with_board_hash_history(pos, bhh.clone());
+            } else {
+                return SearchData::new(pos);
+            }
         });
         self.last_sync_deviates_from_pv = true;
     }
@@ -85,7 +89,6 @@ impl Searcher {
             return SearchData::new(pos);
         });
         let mut search_config = SearchConfig::default();
-        search_config.log_diagnostics = true;
         return Self {
             positions,
             search_data,

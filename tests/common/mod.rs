@@ -22,7 +22,7 @@ impl TestEngine {
     }
 
     pub fn position(&self, fen: &str) -> Position {
-        Position::position_with(fen, &self.move_gen, &self.zobrist).expect("valid FEN")
+        Position::from(fen, &self.move_gen, &self.zobrist).expect("valid FEN")
     }
 
     pub fn board(&self, fen: &str) -> Board {
