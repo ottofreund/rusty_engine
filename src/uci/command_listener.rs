@@ -6,18 +6,21 @@ use std::{
     },
 };
 
+use iced::futures::lock::Mutex;
+
 use crate::{
     game::cpu_game::CpuGame, repr::{
         _move::{self, NULL_MOVE}, position::Position, types::WHITE,
     }, search::search_config::SearchMode, uci::uci_command::{ArbiterCommand, PositionCommand}, utils::fen_tool::is_valid_fen,
 };
 
-pub fn listen(cpu_game: CpuGame) {
+pub async fn listen(cpu_game: CpuGame) {
     let stdin = std::io::stdin();
-    let mut active_search_thread: Option<std::thread::JoinHandle<CpuGame>> = None;
-    let mut cpu_game: Option<CpuGame> = Some(cpu_game);
-    println!("CpuGame size: {}", std::mem::size_of::<CpuGame>());
+    let mut active_search_thread: Option<std::thread::JoinHandle<Box<CpuGame>>> = None;
+    let mut cpu_game: Option<Box<CpuGame>> = Some(Box::new(cpu_game));
     let search_kill_switch: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let last_pos_command: Arc<Mutex<PositionCommand>> = Arc::new(Mutex::new(PositionCommand::new(None, vec![])));
+  
     for line in stdin.lock().lines() {
         let line = line.unwrap();
         let command = parse_command(&line);
@@ -45,7 +48,7 @@ pub fn listen(cpu_game: CpuGame) {
                             cpu_game = Some(handle.join().unwrap());
                         }
 
-                        let mut game: CpuGame = cpu_game.take().unwrap();
+                        let mut game: Box<CpuGame> = cpu_game.take().unwrap();
                         let kill_switch_clone = search_kill_switch.clone();
                         kill_switch_clone.store(false, Relaxed);
                         active_search_thread = Some(std::thread::Builder::new()
@@ -86,19 +89,28 @@ pub fn listen(cpu_game: CpuGame) {
                             }
                             None => {}
                         }
+
                         let cpu_g: &mut CpuGame = cpu_game.as_mut().unwrap();
-                        let position =
-                            match Position::from(&pc.fen, &cpu_g.move_gen, &cpu_g.zobrist) {
-                                Ok(position) => position,
-                                Err(err) => {
-                                    println!("Invalid position: {}", err);
-                                    continue;
+
+                        if last_pos_command.lock().await.preceeds(&pc) {
+                            match cpu_g.sync_new_move(pc.moves.last().unwrap().as_str()) {
+                                Ok(()) => {  
+                                    *last_pos_command.lock().await = pc.clone();
                                 }
-                            };
-                        
-                        cpu_g.import_position(position, pc.moves).unwrap_or_else(|err| {
-                            println!("Error importing position: {}", err);
-                        });
+                                Err(err) => {
+                                    println!("Error syncing new move: {}", err);
+                                }
+                            }
+                        } else {
+                            match cpu_g.import_position(pc.fen.as_str(), pc.moves.clone()) {
+                                Ok(()) => {
+                                    *last_pos_command.lock().await = pc.clone();
+                                }
+                                Err(err) => {
+                                    println!("Error importing position: {}", err);
+                                }
+                            }
+                        }
                     }
                     ArbiterCommand::Quit => {
                         let kill_switch_clone = search_kill_switch.clone();
@@ -210,7 +222,8 @@ fn parse_command(line: &str) -> Option<ArbiterCommand> {
                     movetime: None,
                 }));
             }
-        }
+        },
+        "ucinewgame" => Some(ArbiterCommand::UCINewGame),
         "stop" => Some(ArbiterCommand::Stop),
         "quit" => Some(ArbiterCommand::Quit),
         _ => None,
@@ -227,6 +240,10 @@ fn is_invalid_pos_command(parts: &Vec<&str>) -> bool {
     }
 
     if parts[1] == "fen" && parts.len() < 3 {
+        return true;
+    }
+
+    if parts[1] == "startpos" && parts.len() > 2 && parts[2] != "moves" {
         return true;
     }
 

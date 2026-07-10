@@ -60,10 +60,12 @@ impl Searcher {
             Some(bm) if mov.is_some() => bm != mov.unwrap(),
             _ => true,
         };
-        println!(
-            "last sync deviates from pv: {}",
-            self.last_sync_deviates_from_pv
-        );
+        if self.search_config.log_diagnostics {
+            println!(
+                "last sync deviates from pv: {}",
+                self.last_sync_deviates_from_pv
+            );
+        }
         for i in 0..THREAD_COUNT {
             self.positions[i] = (*new_pos).clone();
             if mov.is_some() && _move::is_unrepeatable(mov.unwrap()) {

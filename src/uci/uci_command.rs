@@ -41,6 +41,7 @@ pub enum OptionType {
     Check(String), //type name
 }
 
+#[derive(Clone)]
 pub struct GoCommand {
     pub ponder: bool,
     pub wtime: Option<u64>,
@@ -84,6 +85,7 @@ impl GoCommand {
     }
 }
 
+#[derive(Clone)]
 pub struct PositionCommand {
     pub fen: String,
     pub moves: Vec<String>,
@@ -96,6 +98,22 @@ impl PositionCommand {
             moves,
         };
     }
+
+    pub fn preceeds(&self, other: &PositionCommand) -> bool {
+        if self.fen != other.fen {
+            return false;
+        }
+        if self.moves.len() + 1 != other.moves.len() {
+            return false;
+        }
+        for (i, m) in self.moves.iter().enumerate() {
+            if m != &other.moves[i] {
+                return false;
+            }
+        }
+        return true;
+    }
+
 }
 
 struct OptionCommand {
