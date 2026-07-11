@@ -15,6 +15,7 @@ impl GameState {
             GameState::DrawByFiftyMoveRule => true,
             GameState::DrawByInsufficientMaterial => true,
             GameState::DrawByTimeout => true,
+            GameState::Stalemate => true,
             _ => false,
         }
     }
