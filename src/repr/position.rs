@@ -292,6 +292,10 @@ impl Position {
             lost_ep,
         );
 
+        if is_promotion {
+            self.board.major_minor_count += 1;
+        }
+
         self.board.nof_checkers = 0;
         self.board.check_block_sqrs = 0;
         //compute opponent attacked of next pos, also sets board.nof_checkers
@@ -309,7 +313,7 @@ impl Position {
         move_gen.compute_pinned(&mut self.board, turn);
         /*
          *
-         * 2. Update self state
+         * 3. Update self state
          *
          */
         let move_arr_s_idx: usize;
@@ -501,6 +505,10 @@ impl Position {
             self.board.white_attacks = board_state_info.opponent_attacked;
         }
         self.board.meta_attacks = board_state_info.meta_attacks;
+
+        if is_promotion {
+            self.board.major_minor_count -= 1;
+        }
 
         self.board.turn = self.board.turn ^ 1;
         /*
