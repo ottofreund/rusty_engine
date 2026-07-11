@@ -74,7 +74,14 @@ pub fn create_promotion(
     //2097152 == 2^21
 }
 ///Add all promotions for this pawn to a mutably borrowed move vector **vec**. Doesn't validate input, assumes correct usage
-pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: &mut Vec<u32>) {
+pub fn add_all_promotions(
+    from: u32,
+    to: u32,
+    is_take: bool,
+    mover: u32,
+    move_arr: &mut [u32],
+    move_arr_s_idx: usize,
+) {
     let mut p: u32;
     let e: u32;
     let moved_piece: u32;
@@ -88,14 +95,23 @@ pub fn add_all_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: 
         e = B_KING;
         moved_piece = B_PAWN;
     };
+    let mut i = move_arr_s_idx;
     while p < e {
-        moves.push(create_promotion(from, to, is_take, p, mover, moved_piece));
-        p += 1
+        move_arr[i] = create_promotion(from, to, is_take, p, mover, moved_piece);
+        p += 1;
+        i += 1;
     }
 }
 
 ///Add only queen and knight promotions to a mutably borrowed move vector **vec**. Doesn't validate input, assumes correct usage
-pub fn add_search_promotions(from: u32, to: u32, is_take: bool, mover: u32, moves: &mut Vec<u32>) {
+pub fn add_search_promotions(
+    from: u32,
+    to: u32,
+    is_take: bool,
+    mover: u32,
+    move_arr: &mut [u32],
+    move_arr_s_idx: usize,
+) {
     let moved_pawn_idx: u32;
     let queen_piece_idx: u32;
     let knight_piece_idx: u32;
@@ -108,22 +124,10 @@ pub fn add_search_promotions(from: u32, to: u32, is_take: bool, mover: u32, move
         queen_piece_idx = B_QUEEN;
         knight_piece_idx = B_KNIGHT;
     }
-    moves.push(create_promotion(
-        from,
-        to,
-        is_take,
-        queen_piece_idx,
-        mover,
-        moved_pawn_idx,
-    ));
-    moves.push(create_promotion(
-        from,
-        to,
-        is_take,
-        knight_piece_idx,
-        mover,
-        moved_pawn_idx,
-    ));
+    move_arr[move_arr_s_idx] =
+        create_promotion(from, to, is_take, queen_piece_idx, mover, moved_pawn_idx);
+    move_arr[move_arr_s_idx + 1] =
+        create_promotion(from, to, is_take, knight_piece_idx, mover, moved_pawn_idx);
     return;
 }
 

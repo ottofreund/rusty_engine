@@ -27,8 +27,6 @@ const BS_CASTLING_GAP_BB: u64 = 6917529027641081856; //2^61 + 2^62
 const BL_CASTLING_GAP_BB: u64 = 1008806316530991104; //2^57 + 2^58 + 2^59
 const WL_ATTACK_GAP_BB: u64 = 12; //2^2 + 2^3
 const BL_ATTACK_GAP_BB: u64 = 864691128455135232; //2^58 + 2^59
-const MAX_PSEUDO: usize = 250; //guess for max pseudo moves in any pos
-
 ///Uses **magic_bb** handle for precomputed slide moves.
 pub struct MoveGen {
     pub attack_bbs: [[u64; 64]; 12], //empty board attack bbs, for pawns doesn't include forward moves, since they aren't attacked by pawns. Doesn't include en passant or castling either.
@@ -78,27 +76,31 @@ impl MoveGen {
         board: &Board,
         mover: u32,
         move_arr: &mut [u32; MOVE_ARR_SIZE],
+        pseudo_move_arr: &mut [u32],
         move_arr_s_idx: usize,
         in_search: bool,
         in_perft_debug: bool,
     ) -> usize {
         let mut generated: usize = 0;
-        for mov in self.generate_pseudolegal(board, mover, in_search, in_perft_debug) {
-            if MoveGen::pseudolegal_is_legal(mov, board, mover) {
+        let pseudolegals_generated: usize =
+            self.generate_pseudolegal(board, pseudo_move_arr, mover, in_search, in_perft_debug);
+
+        for mov in pseudo_move_arr[0..pseudolegals_generated].iter() {
+            if MoveGen::pseudolegal_is_legal(*mov, board, mover) {
                 //add taken piece idx to move (if eating) now, since it is necessary
                 let m: u32;
-                if _move::is_en_passant(mov) {
+                if _move::is_en_passant(*mov) {
                     if mover == WHITE {
-                        m = _move::with_eaten_piece(mov, 6);
+                        m = _move::with_eaten_piece(*mov, 6);
                     } else {
-                        m = mov; //white pawn is 0 so do nothing
+                        m = *mov; //white pawn is 0 so do nothing
                     }
-                } else if _move::is_eating(mov) {
+                } else if _move::is_eating(*mov) {
                     let eaten_piece: u32 =
-                        board.get_piece_type_at(_move::get_target(mov), mover ^ 1);
-                    m = _move::with_eaten_piece(mov, eaten_piece);
+                        board.get_piece_type_at(_move::get_target(*mov), mover ^ 1);
+                    m = _move::with_eaten_piece(*mov, eaten_piece);
                 } else {
-                    m = mov;
+                    m = *mov;
                 }
                 move_arr[move_arr_s_idx + generated] = m;
                 generated += 1;
@@ -245,11 +247,11 @@ impl MoveGen {
     pub fn generate_pseudolegal(
         &self,
         board: &Board,
+        pseudo_move_arr: &mut [u32],
         mover: u32,
         in_search: bool,
         in_perft_debug: bool,
-    ) -> Vec<u32> {
-        let mut res: Vec<u32> = Vec::with_capacity(MAX_PSEUDO);
+    ) -> usize {
         let mut i: usize;
         let e: usize;
         if mover == WHITE {
@@ -259,27 +261,29 @@ impl MoveGen {
             i = 6;
             e = 12;
         }
+        let mut added: usize = 0;
         while i < e {
             let mut piece_bb: u64 = board.pieces[i];
             while piece_bb != 0 {
                 let piece_idx: u32 = bitboard::pop_lsb(&mut piece_bb);
-                self.pseudolegal_for(
+                added += self.pseudolegal_for(
                     piece_idx,
                     i as u32,
                     mover,
                     board,
-                    &mut res,
+                    pseudo_move_arr,
+                    added,
                     false,
                     false,
                     in_search,
                     in_perft_debug,
-                );
+                ) as usize;
             }
             i += 1;
         }
-        add_en_passant(board, mover, &mut res);
-        add_castling(board, mover, &mut res);
-        return res;
+        added += add_en_passant(board, mover, pseudo_move_arr, added);
+        added += add_castling(board, mover, pseudo_move_arr, added);
+        return added;
     }
 
     ///Adds pseudolegal moves for **piece** at **from** to move vector **move_vec**. <br>
@@ -287,14 +291,15 @@ impl MoveGen {
     ///2. Get target squares (including eating own pieces), sliding gen or simply attack_bb <br>
     ///3. If !**keep_protected**, remove "eating own piece" moves by binary ANDing with !own_occupation <br>
     ///4. If **targets_only** just return targets bitboard.
-    ///5. Else Pop-lsb 1-by-1 and make move and add to **move_vec** until none left.
+    ///5. Else Pop-lsb 1-by-1 and make move and add to **move_arr** until none left. Returns number of moves added
     pub fn pseudolegal_for(
         &self,
         from: u32,
         piece: u32,
         mover: u32,
         board: &Board,
-        move_vec: &mut Vec<u32>,
+        move_arr: &mut [u32],
+        move_arr_s_idx: usize,
         keep_protected: bool,
         targets_only: bool,
         in_search: bool,
@@ -302,16 +307,17 @@ impl MoveGen {
     ) -> u64 {
         if piece == W_PAWN || piece == B_PAWN {
             //no en passant from this
-            pseudolegal_pawn(
+            let added: u64 = pseudolegal_pawn(
                 from,
                 mover,
                 board,
                 self,
-                move_vec,
+                move_arr,
+                move_arr_s_idx,
                 in_search,
                 in_perft_debug,
             );
-            return 0;
+            return added;
         }
 
         let mut targets: u64 = match piece {
@@ -367,12 +373,14 @@ impl MoveGen {
             return targets;
         } else {
             //5.
+            let mut i: usize = move_arr_s_idx;
             while targets != 0 {
                 let target_sqr: u32 = bitboard::pop_lsb(&mut targets);
                 let is_take: bool = bitboard::contains_square(opponent_occupied, target_sqr);
-                move_vec.push(_move::create(from, target_sqr, is_take, mover, piece));
+                move_arr[i] = _move::create(from, target_sqr, is_take, mover, piece);
+                i += 1;
             }
-            return 0;
+            return (i - move_arr_s_idx) as u64;
         }
     }
 
@@ -562,7 +570,9 @@ impl MoveGen {
                     i as u32,
                     side,
                     board,
-                    &mut Vec::new(),
+                    // This loop excludes pawns, and targets_only returns before writing moves.
+                    &mut [],
+                    0,
                     true,
                     true,
                     true,
@@ -766,7 +776,8 @@ fn pawn_attacks_white_for(sqr: u32) -> u64 {
 }
 
 ///Adds LEGAL castling moves for **mover** to **move_vec**.
-fn add_castling(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
+fn add_castling(board: &Board, mover: u32, move_arr: &mut [u32], move_arr_s_idx: usize) -> usize {
+    let mut added: usize = 0;
     if board.nof_checkers == 0 {
         //can't castle from check
         let opponent_attacks: u64;
@@ -775,35 +786,46 @@ fn add_castling(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
             let total_occ: u64 = board.total_occupation();
             if board.ws() && WS_CASTLING_GAP_BB & (total_occ | opponent_attacks) == 0 {
                 //short is legal
-                move_vec.push(WHITE_SHORT);
+                move_arr[move_arr_s_idx + added] = WHITE_SHORT;
+                added += 1;
             }
             if board.wl()
                 && WL_CASTLING_GAP_BB & total_occ == 0
                 && WL_ATTACK_GAP_BB & opponent_attacks == 0
             {
                 //long is legal
-                move_vec.push(WHITE_LONG);
+                move_arr[move_arr_s_idx + added] = WHITE_LONG;
+                added += 1;
             }
         } else {
             opponent_attacks = board.white_attacks;
             let total_occ: u64 = board.total_occupation();
             if board.bs() && BS_CASTLING_GAP_BB & (total_occ | opponent_attacks) == 0 {
                 //short is legal
-                move_vec.push(BLACK_SHORT);
+                move_arr[move_arr_s_idx + added] = BLACK_SHORT;
+                added += 1;
             }
             if board.bl()
                 && BL_CASTLING_GAP_BB & total_occ == 0
                 && BL_ATTACK_GAP_BB & opponent_attacks == 0
             {
                 //long is legal
-                move_vec.push(BLACK_LONG);
+                move_arr[move_arr_s_idx + added] = BLACK_LONG;
+                added += 1;
             }
         }
     }
+    return added;
 }
 
 ///Adds **pseudolegal** en passants to move_vec
-pub fn add_en_passant(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
+pub fn add_en_passant(
+    board: &Board,
+    mover: u32,
+    move_arr: &mut [u32],
+    move_arr_s_idx: usize,
+) -> usize {
+    let mut added: usize = 0;
     if let Some(ep_square) = board.ep_square {
         let mover_pawns: u64;
         let l_sqr: u32;
@@ -823,38 +845,36 @@ pub fn add_en_passant(board: &Board, mover: u32, move_vec: &mut Vec<u32>) {
         if !bitboard::contains_square(FILES[0], ep_square)
             && bitboard::contains_square(mover_pawns, l_sqr)
         {
-            move_vec.push(_move::create_en_passant(
-                l_sqr,
-                ep_square,
-                mover,
-                pawn_piece_idx,
-            ))
+            move_arr[move_arr_s_idx + added] =
+                _move::create_en_passant(l_sqr, ep_square, mover, pawn_piece_idx);
+            added += 1;
         }
         if !bitboard::contains_square(FILES[7], ep_square)
             && bitboard::contains_square(mover_pawns, r_sqr)
         {
-            move_vec.push(_move::create_en_passant(
-                r_sqr,
-                ep_square,
-                mover,
-                pawn_piece_idx,
-            ))
+            move_arr[move_arr_s_idx + added] =
+                _move::create_en_passant(r_sqr, ep_square, mover, pawn_piece_idx);
+            added += 1;
         }
     }
+    return added;
 }
 
 /// Add all pseudolegal pawn moves for pawn on square **from** and color **mover** on **board** to **move_vec** . <br>
-/// if **in_search**, only queen and knight promotions are generated
+/// if **in_search**, only queen and knight promotions are generated <br>
+/// returns number of moves added <br>
 /// NO EN PASSANT
 pub fn pseudolegal_pawn(
     from: u32,
     mover: u32,
     board: &Board,
     move_gen: &MoveGen,
-    move_vec: &mut Vec<u32>,
+    move_arr: &mut [u32],
+    move_arr_s_idx: usize,
     in_search: bool,
     in_perft_debug: bool,
-) {
+) -> u64 {
+    let mut added: usize = 0;
     //following are relative to color:
     let is_promotion: bool;
     let forward: u32;
@@ -887,18 +907,30 @@ pub fn pseudolegal_pawn(
             //is pseudolegal
             if is_promotion {
                 if in_search && !in_perft_debug {
-                    add_search_promotions(from, attack_sqr, true, mover, move_vec);
+                    add_search_promotions(
+                        from,
+                        attack_sqr,
+                        true,
+                        mover,
+                        move_arr,
+                        move_arr_s_idx + added,
+                    );
+                    added += 2;
                 } else {
-                    add_all_promotions(from, attack_sqr, true, mover, move_vec);
+                    add_all_promotions(
+                        from,
+                        attack_sqr,
+                        true,
+                        mover,
+                        move_arr,
+                        move_arr_s_idx + added,
+                    );
+                    added += 4;
                 }
             } else {
-                move_vec.push(_move::create(
-                    from,
-                    attack_sqr,
-                    true,
-                    mover,
-                    pawn_piece_idx as u32,
-                ));
+                move_arr[move_arr_s_idx + added] =
+                    _move::create(from, attack_sqr, true, mover, pawn_piece_idx as u32);
+                added += 1;
             }
         }
     }
@@ -906,28 +938,41 @@ pub fn pseudolegal_pawn(
     //can go forward 1 if no piece there
     if !board.is_occupied(forward) {
         if is_promotion {
-            _move::add_all_promotions(from, forward, false, mover, move_vec);
+            if in_search && !in_perft_debug {
+                add_search_promotions(
+                    from,
+                    forward,
+                    false,
+                    mover,
+                    move_arr,
+                    move_arr_s_idx + added,
+                );
+                added += 2;
+            } else {
+                add_all_promotions(
+                    from,
+                    forward,
+                    false,
+                    mover,
+                    move_arr,
+                    move_arr_s_idx + added,
+                );
+                added += 4;
+            }
         } else {
-            move_vec.push(_move::create(
-                from,
-                forward,
-                false,
-                mover,
-                pawn_piece_idx as u32,
-            ))
+            move_arr[move_arr_s_idx + added] =
+                _move::create(from, forward, false, mover, pawn_piece_idx as u32);
+            added += 1;
         }
         //can go forward 2 if also no piece on forward2 and pawn on pawn_start_rank
         if bitboard::contains_square(pawn_start_rank, from) && !board.is_occupied(forward2) {
-            move_vec.push(_move::create_double_push(
-                from,
-                forward2,
-                mover,
-                pawn_piece_idx as u32,
-            ))
+            move_arr[move_arr_s_idx + added] =
+                _move::create_double_push(from, forward2, mover, pawn_piece_idx as u32);
+            added += 1;
         }
     }
     //NO EN PASSANT FROM THIS
-    return;
+    return added as u64;
 }
 
 ///All pawn attacking moves for **side**

@@ -1,3 +1,4 @@
+use crate::repr::types::MAX_PSEUDO_MOVES_IN_POS;
 use crate::repr::*;
 use crate::search::searcher::MAX_SEARCH_DEPTH;
 use crate::{
@@ -14,6 +15,7 @@ use crate::utils::fen_tool::fen_to_board;
 
 pub const MOVE_ARR_SIZE: usize = AVG_BRANCH_FAC * MAX_SEARCH_DEPTH; //supports 40 ply deep search
 
+#[derive(Clone)]
 pub struct Position {
     pub board: Board,
     pub move_arr: [u32; MOVE_ARR_SIZE],
@@ -21,6 +23,7 @@ pub struct Position {
     pub board_state_info_stack: Vec<BoardStateInfo>, //previous board states, allows efficient unmaking of moves
     pub played_moves_stack: Vec<u32>,
     pub last_target: u32,
+    pub move_generation_temp_arr: Vec<u32>,
 }
 
 impl Position {
@@ -28,8 +31,16 @@ impl Position {
         let board: Board = Board::default_board(move_gen, zobrist);
         let turn: u32 = board.turn;
         let mut move_arr: [u32; MOVE_ARR_SIZE] = [NULL_MOVE; MOVE_ARR_SIZE];
-        let generated: usize =
-            move_gen.generate_legal(&board, turn, &mut move_arr, 0, false, false);
+        let mut move_generation_temp_arr: Vec<u32> = vec![NULL_MOVE; MAX_PSEUDO_MOVES_IN_POS];
+        let generated: usize = move_gen.generate_legal(
+            &board,
+            turn,
+            &mut move_arr,
+            &mut move_generation_temp_arr,
+            0,
+            false,
+            false,
+        );
         let move_arr_idx: Vec<usize> = vec![0, generated];
         let board_state_info_stack: Vec<BoardStateInfo> = vec![];
         let played_moves_stack: Vec<u32> = Vec::new();
@@ -41,22 +52,27 @@ impl Position {
             move_arr,
             move_arr_idx,
             last_target,
+            move_generation_temp_arr,
         };
     }
 
-    pub fn from(
-        fen: &str,
-        move_gen: &MoveGen,
-        zobrist: &Zobrist,
-    ) -> Result<Self, &'static str> {
+    pub fn from(fen: &str, move_gen: &MoveGen, zobrist: &Zobrist) -> Result<Self, &'static str> {
         let board: Board;
         match fen_to_board(fen.to_string(), move_gen, zobrist) {
             Ok(b) => board = b,
             Err(_) => return Err("Fen error"),
         }
         let mut move_arr: [u32; MOVE_ARR_SIZE] = [NULL_MOVE; MOVE_ARR_SIZE];
-        let generated: usize =
-            move_gen.generate_legal(&board, board.turn, &mut move_arr, 0, false, false);
+        let mut move_generation_temp_arr: Vec<u32> = vec![NULL_MOVE; MAX_PSEUDO_MOVES_IN_POS];
+        let generated: usize = move_gen.generate_legal(
+            &board,
+            board.turn,
+            &mut move_arr,
+            &mut move_generation_temp_arr,
+            0,
+            false,
+            false,
+        );
         let move_arr_idx: Vec<usize> = vec![0, generated];
 
         let board_state_info_stack: Vec<BoardStateInfo> = vec![];
@@ -69,6 +85,7 @@ impl Position {
             move_arr,
             move_arr_idx,
             last_target,
+            move_generation_temp_arr,
         });
     }
 
@@ -333,6 +350,7 @@ impl Position {
             &self.board,
             turn,
             &mut self.move_arr,
+            &mut self.move_generation_temp_arr,
             move_arr_s_idx,
             in_search,
             in_perft_debug,
@@ -532,18 +550,5 @@ impl Position {
 
     pub fn in_stalemate(&self) -> bool {
         return self.board.nof_checkers == 0 && self.legal_moves().is_empty();
-    }
-}
-
-impl Clone for Position {
-    fn clone(&self) -> Self {
-        return Self {
-            board: self.board.clone(),
-            move_arr: self.move_arr.clone(),
-            move_arr_idx: self.move_arr_idx.clone(),
-            board_state_info_stack: self.board_state_info_stack.clone(),
-            played_moves_stack: self.played_moves_stack.clone(),
-            last_target: self.last_target.clone(),
-        };
     }
 }

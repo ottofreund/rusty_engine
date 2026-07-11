@@ -1,5 +1,6 @@
 use crate::{
     repr::{
+        _move::NULL_MOVE,
         move_gen::{add_en_passant, MoveGen},
         types::{opposite_turn, B_KING, WHITE, W_KING},
     },
@@ -314,12 +315,13 @@ impl Board {
     pub fn bl(&self) -> bool {
         return self.bl == 0;
     }
-
+    ///Is there a legal en passant capture in this pos?
     fn no_legal_en_passant(&self) -> bool {
         if self.ep_square.is_some() {
-            let mut eps: Vec<u32> = Vec::with_capacity(2);
-            add_en_passant(self, self.turn, &mut eps);
-            return eps
+            let mut eps: [u32; 2] = [NULL_MOVE; 2];
+            let generated: usize = add_en_passant(self, self.turn, &mut eps, 0);
+
+            return eps[0..generated]
                 .iter()
                 .filter(|ep| MoveGen::pseudolegal_is_legal(**ep, self, self.turn))
                 .count()
