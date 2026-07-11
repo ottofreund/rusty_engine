@@ -1,4 +1,5 @@
 use crate::repr::*;
+use crate::search::searcher::MAX_SEARCH_DEPTH;
 use crate::{
     repr::{
         _move::NULL_MOVE,
@@ -11,11 +12,11 @@ use crate::{
 
 use crate::utils::fen_tool::fen_to_board;
 
-pub const MOVE_ARR_SIZE: usize = AVG_BRANCH_FAC * 40; //supports 40 ply deep search
+pub const MOVE_ARR_SIZE: usize = AVG_BRANCH_FAC * MAX_SEARCH_DEPTH; //supports 40 ply deep search
 
 pub struct Position {
     pub board: Board,
-    pub move_arr: [u32; AVG_BRANCH_FAC * 40],
+    pub move_arr: [u32; MOVE_ARR_SIZE],
     pub move_arr_idx: Vec<usize>, //move_arr end idx by ply, so e.g. 0..move_arr_idx[0] is first ply idx range (idx is exclusive)
     pub board_state_info_stack: Vec<BoardStateInfo>, //previous board states, allows efficient unmaking of moves
     pub played_moves_stack: Vec<u32>,

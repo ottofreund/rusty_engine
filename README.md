@@ -103,8 +103,9 @@ make/unmake correctness at depth.
 | Piece-square-table evaluation | Implemented |
 | Static-depth negamax and alpha-beta search core | Implemented |
 | GUI board and manual play | Implemented |
+| Time-controlled search integration | Implemented |
+| UCI compatibility for engine vs. engine | Implemented |
 | Engine game loop in the GUI | Planned |
-| Time-controlled search integration | In development |
 | Transposition table | Planned |
 | Multithreaded search | Planned |
 
