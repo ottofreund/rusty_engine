@@ -15,9 +15,9 @@ fn decoding_works() {
     assert_eq!(board.pieces, correct_default.pieces);
     assert_eq!(board.half_move_clock, 0);
 
-    let en_passant_fen = "rnbqkbnr/pppppppp/8/8/4Pp2/8/PPPP2PP/RNBQKBNR w KQkq f6";
+    let en_passant_fen = "rnbqkbnr/pppppppp/8/8/4Pp2/8/PPPP2PP/RNBQKBNR b KQkq e3 0 1";
     let en_passant_board = engine.board(en_passant_fen);
-    assert_eq!(en_passant_board.ep_square, Some(45));
+    assert_eq!(en_passant_board.ep_square, Some(20));
     assert_eq!(en_passant_board.half_move_clock, 0);
 
     let half_move_clock_fen = "4k3/8/8/8/8/8/8/4K3 w - - 17 42";
@@ -32,7 +32,7 @@ fn encoding_works() {
 
     assert_eq!(fen_tool::board_to_fen(&board), DEFAULT_FEN);
 
-    let en_passant_fen = "rnbqkbnr/pppppppp/8/8/4Pp2/8/PPPP2PP/RNBQKBNR w KQkq f6 0 1";
+    let en_passant_fen = "rnbqkbnr/pppppppp/8/8/4Pp2/8/PPPP2PP/RNBQKBNR b KQkq e3 0 1";
     let en_passant_board = engine.board(en_passant_fen);
 
     assert_eq!(fen_tool::board_to_fen(&en_passant_board), en_passant_fen);
