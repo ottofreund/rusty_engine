@@ -1,19 +1,19 @@
 use crate::{
     repr::{bitboard, types::*},
-    search::table_loader::read_table_value_file,
+    search::table_loader::parse_table_values,
 };
 
 pub const MATE_EVAL: i32 = 1_000_000;
 pub const PRUNE_EVAL: i32 = 2_000_000;
-const FILE_NAMES: [&str; 8] = [
-    "pawn_e.txt",
-    "knight.txt",
-    "bishop.txt",
-    "rook.txt",
-    "queen.txt",
-    "king_e.txt",
-    "pawn_l.txt",
-    "king_l.txt",
+const TABLE_SOURCES: [&str; 8] = [
+    include_str!("../../assets/piece_square_tables/pawn_e.txt"),
+    include_str!("../../assets/piece_square_tables/knight.txt"),
+    include_str!("../../assets/piece_square_tables/bishop.txt"),
+    include_str!("../../assets/piece_square_tables/rook.txt"),
+    include_str!("../../assets/piece_square_tables/queen.txt"),
+    include_str!("../../assets/piece_square_tables/king_e.txt"),
+    include_str!("../../assets/piece_square_tables/pawn_l.txt"),
+    include_str!("../../assets/piece_square_tables/king_l.txt"),
 ];
 
 const PIECE_MATERIAL_VALUE: [i32; 6] = [100, 320, 330, 500, 900, 20000];
@@ -25,17 +25,10 @@ pub struct Evaluator {
 
 impl Default for Evaluator {
     fn default() -> Self {
-        let table_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("piece_square_tables");
-        let pst: [Vec<i32>; 8] = std::array::from_fn(|i| {
-            let path = table_dir.join(FILE_NAMES[i]);
-            let path_str = path
-                .to_str()
-                .expect("piece-square table path must be valid UTF-8");
-            read_table_value_file(path_str).expect("Failed to read piece value tables!")
+        let pst = TABLE_SOURCES.map(|source| {
+            parse_table_values(source).expect("embedded piece-square table must be valid")
         });
-        return Self { pst };
+        Self { pst }
     }
 }
 
@@ -70,7 +63,7 @@ impl Evaluator {
         }
     }
 
-    //piece without color so 0..=6
+    //piece without color so 0..6
     fn get_table(&self, piece: usize, is_late_game: bool) -> &Vec<i32> {
         if is_late_game {
             let p_u32: u32 = piece as u32;

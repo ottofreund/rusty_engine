@@ -1,19 +1,19 @@
-use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::{fs, io};
 
 pub fn read_table_value_file(file_path: &str) -> io::Result<Vec<i32>> {
-    let file = File::open(file_path)?;
-    let reader = BufReader::new(file);
+    let contents = fs::read_to_string(file_path)?;
+    parse_table_values(&contents)
+}
 
+pub fn parse_table_values(contents: &str) -> io::Result<Vec<i32>> {
     let mut res: Vec<i32> = Vec::with_capacity(64);
 
-    for line in reader.lines() {
-        let line = line?;
+    for line in contents.lines() {
         let value_row = line
             .split(',')
             .filter(|el| !el.trim().is_empty())
             .map(|s| s.trim().parse::<i32>())
-            .collect::<Result<Vec<_>, _>>() // collect Results
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         if value_row.len() != 8 {
@@ -23,10 +23,9 @@ pub fn read_table_value_file(file_path: &str) -> io::Result<Vec<i32>> {
             ));
         }
 
-        value_row.iter().for_each(|v| {
-            res.push(*v);
-        });
+        res.extend(value_row);
     }
+
     res.reverse();
-    return Ok(res);
+    Ok(res)
 }
