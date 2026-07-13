@@ -1,4 +1,4 @@
-- UCI at least for engine communication to use cutechess
+- UCI ponder
 - material value to eval
 - full principal variation search with null windows
 - Multithreaded search

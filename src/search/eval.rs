@@ -12,9 +12,11 @@ const FILE_NAMES: [&str; 8] = [
     "rook.txt",
     "queen.txt",
     "king_e.txt",
-    "pawl_l.txt",
+    "pawn_l.txt",
     "king_l.txt",
 ];
+
+const PIECE_MATERIAL_VALUE: [i32; 6] = [100, 320, 330, 500, 900, 20000];
 
 //pst: piece square table
 pub struct Evaluator {
@@ -50,11 +52,13 @@ impl Evaluator {
             let v_table: &Vec<i32> = self.get_table(p % 6, is_late_game);
             if p < 6 {
                 while p_bb > 0 {
+                    v += PIECE_MATERIAL_VALUE[p];
                     v += v_table[bitboard::pop_lsb(&mut p_bb) as usize];
                 }
             } else {
                 while p_bb > 0 {
-                    v -= v_table[63 - bitboard::pop_lsb(&mut p_bb) as usize];
+                    v -= PIECE_MATERIAL_VALUE[p - 6];
+                    v -= v_table[bitboard::pop_lsb(&mut p_bb) as usize ^ 56];
                 }
             }
         }

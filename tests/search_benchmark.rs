@@ -39,7 +39,7 @@ const STATIC_TIME_SEARCH_CASES: [&str; 3] = [
 
 #[test]
 #[ignore = "benchmark"]
-fn search_benchmark() {
+fn static_depth_search_benchmark() {
     let engine = TestEngine::new();
     let mut total_positions = 0;
     let mut total_time = 0.0;
@@ -57,7 +57,7 @@ fn search_benchmark() {
     };
 
     println!(
-        "nodes per second: {:.0}, total time: {:.3} seconds, total nodes: {}",
+        "\n\nstatic depth nodes per second: {:.0}, total time: {:.3} seconds, total nodes: {}\n\n",
         nodes_per_second, total_time, total_positions
     );
 }
@@ -94,7 +94,7 @@ fn consecutive_search_benchmark() {
     };
 
     println!(
-        "consecutive search nodes per second: {:.0}, total time: {:.3} seconds, total nodes: {}",
+        "\n\nconsecutive search nodes per second: {:.0}, total time: {:.3} seconds, total nodes: {}\n\n",
         nodes_per_second, total_seconds, total_positions
     );
 }
@@ -128,7 +128,7 @@ fn static_timed_search_benchmark() {
     };
 
     println!(
-        "static timed search nodes per second: {:.0}, total time: {:.3} seconds, total positions: {}",
+        "\n\nstatic timed search nodes per second: {:.0}, total time: {:.3} seconds, total positions: {}\n\n",
         nodes_per_second, total_seconds, total_positions
     );
 }

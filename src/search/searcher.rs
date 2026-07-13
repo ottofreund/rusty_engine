@@ -90,7 +90,7 @@ impl Searcher {
         let search_data: [SearchData; THREAD_COUNT] = std::array::from_fn(|_| {
             return SearchData::new(pos);
         });
-        let mut search_config = SearchConfig::default();
+        let search_config = SearchConfig::default();
         return Self {
             positions,
             search_data,
@@ -223,9 +223,11 @@ impl Searcher {
                 move_gen,
                 zobrist,
             );
-            println!("at depth: {}, eval: {}", i, eval);
             search_data.cumul_positions_searched += search_data.positions_searched;
-            search_data.log_performance();
+            if self.search_config.log_diagnostics {
+                println!("at depth: {}, eval: {}", i, eval);
+                search_data.log_performance();
+            }
             search_data.reset_temp_performance_data();
         }
 
@@ -237,11 +239,12 @@ impl Searcher {
             }
             i += 1;
         }
-
-        println!(
-            "got pv: {:?}",
-            search_data.pv.map(|m| _move::to_string(m, true))
-        );
+        if self.search_config.log_diagnostics {
+            println!(
+                "got pv: {:?}",
+                search_data.pv.map(|m| _move::to_string(m, true))
+            );
+        }
 
         return;
     }
@@ -383,7 +386,7 @@ impl Searcher {
         }
 
         search_data.pv = pv;
-        if self.search_config.log_diagnostics {
+        if !self.search_config.log_diagnostics {
             println!(
                 "got pv: {:?}",
                 search_data.pv.map(|m| _move::to_string(m, true))
