@@ -386,7 +386,7 @@ impl Searcher {
         }
 
         search_data.pv = pv;
-        if !self.search_config.log_diagnostics {
+        if self.search_config.log_diagnostics {
             println!(
                 "got pv: {:?}",
                 search_data.pv.map(|m| _move::to_string(m, true))
@@ -401,6 +401,17 @@ impl Searcher {
             panic!("multithreaded search");
         } else {
             match self.search_data[0].pv[0] {
+                NULL_MOVE => None,
+                m => Some(m),
+            }
+        }
+    }
+
+    pub fn collect_ponder_move(&self) -> Option<u32> {
+        if self.multithreaded {
+            panic!("multithreaded search");
+        } else {
+            match self.search_data[0].pv[1] {
                 NULL_MOVE => None,
                 m => Some(m),
             }

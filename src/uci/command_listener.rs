@@ -10,8 +10,8 @@ use iced::futures::lock::Mutex;
 
 use crate::{
     game::cpu_game::CpuGame, repr::{
-        _move::{self, NULL_MOVE}, position::Position, types::WHITE,
-    }, search::search_config::SearchMode, uci::uci_command::{ArbiterCommand, PositionCommand}, utils::fen_tool::is_valid_fen,
+        _move::{self, NULL_MOVE}, types::WHITE,
+    }, search::search_config::SearchMode, uci::uci_command::{_Option::Ponder, ArbiterCommand, PositionCommand}, utils::fen_tool::is_valid_fen,
 };
 
 pub async fn listen(cpu_game: CpuGame) {
@@ -29,17 +29,21 @@ pub async fn listen(cpu_game: CpuGame) {
                 match c {
                     ArbiterCommand::UCI => {
                         println!("id name Rusty");
-                        //TODO SEND OPTIONS HERE, at least pondering option
+                        //println!("option name Ponder type check default true");
                         println!("uciok");
                     }
                     ArbiterCommand::IsReady => {
                         println!("readyok");
                     }
-                    ArbiterCommand::SetOption(_) => {
-                        //TODO
+                    ArbiterCommand::SetOption(o) => {
+                        match o {
+                            Ponder(_) => {
+                                //can ignore safely, ponder if get "go ponder" else don't, no need for engine to know if ponder is enabled or not
+                            }
+                        }
                     }
                     ArbiterCommand::UCINewGame => {
-                        //TODO
+                        //can ignore safely
                     }
                     ArbiterCommand::Go(gc) if gc.is_valid() => {
                         //TODO add ponder case
@@ -74,7 +78,14 @@ pub async fn listen(cpu_game: CpuGame) {
                                 Some(kill_switch_clone),
                             );
                             let best_move: u32 = game.searcher.collect_best_move().unwrap_or(NULL_MOVE);
-                            println!("bestmove {}", _move::to_string(best_move, true));
+                            match game.searcher.collect_ponder_move() {
+                                Some(pm) => {
+                                    println!("bestmove {} ponder {}", _move::to_string(best_move, true), _move::to_string(pm, true))
+                                }
+                                None => {
+                                    println!("bestmove {}", _move::to_string(best_move, true))
+                                }
+                            }
                             return game;
                         }).unwrap());
                     }
@@ -125,7 +136,7 @@ pub async fn listen(cpu_game: CpuGame) {
                         kill_switch_clone.store(true, Relaxed);
                     }
                     _ => {
-                        println!("Invalid arguments: {}", line);
+                        println!("Invalid command: {}", line);
                     }
                 }
             }

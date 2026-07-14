@@ -33,6 +33,7 @@ impl EngineCommand {
     }
 }
 
+#[derive(Debug)]
 pub enum _Option {
     Ponder(String), //option name
 }
