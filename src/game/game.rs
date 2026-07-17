@@ -43,13 +43,23 @@ impl Game {
                     .make_move(m, false, false, &self.move_gen, &self.zobrist);
                 self.searcher.sync_new_move(&self.position, Some(m));
                 if _move::is_unrepeatable(m) {
-                    println!("move was unrepeatable");
                     self.repetition_relevant_history_idx = self.board_history.len();
                 }
                 self.board_history.push(self.position.board.clone());
                 self.game_state = self.current_game_state();
                 println!("Game state: {}", self.game_state.to_string());
                 return Ok(m);
+            }
+            None => return Err(Error::default()),
+        }
+    }
+
+    pub fn play_cpu_move(&mut self) -> Result<u32, Error> {
+        self.searcher.start_search(&self.move_gen, &self.zobrist, None);
+        let mov: Option<u32> = self.searcher.collect_best_move();
+        match mov {
+            Some(m) => {
+                return self.try_make_move(_move::get_init(m), _move::get_target(m), _move::lift_promotion_piece(m));
             }
             None => return Err(Error::default()),
         }
@@ -75,6 +85,13 @@ impl Game {
         } else {
             return GameState::InProgress;
         }
+    }
+
+    pub fn is_over(&self) -> bool {
+        return match self.game_state {
+            GameState::InProgress => false,
+            _ => true,
+        };
     }
 
     fn cur_pos_is_threefold(&self) -> bool {

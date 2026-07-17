@@ -2,18 +2,19 @@ use iced::event::{self, Event};
 use iced::keyboard::{self};
 use iced::widget::image::Handle;
 
-use iced::widget::{button, center, column, container, row, stack, text, Button, Image, TextInput, pick_list};
+use iced::widget::{button, column, container, row, stack, text, Button, Image, TextInput, pick_list};
 use iced::{Border, Color, Element, Shadow, Size, Subscription};
 
-use iced_aw::{card::*, menu::*, Menu, MenuBar};
+use iced_aw::{menu::*, Menu, MenuBar};
 
-use iced_dialog::{dialog};
+use iced_dialog::{button as dialog_button, dialog, Dialog};
 
 use crate::ui::image_handle::ImageHandle;
+use crate::ui::messages::Message::{ErrorAcknowledged, GameEndAcknowledged};
 use crate::ui::messages::*;
 
 use crate::game::game::Game;
-use crate::repr::board::{RANKS, square_to_string};
+use crate::repr::board::{RANKS};
 use crate::repr::position::Position;
 use crate::repr::{_move, bitboard, types::*};
 
@@ -35,10 +36,12 @@ pub struct AppState {
     image_handle: ImageHandle,
     selection_target_sqrs: Vec<u32>,
     fen_input: String,
-    show_error: bool,
-    show_promotion_dialog: bool,
     input_side: u32,
     user_side: u32,
+    show_error_dialog: bool,
+    show_promotion_dialog: bool,
+    show_game_end_dialog: bool,
+    game_end_dialog_acknowledged: bool,
 }
 
 impl AppState {
@@ -49,12 +52,29 @@ impl AppState {
         ]
         .width(iced::Length::Fill)
         .height(iced::Length::Fill);
-
-        return dialog(self.show_promotion_dialog, main_content, pick_list(PROMOTION_OPTIONS, Some(PROMOTION_OPTIONS[0]), Message::PromotionSelected))
+        let promotion_dialog = dialog(self.show_promotion_dialog, main_content, pick_list(PROMOTION_OPTIONS, Some(PROMOTION_OPTIONS[0]), Message::PromotionSelected))
             .title("Promotion")
             .width(300.0)
-            .height(200.0)
-            .into();
+            .height(200.0);
+        let error_dialog = Dialog::with_buttons(
+            self.show_error_dialog,
+            promotion_dialog,
+            text("Invalid FEN-string"),
+            vec![dialog_button("OK", ErrorAcknowledged).into()],
+        )
+            .title("Error")
+            .width(300.0)
+            .height(200.0);
+        let game_end_dialog = Dialog::with_buttons(
+            self.show_game_end_dialog,
+            error_dialog,
+            text(self.game.game_state.to_string()),
+            vec![dialog_button("OK", GameEndAcknowledged).into()],
+        )
+            .title("Game Over")
+            .width(300.0)
+            .height(200.0);
+        return game_end_dialog.into();
     }
 
     fn render_board(&self) -> Element<'static, Message, iced::Theme, iced::Renderer> {
@@ -139,7 +159,7 @@ impl AppState {
             Menu::new(
                 [
                     Item::new(button("Search").on_press(Message::SearchStart)),
-                    Item::new(button("Starting Position").on_press(Message::NewDefaultPosPressed)),
+                    Item::new(button("Default Position").on_press(Message::NewDefaultPosPressed)),
                     Item::new(button("From FEN").on_press(Message::NewFenPosPressed)),
                     Item::new(
                         TextInput::new("FEN string", &self.fen_input)
@@ -195,55 +215,65 @@ impl AppState {
         self.promotion_target_square = None;
         self.selection_target_sqrs.clear();
     }
+
+    pub fn is_cpu_turn(&self) -> bool {
+        return self.game.position.board.turn != self.user_side;
+    }
+
+    fn reset_game_end_dialog(&mut self) {
+        self.show_game_end_dialog = false;
+        self.game_end_dialog_acknowledged = false;
+    }
+
+    fn sync_game_end_dialog(&mut self) {
+        self.show_game_end_dialog =
+            self.game.is_over() && !self.game_end_dialog_acknowledged;
+    }
 }
 
 pub fn update(state: &mut AppState, msg: Message) {
     match msg {
-        Message::Reset => {
-            println!("Got to reset handler");
-            state.selected_square = None;
-        }
         Message::SquareClicked(sqr) => {
-            println!("Clicked square: {}", square_to_string(sqr));
-            match state.selected_square {
-                Some(selected_sqr) => {
-                    if selected_sqr == sqr {
-                        //unselect
-                        state.selected_square = None;
-                    } else {
-                        let moved_piece: Option<u32> = state.game.position.board.lift_piece_type_at(selected_sqr, state.game.position.board.turn);
-                        match moved_piece {
-                            Some(piece) => {
-                                if ((piece == W_PAWN && bitboard::contains_square(RANKS[6], selected_sqr) && state.game.position.board.turn == WHITE)  || 
-                                   ( piece == B_PAWN && bitboard::contains_square(RANKS[1], selected_sqr) && state.game.position.board.turn == BLACK)) &&
-                                     state.game.exists_move(selected_sqr, sqr)
-                                {
-                                    state.show_promotion_dialog = true;
-                                    state.promotion_target_square = Some(sqr);
-                                    return;
-                                } else { //non-promotion
-                                    match state.game.try_make_move(selected_sqr, sqr, None) {
-                                        Ok(m) => {}
-                                        Err(_) => {} //tried illegal move
+            if !state.game.is_over() {
+                match state.selected_square {
+                    Some(selected_sqr) => {
+                        if selected_sqr == sqr {
+                            //unselect
+                            state.selected_square = None;
+                        } else {
+                            let moved_piece: Option<u32> = state.game.position.board.lift_piece_type_at(selected_sqr, state.game.position.board.turn);
+                            match moved_piece {
+                                Some(piece) => {
+                                    if ((piece == W_PAWN && bitboard::contains_square(RANKS[6], selected_sqr) && state.game.position.board.turn == WHITE)  ||
+                                       ( piece == B_PAWN && bitboard::contains_square(RANKS[1], selected_sqr) && state.game.position.board.turn == BLACK)) &&
+                                         state.game.exists_move(selected_sqr, sqr)
+                                    {
+                                        state.show_promotion_dialog = true;
+                                        state.promotion_target_square = Some(sqr);
+                                    } else { //non-promotion
+                                        match state.game.try_make_move(selected_sqr, sqr, None) {
+                                            Ok(_) => {}
+                                            Err(_) => {} //tried illegal move
+                                        }
+                                        state.reset_state_inputs();
                                     }
                                 }
+                                None => {}
                             }
-                            None => {}
                         }
-                        state.reset_state_inputs();
                     }
-                }
-                None => {
-                    let mover_occupied: u64;
-                    if state.game.position.board.turn == WHITE {
-                        mover_occupied = state.game.position.board.white_occupation;
-                    } else {
-                        mover_occupied = state.game.position.board.black_occupation;
+                    None => {
+                        let mover_occupied: u64;
+                        if state.game.position.board.turn == WHITE {
+                            mover_occupied = state.game.position.board.white_occupation;
+                        } else {
+                            mover_occupied = state.game.position.board.black_occupation;
+                        }
+                        if bitboard::contains_square(mover_occupied, sqr) {
+                            state.selected_square = Some(sqr);
+                            state.update_selection_targets();
+                        } //else not valid selection
                     }
-                    if bitboard::contains_square(mover_occupied, sqr) {
-                        state.selected_square = Some(sqr);
-                        state.update_selection_targets();
-                    } //else not valid selection
                 }
             }
         }
@@ -262,6 +292,7 @@ pub fn update(state: &mut AppState, msg: Message) {
         }
         Message::NewDefaultPosPressed => {
             state.reset_state_inputs();
+            state.reset_game_end_dialog();
             state.user_side = state.input_side;
             state
                 .game
@@ -275,11 +306,12 @@ pub fn update(state: &mut AppState, msg: Message) {
             ) {
                 Ok(p) => {
                     state.reset_state_inputs();
+                    state.reset_game_end_dialog();
                     state.user_side = state.input_side;
                     state.game.import_position(p);
                 }
                 Err(_) => {
-                    state.show_error = true;
+                    state.show_error_dialog = true;
                 }
             }
         }
@@ -289,18 +321,23 @@ pub fn update(state: &mut AppState, msg: Message) {
         Message::InputSideBlackPressed => {
             state.input_side = BLACK;
         }
-        Message::ErrorHandled => {
-            state.show_error = false;
+        Message::ErrorAcknowledged => {
+            state.show_error_dialog = false;
+        }
+        Message::GameEndAcknowledged => {
+            state.show_game_end_dialog = false;
+            state.game_end_dialog_acknowledged = true;
         }
         Message::SearchStart => {
-            println!("Search start pressed");
-            let start: Instant = Instant::now();
-            state
-                .game
-                .searcher
-                .start_search(&state.game.move_gen, &state.game.zobrist, None);
-            let time_took: Duration = start.elapsed();
-            println!("Search finished in {} ms", time_took.as_millis());
+            if !state.game.is_over() {
+                let start: Instant = Instant::now();
+                state
+                    .game
+                    .searcher
+                    .start_search(&state.game.move_gen, &state.game.zobrist, None);
+                let time_took: Duration = start.elapsed();
+                println!("Search finished in {} ms", time_took.as_millis());
+            }
         }
         Message::PromotionSelected(piece_str) => {
             state.show_promotion_dialog = false;
@@ -319,21 +356,18 @@ pub fn update(state: &mut AppState, msg: Message) {
             println!("Unrecognized message");
         }
     }
-    return;
+    state.sync_game_end_dialog();
+    if !state.game.is_over() && state.is_cpu_turn() {
+        match state.game.play_cpu_move() {
+            Ok(_) => {}
+            Err(_) => {}
+        }
+    }
 }
 
 pub fn view(state: &AppState) -> Element<Message> {
     let main_content = state.render_main_container();
-    if state.show_error {
-        let error_window = center(
-            Card::new("Error", "Invalid FEN-string")
-                .on_close(Message::ErrorHandled)
-                .max_width(300.0),
-        );
-        return stack![main_content, error_window].into();
-    } else {
-        return main_content.into();
-    }
+    return main_content.into();
 }
 
 fn input_button_style(white: bool, selected: bool) -> iced::widget::button::Style {
@@ -367,3 +401,63 @@ const DARK_SQR_COLOR: iced::Color = iced::Color::from_rgb(0.47, 0.40, 0.30);
 const SELECTED_SQUARE_COLOR: iced::Color = iced::Color::from_rgb(1.0, 1.0, 0.0);
 const SQR_SIZE: u32 = 80;
 const PROMOTION_OPTIONS: [&str; 4] = ["Queen", "Rook", "Bishop", "Knight"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::game_state::GameState;
+
+    const STALEMATE_FEN: &str = "k7/2Q5/2K5/8/8/8/8/8 b - - 0 1";
+
+    fn terminal_state() -> AppState {
+        let mut state = AppState::default();
+        state.game.game_state = GameState::Stalemate;
+        state
+    }
+
+    #[test]
+    fn post_update_sync_shows_game_end_dialog() {
+        let mut state = terminal_state();
+
+        update(&mut state, Message::InputSideWhitePressed);
+
+        assert!(state.show_game_end_dialog);
+    }
+
+    #[test]
+    fn acknowledged_game_end_dialog_stays_closed_for_current_game() {
+        let mut state = terminal_state();
+        update(&mut state, Message::InputSideWhitePressed);
+
+        update(&mut state, Message::GameEndAcknowledged);
+        update(&mut state, Message::InputSideBlackPressed);
+
+        assert!(state.game_end_dialog_acknowledged);
+        assert!(!state.show_game_end_dialog);
+    }
+
+    #[test]
+    fn loading_default_position_clears_game_end_dialog_dismissal() {
+        let mut state = terminal_state();
+        update(&mut state, Message::GameEndAcknowledged);
+
+        update(&mut state, Message::NewDefaultPosPressed);
+
+        assert!(!state.game_end_dialog_acknowledged);
+        assert!(!state.show_game_end_dialog);
+    }
+
+    #[test]
+    fn loading_terminal_fen_reopens_game_end_dialog() {
+        let mut state = terminal_state();
+        update(&mut state, Message::GameEndAcknowledged);
+        state.input_side = BLACK;
+        state.fen_input = STALEMATE_FEN.to_owned();
+
+        update(&mut state, Message::NewFenPosPressed);
+
+        assert!(state.game.is_over());
+        assert!(!state.game_end_dialog_acknowledged);
+        assert!(state.show_game_end_dialog);
+    }
+}
