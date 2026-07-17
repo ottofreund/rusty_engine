@@ -454,7 +454,7 @@ fn partial_selection_sort(move_arr_s: &mut [u32], pv_mv: u32, last_target: u32) 
             break;
         }
         if _move::is_promotion(mov) {
-            cur_v += PROMOTION_SCORE + _move::get_promoted_piece(mov) as i32;
+            cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
         }
         if _move::get_target(mov) == last_target {
             cur_v += LAST_TARGET_SCORE;

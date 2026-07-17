@@ -14,7 +14,7 @@ pub struct Game {
     pub zobrist: Zobrist,
     pub game_state: GameState,
     pub board_history: Vec<Board>,
-    repetition_relevant_history_idx: usize, // [this..] are relevant for checking repetition
+    repetition_relevant_history_idx: usize, // board_history[this..] are relevant for checking repetition
 }
 
 impl Game {
@@ -31,10 +31,10 @@ impl Game {
     ///For making moves on the board, not called in search
     ///Syncs the searcher if successful
     ///Returns Success(made_move) if successful
-    pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32) -> Result<u32, Error> {
+    pub fn try_make_move(&mut self, init_sqr: u32, target_sqr: u32, promotion_piece: Option<u32>) -> Result<u32, Error> {
         let mov: Option<u32> =
             self.position.legal_moves().iter().copied().find(|mov| {
-                _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr
+                _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr && _move::lift_promotion_piece(*mov) == promotion_piece
             });
         match mov {
             Some(m) => {
@@ -53,6 +53,14 @@ impl Game {
             }
             None => return Err(Error::default()),
         }
+    }
+
+    pub fn exists_move(&self, init_sqr: u32, target_sqr: u32) -> bool {
+        let mov: Option<u32> =
+            self.position.legal_moves().iter().copied().find(|mov| {
+                _move::get_init(*mov) == init_sqr && _move::get_target(*mov) == target_sqr
+            });
+        return mov.is_some();
     }
 
     fn current_game_state(&self) -> GameState {

@@ -135,7 +135,7 @@ impl Position {
         let is_double_push: bool = _move::is_double_push(mov);
         let is_en_passant: bool = _move::is_en_passant(mov);
         let promotion_piece: Option<usize> = if is_promotion {
-            Some(_move::get_promoted_piece(mov) as usize)
+            Some(_move::get_promotion_piece(mov) as usize)
         } else {
             None
         };
@@ -372,7 +372,7 @@ impl Position {
         let is_short_castle: bool = is_castle && _move::is_short_castle(mov);
         let is_promotion: bool = _move::is_promotion(mov);
         let promotion_piece: Option<usize> = if is_promotion {
-            Some(_move::get_promoted_piece(mov) as usize)
+            Some(_move::get_promotion_piece(mov) as usize)
         } else {
             None
         };

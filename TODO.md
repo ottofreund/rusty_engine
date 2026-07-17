@@ -1,5 +1,4 @@
 - UCI ponder
-- material value to eval
 - full principal variation search with null windows
 - Multithreaded search
 - Quiescence search

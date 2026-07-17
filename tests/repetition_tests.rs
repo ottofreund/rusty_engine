@@ -27,7 +27,7 @@ fn on_board_detects_natural_threefold_repetition() {
     .into_iter()
     .enumerate()
     {
-        play(&mut game, from, to);
+        play(&mut game, from, to, None);
 
         if idx == 3 {
             assert_in_progress(&game);
@@ -100,7 +100,7 @@ fn search_detects_natural_threefold_repetition() {
     .into_iter()
     .enumerate()
     {
-        play(&mut game, from, to);
+        play(&mut game, from, to, None);
 
         if idx == 3 {
             assert_not_search_threefold(&game);
@@ -115,7 +115,7 @@ fn search_repetition_history_resets_after_unrepeatable_move() {
     let mut game = Game::default();
 
     for (from, to) in [("g1", "f3"), ("g8", "f6"), ("f3", "g1"), ("f6", "g8")] {
-        play(&mut game, from, to);
+        play(&mut game, from, to, None);
     }
 
     assert!(
@@ -123,7 +123,7 @@ fn search_repetition_history_resets_after_unrepeatable_move() {
         "expected reversible moves to accumulate search repetition history"
     );
 
-    play(&mut game, "e2", "e4");
+    play(&mut game, "e2", "e4", None);
 
     let search_data = &game.searcher.search_data[0];
     assert_eq!(
@@ -146,12 +146,12 @@ fn board(game: &Game, fen: &str) -> Board {
 
 fn play_king_cycle(game: &mut Game) {
     for (from, to) in [("e1", "f1"), ("e8", "f8"), ("f1", "e1"), ("f8", "e8")] {
-        play(game, from, to);
+        play(game, from, to, None);
     }
 }
 
-fn play(game: &mut Game, from: &str, to: &str) {
-    game.try_make_move(square(from), square(to))
+fn play(game: &mut Game, from: &str, to: &str, promotion_piece: Option<u32>) {
+    game.try_make_move(square(from), square(to), promotion_piece)
         .unwrap_or_else(|_| panic!("expected legal move {from}{to}"));
 }
 

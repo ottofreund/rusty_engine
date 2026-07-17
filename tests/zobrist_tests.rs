@@ -119,7 +119,7 @@ fn promotion_hash_updates_and_restores() {
             _move::get_init(mov) == square('a', 7)
                 && _move::get_target(mov) == square('a', 8)
                 && _move::is_promotion(mov)
-                && _move::get_promoted_piece(mov) == W_QUEEN
+                && _move::get_promotion_piece(mov) == W_QUEEN
         })
     });
 }

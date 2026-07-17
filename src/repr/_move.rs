@@ -151,8 +151,17 @@ pub fn get_moved_piece(mov: u32) -> u32 {
 }
 
 #[inline]
-pub fn get_promoted_piece(mov: u32) -> u32 {
+pub fn get_promotion_piece(mov: u32) -> u32 {
     return (mov >> 22) & 0xF;
+}
+
+#[inline]
+pub fn lift_promotion_piece(mov: u32) -> Option<u32> {
+    if is_promotion(mov) {
+        return Some(get_promotion_piece(mov));
+    } else {
+        return None;
+    }
 }
 
 #[inline]
@@ -221,7 +230,7 @@ pub fn breaks_fifty_counter(mov: u32) -> bool {
 
 pub fn promotion_matches(mov: u32, promotion: Option<u32>) -> bool {
     match promotion {
-        Some(piece) => return is_promotion(mov) && get_promoted_piece(mov) == piece,
+        Some(piece) => return is_promotion(mov) && get_promotion_piece(mov) == piece,
         None => return !is_promotion(mov),
     }
 }
@@ -291,7 +300,7 @@ pub fn to_string(mov: u32, uci: bool) -> String {
         let mut res = square_to_string(get_init(mov));
         res.push_str(&square_to_string(get_target(mov)));
         if is_promotion(mov) {
-            res.push_str(&PIECE_CHARS[get_promoted_piece(mov) as usize].to_ascii_lowercase());
+            res.push_str(&PIECE_CHARS[get_promotion_piece(mov) as usize].to_ascii_lowercase());
         }
         return res;
     }
@@ -310,7 +319,7 @@ pub fn to_string(mov: u32, uci: bool) -> String {
     res.push_str(&square_to_string(get_target(mov)));
     if is_promotion(mov) {
         res.push_str(" -- promoting to ");
-        res.push_str(PIECE_CHARS[get_promoted_piece(mov) as usize]);
+        res.push_str(PIECE_CHARS[get_promotion_piece(mov) as usize]);
     }
     return res;
 }

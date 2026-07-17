@@ -11,4 +11,5 @@ pub enum Message {
     InputSideBlackPressed,
     Event(iced::Event),
     SearchStart,
+    PromotionSelected(&'static str)
 }

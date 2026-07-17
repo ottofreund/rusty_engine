@@ -1,16 +1,19 @@
 use iced::event::{self, Event};
 use iced::keyboard::{self};
 use iced::widget::image::Handle;
-use iced::widget::{button, center, column, container, row, stack, text, Button, Image, TextInput};
+
+use iced::widget::{button, center, column, container, row, stack, text, Button, Image, TextInput, pick_list};
 use iced::{Border, Color, Element, Shadow, Size, Subscription};
 
 use iced_aw::{card::*, menu::*, Menu, MenuBar};
+
+use iced_dialog::{dialog};
 
 use crate::ui::image_handle::ImageHandle;
 use crate::ui::messages::*;
 
 use crate::game::game::Game;
-use crate::repr::board::square_to_string;
+use crate::repr::board::{RANKS, square_to_string};
 use crate::repr::position::Position;
 use crate::repr::{_move, bitboard, types::*};
 
@@ -27,22 +30,31 @@ pub fn run_fr() -> iced::Result {
 #[derive(Default)]
 pub struct AppState {
     selected_square: Option<u32>,
+    promotion_target_square: Option<u32>,
     game: Game,
     image_handle: ImageHandle,
     selection_target_sqrs: Vec<u32>,
     fen_input: String,
     show_error: bool,
+    show_promotion_dialog: bool,
     input_side: u32,
     user_side: u32,
 }
 
 impl AppState {
     fn render_main_container(&self) -> Element<'_, Message, iced::Theme, iced::Renderer> {
-        let mut columns = column!();
-        columns = columns.push(self.render_menu_bar());
-        columns = columns.push(self.render_board());
-        //rows
-        return columns.width(1200).height(900).into();
+        let main_content = column![
+        self.render_menu_bar(),
+        self.render_board(),
+        ]
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill);
+
+        return dialog(self.show_promotion_dialog, main_content, pick_list(PROMOTION_OPTIONS, Some(PROMOTION_OPTIONS[0]), Message::PromotionSelected))
+            .title("Promotion")
+            .width(300.0)
+            .height(200.0)
+            .into();
     }
 
     fn render_board(&self) -> Element<'static, Message, iced::Theme, iced::Renderer> {
@@ -180,7 +192,8 @@ impl AppState {
     pub fn reset_state_inputs(&mut self) {
         self.fen_input = String::new();
         self.selected_square = None;
-        self.selection_target_sqrs = Vec::with_capacity(27);
+        self.promotion_target_square = None;
+        self.selection_target_sqrs.clear();
     }
 }
 
@@ -198,11 +211,24 @@ pub fn update(state: &mut AppState, msg: Message) {
                         //unselect
                         state.selected_square = None;
                     } else {
-                        //move from selected_sqr to sqr
-                        match state.game.try_make_move(selected_sqr, sqr) {
-                            Ok(m) => {}
-                            Err(_) => { //tried illegal move
+                        let moved_piece: Option<u32> = state.game.position.board.lift_piece_type_at(selected_sqr, state.game.position.board.turn);
+                        match moved_piece {
+                            Some(piece) => {
+                                if ((piece == W_PAWN && bitboard::contains_square(RANKS[6], selected_sqr) && state.game.position.board.turn == WHITE)  || 
+                                   ( piece == B_PAWN && bitboard::contains_square(RANKS[1], selected_sqr) && state.game.position.board.turn == BLACK)) &&
+                                     state.game.exists_move(selected_sqr, sqr)
+                                {
+                                    state.show_promotion_dialog = true;
+                                    state.promotion_target_square = Some(sqr);
+                                    return;
+                                } else { //non-promotion
+                                    match state.game.try_make_move(selected_sqr, sqr, None) {
+                                        Ok(m) => {}
+                                        Err(_) => {} //tried illegal move
+                                    }
+                                }
                             }
+                            None => {}
                         }
                         state.reset_state_inputs();
                     }
@@ -276,6 +302,19 @@ pub fn update(state: &mut AppState, msg: Message) {
             let time_took: Duration = start.elapsed();
             println!("Search finished in {} ms", time_took.as_millis());
         }
+        Message::PromotionSelected(piece_str) => {
+            state.show_promotion_dialog = false;
+
+            let promotion_piece = match piece_str {
+                "Queen" => if state.game.position.board.turn == WHITE { Some(W_QUEEN) } else { Some(B_QUEEN) },
+                "Rook" => if state.game.position.board.turn == WHITE { Some(W_ROOK) } else { Some(B_ROOK) },
+                "Bishop" => if state.game.position.board.turn == WHITE { Some(W_BISHOP) } else { Some(B_BISHOP) },
+                "Knight" => if state.game.position.board.turn == WHITE { Some(W_KNIGHT) } else { Some(B_KNIGHT) },
+                _ => panic!("Invalid promotion piece"),
+            };
+            state.game.try_make_move(state.selected_square.unwrap(), state.promotion_target_square.unwrap(), promotion_piece).unwrap();
+            state.reset_state_inputs();
+        }
         _ => {
             println!("Unrecognized message");
         }
@@ -296,10 +335,6 @@ pub fn view(state: &AppState) -> Element<Message> {
         return main_content.into();
     }
 }
-
-/* pub fn run_fr() -> iced::Result {
-    return run(update, view);
-} */
 
 fn input_button_style(white: bool, selected: bool) -> iced::widget::button::Style {
     let main_color: iced::Color;
@@ -331,3 +366,4 @@ const LIGHT_SQR_COLOR: iced::Color = iced::Color::from_rgb(0.94, 0.90, 0.86);
 const DARK_SQR_COLOR: iced::Color = iced::Color::from_rgb(0.47, 0.40, 0.30);
 const SELECTED_SQUARE_COLOR: iced::Color = iced::Color::from_rgb(1.0, 1.0, 0.0);
 const SQR_SIZE: u32 = 80;
+const PROMOTION_OPTIONS: [&str; 4] = ["Queen", "Rook", "Bishop", "Knight"];
