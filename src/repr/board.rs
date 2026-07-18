@@ -316,14 +316,14 @@ impl Board {
         return self.bl == 0;
     }
     ///Is there a legal en passant capture in this pos?
-    fn no_legal_en_passant(&self) -> bool {
+    fn no_legal_en_passant(&self, move_gen: &MoveGen) -> bool {
         if self.ep_square.is_some() {
             let mut eps: [u32; 2] = [NULL_MOVE; 2];
             let generated: usize = add_en_passant(self, self.turn, &mut eps, 0);
 
             return eps[0..generated]
                 .iter()
-                .filter(|ep| MoveGen::pseudolegal_is_legal(**ep, self, self.turn))
+                .filter(|ep| move_gen.pseudolegal_is_legal(**ep, self, self.turn))
                 .count()
                 == 0;
         } else {
@@ -331,8 +331,8 @@ impl Board {
         }
     }
 
-    fn repetition_ep(&self) -> Option<u32> {
-        if self.no_legal_en_passant() {
+    fn repetition_ep(&self, move_gen: &MoveGen) -> Option<u32> {
+        if self.no_legal_en_passant(move_gen) {
             None
         } else {
             self.ep_square
@@ -342,18 +342,17 @@ impl Board {
     pub fn is_fifty_move_draw(&self) -> bool {
         return self.half_move_clock >= 100;
     }
-}
 
-impl PartialEq for Board {
-    fn eq(&self, other: &Self) -> bool {
+    pub fn eq(&self, other: &Self, move_gen: &MoveGen) -> bool {
         return self.pieces == other.pieces
             && self.turn == other.turn
             && self.ws() == other.ws()
             && self.wl() == other.wl()
             && self.bs() == other.bs()
             && self.bl() == other.bl()
-            && self.repetition_ep() == other.repetition_ep(); //only if en passant capture is actually possible
+            && self.repetition_ep(move_gen) == other.repetition_ep(move_gen); //only if en passant capture is actually possible
     }
+
 }
 
 impl std::fmt::Display for Board {

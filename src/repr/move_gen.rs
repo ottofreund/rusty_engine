@@ -86,7 +86,7 @@ impl MoveGen {
             self.generate_pseudolegal(board, pseudo_move_arr, mover, in_search, in_perft_debug);
 
         for mov in pseudo_move_arr[0..pseudolegals_generated].iter() {
-            if MoveGen::pseudolegal_is_legal(*mov, board, mover) {
+            if self.pseudolegal_is_legal(*mov, board, mover) {
                 //add taken piece idx to move (if eating) now, since it is necessary
                 let m: u32;
                 if _move::is_en_passant(*mov) {
@@ -110,7 +110,7 @@ impl MoveGen {
     }
 
     ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares
-    pub fn pseudolegal_is_legal(mov: u32, board: &Board, mover: u32) -> bool {
+    pub fn pseudolegal_is_legal(&self, mov: u32, board: &Board, mover: u32) -> bool {
         let init: u32 = _move::get_init(mov);
         let target: u32 = _move::get_target(mov);
         let moved_piece: u32 = _move::get_moved_piece(mov);
@@ -135,7 +135,7 @@ impl MoveGen {
             if board.nof_checkers == 1 {
                 let mut blocked_check: bool =
                     bitboard::contains_square(board.check_block_sqrs, target);
-                //also en passant can "block" check
+                //May also resolve check by eating the checking pawn by en passant
                 let ep_offset: i32;
                 if mover == WHITE {
                     ep_offset = -8
@@ -145,7 +145,7 @@ impl MoveGen {
                 if _move::is_en_passant(mov)
                     && bitboard::contains_square(
                         board.check_block_sqrs,
-                        (board.ep_square.expect("was ep but no ep sqr") as i32 + ep_offset) as u32,
+                        (board.ep_square.unwrap() as i32 + ep_offset) as u32,
                     )
                 {
                     blocked_check = true;
@@ -168,63 +168,39 @@ impl MoveGen {
             }
         }
 
-        if _move::is_en_passant(mov) && board.get_king_sqr_idx(mover) / 8 == init / 8 {
-            //check edge case where both pawns leave rank exposing pin on same rank king
+        if _move::is_en_passant(mov) {
+            //check edge case where both pawns leave rank exposing pin on king, can be horizontal or diagonal pin
+            let ep_offset: i32;
+            if mover == WHITE {
+                ep_offset = -8
+            } else {
+                ep_offset = 8
+            }
             let opponent_horizontal_sliding: u64;
-            let ep_rank: u64;
+            let opponent_diagonal_sliding: u64;
             if mover == WHITE {
                 opponent_horizontal_sliding = board.pieces[9] | board.pieces[10];
-                ep_rank = RANKS[4];
+                opponent_diagonal_sliding = board.pieces[8] | board.pieces[10];
             } else {
                 opponent_horizontal_sliding = board.pieces[3] | board.pieces[4];
-                ep_rank = RANKS[3];
+                opponent_diagonal_sliding = board.pieces[2] | board.pieces[4];
             }
-            if ep_rank & opponent_horizontal_sliding > 0 {
-                let mover_king_sqr: u32 = board.get_king_sqr_idx(mover);
-                let king_on_left_side: bool = mover_king_sqr < init;
-                let ep_dir_right: bool = target % 8 > init % 8;
-                //scan right
-                let mut scan_start_sqr: u32;
-                let mut apply_step_f: fn(u32) -> u32 = |x: u32| x + 1;
-                let mut end_sqr_bb: u64 = FILES[7];
-                if ep_dir_right {
-                    scan_start_sqr = init + 1;
-                } else {
-                    scan_start_sqr = init;
-                }
-                let slide_bb_right: u64 = slide_to_dir(
-                    scan_start_sqr,
-                    apply_step_f,
-                    end_sqr_bb,
-                    board.total_occupation(),
-                    true,
-                );
-                if (king_on_left_side && (slide_bb_right & opponent_horizontal_sliding > 0))
-                    || (!king_on_left_side
-                        && bitboard::contains_square(slide_bb_right, mover_king_sqr))
-                {
-                    //necessary to scan left, could be edge case
-                    apply_step_f = |x: u32| x - 1;
-                    end_sqr_bb = FILES[0];
-                    if ep_dir_right {
-                        scan_start_sqr = init;
-                    } else {
-                        scan_start_sqr = init - 1;
-                    }
-                    let slide_bb_left: u64 = slide_to_dir(
-                        scan_start_sqr,
-                        apply_step_f,
-                        end_sqr_bb,
-                        board.total_occupation(),
-                        true,
-                    );
-                    if (king_on_left_side
-                        && bitboard::contains_square(slide_bb_left, mover_king_sqr))
-                        || (!king_on_left_side && (slide_bb_left & opponent_horizontal_sliding > 0))
-                    {
-                        return false;
-                    }
-                }
+            let mut post_ep_total_occupied: u64 = bitboard::with_clear_square(board.total_occupation(), init);
+            bitboard::clear_square(&mut post_ep_total_occupied, (board.ep_square.unwrap() as i32 + ep_offset) as u32);
+            bitboard::set_square(&mut post_ep_total_occupied, target);
+
+            let king_sqr_idx: usize = board.get_king_sqr_idx(mover) as usize;
+            //check diagonal
+            let relevant_blockers_diag: u64 = self.get_relevant_blockers(king_sqr_idx, post_ep_total_occupied, false);
+            let diag_king_targets: u64 = self.get_sliding_for(king_sqr_idx, relevant_blockers_diag, false);
+            if diag_king_targets & opponent_diagonal_sliding > 0 {
+                return false;
+            }
+            //check cardinal
+            let relevant_blockers_cardinal: u64 = self.get_relevant_blockers(king_sqr_idx, post_ep_total_occupied, true);
+            let cardinal_king_targets: u64 = self.get_sliding_for(king_sqr_idx, relevant_blockers_cardinal, true);
+            if cardinal_king_targets & opponent_horizontal_sliding > 0 {
+                return false;
             }
         } else if moved_piece == mover_king_piece_idx {
             if bitboard::contains_square(opponent_attacked, target)

@@ -25,7 +25,7 @@ impl CpuGame {
             };
         let mut board_hash_history: Vec<u64> = vec![new_pos.board.zhash];
 
-        for (i, m) in moves.iter().enumerate() {
+        for m in moves.iter() {
             let (from, to, promotion): (u32, u32, Option<u32>) =
                 match from_string(&m) {
                     Ok(fromtoprom) => fromtoprom,

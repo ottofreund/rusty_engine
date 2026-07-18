@@ -97,7 +97,7 @@ impl Game {
     fn cur_pos_is_threefold(&self) -> bool {
         let mut count: u32 = 1;
         for i in self.repetition_relevant_history_idx..(self.board_history.len() - 1) {
-            if self.position.board == self.board_history[i] {
+            if self.position.board.eq(&self.board_history[i], &self.move_gen) {
                 count += 1;
             }
         }
