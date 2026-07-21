@@ -71,6 +71,7 @@ impl MoveGen {
     ///Called once upon arriving to a new position. <br>
     ///Not called when reverting move, since just fetched from stack.
     ///Returns how many moves generated
+    ///"noisy" means captures + promotions
     pub fn generate_legal(
         &self,
         board: &Board,
@@ -80,10 +81,17 @@ impl MoveGen {
         move_arr_s_idx: usize,
         in_search: bool,
         in_perft_debug: bool,
+        noisy_only: bool,
     ) -> usize {
         let mut generated: usize = 0;
-        let pseudolegals_generated: usize =
-            self.generate_pseudolegal(board, pseudo_move_arr, mover, in_search, in_perft_debug);
+        let pseudolegals_generated: usize = self.generate_pseudolegal(
+            board,
+            pseudo_move_arr,
+            mover,
+            in_search,
+            in_perft_debug,
+            noisy_only,
+        );
 
         for mov in pseudo_move_arr[0..pseudolegals_generated].iter() {
             if self.pseudolegal_is_legal(*mov, board, mover) {
@@ -100,6 +108,9 @@ impl MoveGen {
                         board.get_piece_type_at(_move::get_target(*mov), mover ^ 1);
                     m = _move::with_eaten_piece(*mov, eaten_piece);
                 } else {
+                    if noisy_only && !_move::is_promotion(*mov) {
+                        panic!("Quiet in noisy_only mode");
+                    }
                     m = *mov;
                 }
                 move_arr[move_arr_s_idx + generated] = m;
@@ -227,6 +238,7 @@ impl MoveGen {
         mover: u32,
         in_search: bool,
         in_perft_debug: bool,
+        noisy_only: bool,
     ) -> usize {
         let mut i: usize;
         let e: usize;
@@ -253,21 +265,25 @@ impl MoveGen {
                     false,
                     in_search,
                     in_perft_debug,
+                    noisy_only,
                 ) as usize;
             }
             i += 1;
         }
         added += add_en_passant(board, mover, pseudo_move_arr, added);
-        added += add_castling(board, mover, pseudo_move_arr, added);
+        if !noisy_only {
+            added += add_castling(board, mover, pseudo_move_arr, added);
+        }
         return added;
     }
 
     ///Adds pseudolegal moves for **piece** at **from** to move vector **move_vec**. <br>
     ///1. If pawn, handle separately <br>
     ///2. Get target squares (including eating own pieces), sliding gen or simply attack_bb <br>
-    ///3. If !**keep_protected**, remove "eating own piece" moves by binary ANDing with !own_occupation <br>
-    ///4. If **targets_only** just return targets bitboard.
-    ///5. Else Pop-lsb 1-by-1 and make move and add to **move_arr** until none left. Returns number of moves added
+    ///3. If **noisy_only**, remove non-captures by binary ANDing with opponent_occupation <br>
+    ///4. If !**keep_protected**, remove "eating own piece" moves by binary ANDing with !own_occupation <br>
+    ///5. If **targets_only** just return targets bitboard.
+    ///6. Else Pop-lsb 1-by-1 and make move and add to **move_arr** until none left. Returns number of moves added
     pub fn pseudolegal_for(
         &self,
         from: u32,
@@ -280,6 +296,7 @@ impl MoveGen {
         targets_only: bool,
         in_search: bool,
         in_perft_debug: bool,
+        noisy_only: bool,
     ) -> u64 {
         if piece == W_PAWN || piece == B_PAWN {
             //no en passant from this
@@ -292,6 +309,7 @@ impl MoveGen {
                 move_arr_s_idx,
                 in_search,
                 in_perft_debug,
+                noisy_only,
             );
             return added;
         }
@@ -332,6 +350,14 @@ impl MoveGen {
             _ => panic!("Couldn't match piece in pseudolegal_for. Reached unreachable case."),
         };
         //3.
+        if noisy_only {
+            if mover == WHITE {
+                targets &= board.black_occupation;
+            } else {
+                targets &= board.white_occupation;
+            }
+        }
+        //4.
         let opponent_occupied: u64;
         if mover == WHITE {
             if !keep_protected {
@@ -345,10 +371,10 @@ impl MoveGen {
             opponent_occupied = board.white_occupation;
         }
         if targets_only {
-            //4.
+            //5.
             return targets;
         } else {
-            //5.
+            //6.
             let mut i: usize = move_arr_s_idx;
             while targets != 0 {
                 let target_sqr: u32 = bitboard::pop_lsb(&mut targets);
@@ -553,6 +579,7 @@ impl MoveGen {
                     true,
                     true,
                     false,
+                    false, // attack maps must include non-capturing attacks
                 );
                 if bitboard::contains_square(targets, opponent_king_sqr) {
                     //see if checker
@@ -849,6 +876,7 @@ pub fn pseudolegal_pawn(
     move_arr_s_idx: usize,
     in_search: bool,
     in_perft_debug: bool,
+    noisy_only: bool,
 ) -> u64 {
     let mut added: usize = 0;
     //following are relative to color:
@@ -909,6 +937,9 @@ pub fn pseudolegal_pawn(
                 added += 1;
             }
         }
+    }
+    if noisy_only && !is_promotion {
+        return added as u64;
     }
     //now check forward moves
     //can go forward 1 if no piece there

@@ -40,6 +40,7 @@ impl Position {
             0,
             false,
             false,
+            false,
         );
         let move_arr_idx: Vec<usize> = vec![0, generated];
         let board_state_info_stack: Vec<BoardStateInfo> = vec![];
@@ -70,6 +71,7 @@ impl Position {
             &mut move_arr,
             &mut move_generation_temp_arr,
             0,
+            false,
             false,
             false,
         );
@@ -121,6 +123,7 @@ impl Position {
         mov: u32,
         in_search: bool,
         in_perft_debug: bool,
+        in_quiescence: bool,
         move_gen: &MoveGen,
         zobrist: &Zobrist,
     ) {
@@ -354,6 +357,7 @@ impl Position {
             move_arr_s_idx,
             in_search,
             in_perft_debug,
+            in_quiescence && self.board.nof_checkers == 0,
         );
         self.move_arr_idx.push(move_arr_s_idx + generated);
         self.played_moves_stack.push(mov);

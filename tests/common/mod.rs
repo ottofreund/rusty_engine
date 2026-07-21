@@ -38,7 +38,7 @@ impl TestEngine {
     }
 
     pub fn make_search_move(&self, pos: &mut Position, mov: u32) {
-        pos.make_move(mov, true, false, &self.move_gen, &self.zobrist);
+        pos.make_move(mov, true, false, false, &self.move_gen, &self.zobrist);
     }
 
     pub fn unmake_move(&self, pos: &mut Position, mov: u32) {
@@ -120,7 +120,7 @@ pub fn go_perft(
         let (s, e) = pos.search_move_bounds();
         for i in s..e {
             let mov = pos.move_arr[i];
-            pos.make_move(mov, true, true, move_gen, zobrist);
+            pos.make_move(mov, true, true, false, move_gen, zobrist);
             from_here += inner(d_left - 1, pos, move_gen, zobrist);
             pos.unmake_move(mov, zobrist);
         }

@@ -8,27 +8,27 @@ use rusty_engine::{
 };
 use std::time::{Duration, Instant};
 
-const DEPTH: usize = 8;
+const DEPTH: usize = 6;
 const CONSECUTIVE_SEARCH_REPS: usize = 2;
 const STATIC_TIME_MS: u64 = 3000;
 const SEARCH_CASES: [(&str, usize); 6] = [
     (DEFAULT_FEN, DEPTH),
     (
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ",
-        7,
+        6,
     ),
     (
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ",
-        7,
+        6,
     ),
-    ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 7),
+    ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 6),
     (
         "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
-        7,
+        6,
     ),
     (
         "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-        7,
+        6,
     ),
 ];
 const STATIC_TIME_SEARCH_CASES: [&str; 3] = [
@@ -72,9 +72,9 @@ fn consecutive_search_benchmark() {
     for (fen, depth) in SEARCH_CASES {
         println!(
             "benchmarking {} consecutive searches at depth {} from {}",
-            CONSECUTIVE_SEARCH_REPS, depth, fen
+            CONSECUTIVE_SEARCH_REPS, 5, fen
         );
-        let (positions, time) = search_benchmark_pos(&engine, fen, depth, CONSECUTIVE_SEARCH_REPS);
+        let (positions, time) = search_benchmark_pos(&engine, fen, 5, CONSECUTIVE_SEARCH_REPS);
         println!(
             "{} consecutive searches took {:.3} seconds and searched {} nodes",
             CONSECUTIVE_SEARCH_REPS,
@@ -161,7 +161,7 @@ fn search_benchmark_pos(
                     time_took.as_secs_f64(),
                     _move::to_string(m, false)
                 );
-                pos.make_move(m, false, false, &engine.move_gen, &engine.zobrist);
+                pos.make_move(m, false, false, false, &engine.move_gen, &engine.zobrist);
                 searcher.sync_new_move(&pos, Some(m));
             }
             None => {

@@ -4,7 +4,7 @@ use crate::{
 };
 
 pub struct SearchData {
-    pub pv: [u32; MAX_SEARCH_DEPTH + 1], //next moves on last search's primary variation (i.e. search result)
+    pub pv: [u32; MAX_SEARCH_DEPTH + 1], //next moves on last search's primary variation (i.e. search result), doesn't contain quiescence moves
     pub mate_in: Option<u32>,
     pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
     pub positions_searched: u64,      //per search

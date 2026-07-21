@@ -1,5 +1,95 @@
+mod common;
+
+use common::TestEngine;
 use rusty_engine::repr::move_gen::*;
 use rusty_engine::repr::*;
+
+fn generate_legal(engine: &TestEngine, fen: &str, noisy_only: bool) -> Vec<u32> {
+    let board = engine.board(fen);
+    let mut legal_moves = [_move::NULL_MOVE; position::MOVE_ARR_SIZE];
+    let mut pseudolegal_moves = [_move::NULL_MOVE; types::MAX_PSEUDO_MOVES_IN_POS];
+    let generated = engine.move_gen.generate_legal(
+        &board,
+        board.turn,
+        &mut legal_moves,
+        &mut pseudolegal_moves,
+        0,
+        false,
+        false,
+        noisy_only,
+    );
+
+    legal_moves[..generated].to_vec()
+}
+
+fn sorted_uci(moves: &[u32]) -> Vec<String> {
+    let mut moves: Vec<String> = moves
+        .iter()
+        .map(|mov| _move::to_string(*mov, true))
+        .collect();
+    moves.sort();
+    moves
+}
+
+fn sorted_encoded(moves: &[u32]) -> Vec<u32> {
+    let mut moves = moves.to_vec();
+    moves.sort_unstable();
+    moves
+}
+
+#[test]
+fn noisy_only_matches_captures_from_full_generation() {
+    let engine = TestEngine::new();
+    let fen = "4k3/8/3p1n2/4P3/2bQ4/8/8/4K3 w - - 0 1";
+
+    let all_moves = generate_legal(&engine, fen, false);
+    let captures = generate_legal(&engine, fen, true);
+    let captures_from_all: Vec<u32> = all_moves
+        .iter()
+        .copied()
+        .filter(|mov| _move::is_eating(*mov))
+        .collect();
+
+    assert!(all_moves.len() > captures.len());
+    assert!(captures.iter().all(|mov| _move::is_eating(*mov)));
+    assert_eq!(sorted_encoded(&captures), sorted_encoded(&captures_from_all));
+    assert_eq!(
+        sorted_uci(&captures),
+        ["d4c4", "d4d6", "e5d6", "e5f6"]
+    );
+}
+
+#[test]
+fn noisy_only_includes_en_passant() {
+    let engine = TestEngine::new();
+    let captures = generate_legal(
+        &engine,
+        "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
+        true,
+    );
+
+    assert_eq!(sorted_uci(&captures), ["e5d6"]);
+    assert!(_move::is_en_passant(captures[0]));
+    assert_eq!(_move::eaten_piece(captures[0]), Some(types::B_PAWN));
+}
+
+#[test]
+fn noisy_only_includes_capture_and_quiet_promotions() {
+    let engine = TestEngine::new();
+    let noisy_moves = generate_legal(
+        &engine,
+        "4k2r/6P1/8/8/8/8/8/4K3 w - - 0 1",
+        true,
+    );
+
+    assert!(noisy_moves.iter().all(|mov| _move::is_promotion(*mov)));
+    assert_eq!(
+        sorted_uci(&noisy_moves),
+        [
+            "g7g8b", "g7g8n", "g7g8q", "g7g8r", "g7h8b", "g7h8n", "g7h8q", "g7h8r"
+        ]
+    );
+}
 
 #[test]
 fn naive_slide_gen_works() {

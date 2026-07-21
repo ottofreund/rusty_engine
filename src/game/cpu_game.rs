@@ -47,7 +47,7 @@ impl CpuGame {
             if _move::is_unrepeatable(mov) {
                 board_hash_history.clear();
             }
-            new_pos.make_move(mov, false, false, &self.move_gen, &self.zobrist);
+            new_pos.make_move(mov, false, false, false, &self.move_gen, &self.zobrist);
             board_hash_history.push(new_pos.board.zhash);
         }
 
@@ -72,7 +72,7 @@ impl CpuGame {
                 return Err(format!("Invalid move {}: {}", mov, err));
             }
         };
-        self.position.make_move(mov, false, false, &self.move_gen, &self.zobrist);
+        self.position.make_move(mov, false, false, false, &self.move_gen, &self.zobrist);
         self.searcher.sync_new_move(&self.position, Some(mov));
         Ok(())
     }
