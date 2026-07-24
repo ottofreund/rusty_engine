@@ -16,6 +16,7 @@ use crate::{
 };
 
 pub const MAX_SEARCH_DEPTH: usize = 50;
+const DELTA_PRUNE_MARGIN: i32 = 200;
 const THREAD_COUNT: usize = 4;
 const ALPHA_INIT: i32 = -1_000_000_000;
 const BETA_INIT: i32 = 1_000_000_000;
@@ -151,6 +152,7 @@ impl Searcher {
         ) -> i32 {
             search_data.positions_searched += 1;
             let mut eval: i32 = EVAL_INIT;
+            let mut stand_pat: Option<i32> = None;
             let (s, e) = pos.search_move_bounds();
             if s == e {
                 if pos.board.nof_checkers > 0 {
@@ -166,6 +168,7 @@ impl Searcher {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
                         eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
+                        stand_pat = Some(eval);
                         if eval >= beta {
                             return eval;
                         }
@@ -181,9 +184,19 @@ impl Searcher {
             }
 
             for i in s..e {
-                let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
                 let mov: u32 =
                     partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
+
+                if let Some(stand_pat) = stand_pat {
+                    if stand_pat + _move::delta_score(mov) + DELTA_PRUNE_MARGIN < alpha
+                        && !move_gen.move_gives_check(mov, &pos.board)
+                    {
+                        continue;
+                    }
+                }
+
+                let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] =
+                    [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
                 let mov_eval: i32 = -inner(
@@ -312,6 +325,7 @@ impl Searcher {
 
             search_data.positions_searched += 1;
             let mut eval: i32 = EVAL_INIT;
+            let mut stand_pat: Option<i32> = None;
             let (s, e) = pos.search_move_bounds();
             if s == e {
                 if pos.board.nof_checkers > 0 {
@@ -327,7 +341,8 @@ impl Searcher {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
                         eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
-                        if eval >= beta { //can prune?
+                        stand_pat = Some(eval);
+                        if eval >= beta {
                             return eval;
                         }
                         alpha = max(alpha, eval);
@@ -342,9 +357,19 @@ impl Searcher {
             }
 
             for i in s..e {
-                let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
                 let mov: u32 =
                     partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
+
+                if let Some(stand_pat) = stand_pat {
+                    if stand_pat + _move::delta_score(mov) + DELTA_PRUNE_MARGIN < alpha
+                        && !move_gen.move_gives_check(mov, &pos.board)
+                    {
+                        continue;
+                    }
+                }
+
+                let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
+
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
                 let child_eval: i32 = inner(

@@ -127,6 +127,7 @@ impl MoveGen {
         let moved_piece: u32 = _move::get_moved_piece(mov);
         let opponent_attacked: u64;
         let mover_king_piece_idx: u32;
+        let king_sqr_idx: usize = board.get_king_sqr_idx(mover) as usize;
         let mover_pinned: u64;
         let mover_pinned_restrictions: u64;
         if mover == WHITE {
@@ -196,22 +197,23 @@ impl MoveGen {
                 opponent_horizontal_sliding = board.pieces[3] | board.pieces[4];
                 opponent_diagonal_sliding = board.pieces[2] | board.pieces[4];
             }
-            let mut post_ep_total_occupied: u64 = bitboard::with_clear_square(board.total_occupation(), init);
-            bitboard::clear_square(&mut post_ep_total_occupied, (board.ep_square.unwrap() as i32 + ep_offset) as u32);
-            bitboard::set_square(&mut post_ep_total_occupied, target);
 
-            let king_sqr_idx: usize = board.get_king_sqr_idx(mover) as usize;
-            //check diagonal
-            let relevant_blockers_diag: u64 = self.get_relevant_blockers(king_sqr_idx, post_ep_total_occupied, false);
-            let diag_king_targets: u64 = self.get_sliding_for(king_sqr_idx, relevant_blockers_diag, false);
-            if diag_king_targets & opponent_diagonal_sliding > 0 {
-                return false;
+            let post_ep_total_occupied: u64 = board.total_occupation() ^ ((1 << init ) | (1  << target) | (1 << (board.ep_square.unwrap() as i32 + ep_offset) as u64));
+            if self.attack_bbs[W_BISHOP as usize][king_sqr_idx] & opponent_diagonal_sliding > 0 {
+                //check diagonal
+                let relevant_blockers_diag: u64 = self.get_relevant_blockers(king_sqr_idx, post_ep_total_occupied, false);
+                let diag_king_targets: u64 = self.get_sliding_for(king_sqr_idx, relevant_blockers_diag, false);
+                if diag_king_targets & opponent_diagonal_sliding > 0 {
+                    return false;
+                }
             }
-            //check cardinal
-            let relevant_blockers_cardinal: u64 = self.get_relevant_blockers(king_sqr_idx, post_ep_total_occupied, true);
-            let cardinal_king_targets: u64 = self.get_sliding_for(king_sqr_idx, relevant_blockers_cardinal, true);
-            if cardinal_king_targets & opponent_horizontal_sliding > 0 {
-                return false;
+            if self.attack_bbs[W_ROOK as usize][king_sqr_idx] & opponent_horizontal_sliding > 0 {
+                //check cardinal
+                let relevant_blockers_cardinal: u64 = self.get_relevant_blockers(king_sqr_idx, post_ep_total_occupied, true);
+                let cardinal_king_targets: u64 = self.get_sliding_for(king_sqr_idx, relevant_blockers_cardinal, true);
+                if cardinal_king_targets & opponent_horizontal_sliding > 0 {
+                    return false;
+                }
             }
         } else if moved_piece == mover_king_piece_idx {
             if bitboard::contains_square(opponent_attacked, target)
@@ -592,6 +594,107 @@ impl MoveGen {
         }
         return res;
     }
+
+    ///Castling moves not supported (may return wrong results), since they can't be called from quiescence
+    pub fn move_gives_check(&self, mov: u32, board: &Board) -> bool {
+        let init_bb: u64 = 1 << _move::get_init(mov);
+        let target_bb: u64 = 1 << _move::get_target(mov);
+        let moved_piece_type: u32 = _move::get_moved_piece(mov) % 6;
+        let opponent_king_sqr: usize = board.get_king_sqr_idx(board.turn ^ 1) as usize;
+        let is_promotion: bool = _move::is_promotion(mov);
+        //pawn and knight direct checks
+        if moved_piece_type == W_KNIGHT && self.attack_bbs[1][opponent_king_sqr] & target_bb > 0 {
+            return true;
+        } else if moved_piece_type == W_PAWN && !is_promotion {
+            let gives_direct_check: bool;
+            if board.turn == WHITE {
+                gives_direct_check = self.attack_bbs[0][_move::get_target(mov) as usize]
+                    & (1 << opponent_king_sqr)
+                    > 0;
+            } else {
+                gives_direct_check = self.attack_bbs[6][_move::get_target(mov) as usize]
+                    & (1 << opponent_king_sqr)
+                    > 0;
+            }
+            if gives_direct_check {
+                return true;
+            }
+        }
+
+        let mut mover_diagonal_sliding: u64;
+        let mut mover_horizontal_sliding: u64;
+        if board.turn == WHITE {
+            mover_diagonal_sliding = board.pieces[2] | board.pieces[4];
+            mover_horizontal_sliding = board.pieces[3] | board.pieces[4];
+        } else {
+            mover_diagonal_sliding = board.pieces[8] | board.pieces[10];
+            mover_horizontal_sliding = board.pieces[9] | board.pieces[10];
+        }
+        if is_promotion {
+            match _move::get_promotion_piece(mov) % 6 {
+                W_QUEEN => {
+                    mover_diagonal_sliding |= target_bb;
+                    mover_horizontal_sliding |= target_bb;
+                }
+                W_ROOK => {
+                    mover_horizontal_sliding |= target_bb;
+                }
+                W_BISHOP => {
+                    mover_diagonal_sliding |= target_bb;
+                }
+                W_KNIGHT => {
+                    if self.attack_bbs[1][opponent_king_sqr] & target_bb > 0 {
+                        return true;
+                    }
+                }
+                _ => {
+                    panic!("Invalid promotion piece type");
+                }
+            }
+        } else if moved_piece_type == W_BISHOP {
+            mover_diagonal_sliding |= target_bb;
+            mover_diagonal_sliding ^= init_bb;
+        } else if moved_piece_type == W_ROOK {
+            mover_horizontal_sliding |= target_bb;
+            mover_horizontal_sliding ^= init_bb;
+        } else if moved_piece_type == W_QUEEN {
+            mover_diagonal_sliding |= target_bb;
+            mover_horizontal_sliding |= target_bb;
+            mover_horizontal_sliding ^= init_bb;
+            mover_diagonal_sliding ^= init_bb;
+        }
+
+        let mut post_move_total_occupation: u64 = board.total_occupation() ^ init_bb;
+        post_move_total_occupation |= target_bb;
+        if _move::is_en_passant(mov) {
+            let ep_offset: i32;
+            if board.turn == WHITE {
+                ep_offset = -8
+            } else {
+                ep_offset = 8
+            }
+            post_move_total_occupation ^= 1 << (board.ep_square.unwrap() as i32 + ep_offset) as u64;
+        }
+        //sliding checks
+        if self.attack_bbs[W_BISHOP as usize][opponent_king_sqr] & mover_diagonal_sliding > 0 {
+            //check diagonal
+            let relevant_blockers_diag: u64 = self.get_relevant_blockers(opponent_king_sqr, post_move_total_occupation, false);
+            let diag_king_targets: u64 = self.get_sliding_for(opponent_king_sqr, relevant_blockers_diag, false);
+            if diag_king_targets & mover_diagonal_sliding > 0 {
+                return true;
+            }
+        }
+        if self.attack_bbs[W_ROOK as usize][opponent_king_sqr] & mover_horizontal_sliding > 0 {
+            //check cardinal
+            let relevant_blockers_cardinal: u64 = self.get_relevant_blockers(opponent_king_sqr, post_move_total_occupation, true);
+            let cardinal_king_targets: u64 = self.get_sliding_for(opponent_king_sqr, relevant_blockers_cardinal, true);
+            if cardinal_king_targets & mover_horizontal_sliding > 0 {
+                return true;
+            }
+        }
+        return false;
+    }
+
 }
 
 ///Compute and add attacking bitboard for all pieces at (x, y)

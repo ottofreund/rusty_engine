@@ -57,10 +57,12 @@ pub struct Board {
 
 impl Board {
     ///Returns bb with both black and white occupations toggled.
+    #[inline]
     pub fn total_occupation(&self) -> u64 {
         return self.white_occupation | self.black_occupation;
     }
 
+    #[inline]
     pub fn is_occupied(&self, sqr: u32) -> bool {
         return self.is_white_occupied(sqr) || self.is_black_occupied(sqr);
     }
@@ -73,10 +75,12 @@ impl Board {
         }
     }
 
+    #[inline]
     pub fn is_white_occupied(&self, sqr: u32) -> bool {
         return (self.white_occupation & (1 << sqr)) != 0;
     }
 
+    #[inline]
     pub fn is_black_occupied(&self, sqr: u32) -> bool {
         return (self.black_occupation & (1 << sqr)) != 0;
     }

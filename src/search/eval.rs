@@ -16,7 +16,7 @@ const TABLE_SOURCES: [&str; 8] = [
     include_str!("../../assets/piece_square_tables/king_l.txt"),
 ];
 
-const PIECE_MATERIAL_VALUE: [i32; 6] = [100, 320, 330, 500, 900, 20000];
+pub const PIECE_MATERIAL_VALUE: [i32; 6] = [100, 320, 330, 500, 900, 20000];
 
 //pst: piece square table
 pub struct Evaluator {
