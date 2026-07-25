@@ -1,4 +1,4 @@
-- Quiescence search with SEE and Delta pruning
+- SEE in quiescence and maybe elsewhere too
 - Tapered eval
 - Futility pruning, should be easy gains
 - full principal variation search with null windows
