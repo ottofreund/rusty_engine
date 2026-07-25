@@ -182,18 +182,9 @@ impl Searcher {
                 in_quiescence = true;
             }
 
-            let delta_prune_margin: i32 = tapered_delta_prune_margin(pos.board.major_minor_count);
             for i in s..e {
                 let mov: u32 =
                     partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
-
-                if let Some(stand_pat) = stand_pat {
-                    if stand_pat + _move::delta_score(mov) + delta_prune_margin < alpha
-                        && !move_gen.move_gives_check(mov, &pos.board)
-                    {
-                        continue;
-                    }
-                }
 
                 let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] =
                     [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
@@ -356,18 +347,9 @@ impl Searcher {
                 in_quiescence = true;
             }
 
-            let delta_prune_margin: i32 = tapered_delta_prune_margin(pos.board.major_minor_count);
             for i in s..e {
                 let mov: u32 =
                     partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
-
-                if let Some(stand_pat) = stand_pat {
-                    if stand_pat + _move::delta_score(mov) + delta_prune_margin < alpha
-                        && !move_gen.move_gives_check(mov, &pos.board)
-                    {
-                        continue;
-                    }
-                }
 
                 let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
 
@@ -547,21 +529,4 @@ fn partial_selection_sort(move_arr_s: &mut [u32], pv_mv: u32, last_target: u32) 
         move_arr_s[best_i] = t;
     }
     return move_arr_s[0];
-}
-
-///Approximates inverse exponential function at discrete points
-fn tapered_delta_prune_margin(major_minor_count: u32) -> i32 {
-    return match major_minor_count {
-        14 | 13 | 12 | 11 | 10 | 9 => 200,
-        8 => 210,
-        7 => 225,
-        6 => 240,
-        5 => 265,
-        4 => 310,
-        3 => 380,
-        2 => 500,
-        1 => 690,
-        0 => 1000,
-        _ => 200,
-    };
 }

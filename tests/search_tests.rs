@@ -60,22 +60,3 @@ fn static_depth_quiescence_preserves_nominal_pv_length() {
         assert_eq!(pv[depth], NULL_MOVE);
     }
 }
-
-#[test]
-fn static_depth_quiescence_applies_delta_pruning() {
-    let engine = TestEngine::new();
-    let searcher = search_static_depth(
-        &engine,
-        "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-        2,
-        true,
-    );
-    let pv = &searcher.search_data[0].pv;
-
-    assert_eq!(_move::to_string(pv[0], true), "d7c8q");
-    assert_eq!(_move::to_string(pv[1], true), "d8c8");
-    assert!(
-        searcher.search_data[0].cumul_positions_searched < 1_386,
-        "static-depth delta pruning did not reduce the unpruned 1,386-node baseline"
-    );
-}

@@ -235,17 +235,6 @@ pub fn promotion_matches(mov: u32, promotion: Option<u32>) -> bool {
     }
 }
 
-pub fn delta_score(mov: u32) -> i32 {
-    let mut res: i32 = 0;
-    if is_eating(mov) {
-        res += PIECE_MATERIAL_VALUE[eaten_piece(mov).unwrap() as usize % 6];
-    }
-    if is_promotion(mov) {
-        res += PIECE_MATERIAL_VALUE[get_promotion_piece(mov) as usize % 6] - PIECE_MATERIAL_VALUE[0];
-    }
-    return res;
-}
-
 const PIECE_CHARS: [&str; 12] = ["P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"];
 
 pub fn from_string(mov: &str) -> Result<(u32, u32, Option<u32>), &'static str> {
