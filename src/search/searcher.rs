@@ -6,13 +6,9 @@ use crate::{
         move_gen::MoveGen,
         position::Position,
         types::NOF_PIECE_TYPES,
-    },
-    search::{
-        eval::{Evaluator, MATE_EVAL},
-        search_config::*,
-        search_data::SearchData,
-    },
-    utils::zobrist::Zobrist,
+    }, search::{
+        eval::{Evaluator, MATE_EVAL}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table},
+    }, utils::zobrist::Zobrist,
 };
 
 pub const MAX_SEARCH_DEPTH: usize = 50;
@@ -75,7 +71,7 @@ impl Searcher {
                 .board_hash_history
                 .push(new_pos.board.zhash);
 
-            if self.last_sync_deviates_from_pv {
+            if self.last_sync_deviates_from_pv || self.search_data[i].pv_ply_indices.len() < 2 {
                 self.search_data[i].pv.fill(NULL_MOVE);
             } else {
                 self.drop_pv_head(i);
@@ -133,7 +129,11 @@ impl Searcher {
         move_gen: &MoveGen,
         zobrist: &Zobrist,
     ) {
-        //cv: current variation, pv: primary variation
+        assert!(
+            target_d <= MAX_SEARCH_DEPTH,
+            "static search depth {target_d} exceeds MAX_SEARCH_DEPTH {MAX_SEARCH_DEPTH}"
+        );
+
         fn inner(
             d: usize,
             target_d: usize,
@@ -141,7 +141,6 @@ impl Searcher {
             beta: i32,
             mut in_quiescence: bool,
             use_quiescence: bool,
-            pv: &mut [u32],
             prev_pv: &[u32],
             pos: &mut Position,
             evaluator: &Evaluator,
@@ -149,9 +148,13 @@ impl Searcher {
             move_gen: &MoveGen,
             zobrist: &Zobrist,
         ) -> i32 {
+            if d < target_d {
+                let row_start = search_data.pv_ply_indices[d];
+                search_data.pv[row_start] = NULL_MOVE;
+            }
+
             search_data.positions_searched += 1;
             let mut eval: i32 = EVAL_INIT;
-            let mut stand_pat: Option<i32> = None;
             let (s, e) = pos.search_move_bounds();
             if s == e {
                 if pos.board.nof_checkers > 0 {
@@ -167,7 +170,6 @@ impl Searcher {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
                         eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
-                        stand_pat = Some(eval);
                         if eval >= beta {
                             return eval;
                         }
@@ -183,11 +185,14 @@ impl Searcher {
             }
 
             for i in s..e {
+                let pv_mv: u32 = if d < prev_pv.len() {
+                    prev_pv[d]
+                } else {
+                    NULL_MOVE
+                };
                 let mov: u32 =
-                    partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
+                    partial_selection_sort(&mut pos.move_arr[i..e], pv_mv, pos.last_target);
 
-                let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] =
-                    [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
                 let mov_eval: i32 = -inner(
@@ -197,7 +202,6 @@ impl Searcher {
                     -alpha,
                     in_quiescence,
                     use_quiescence,
-                    &mut child_pv,
                     prev_pv,
                     pos,
                     evaluator,
@@ -210,10 +214,16 @@ impl Searcher {
 
                 if mov_eval > eval {
                     eval = mov_eval;
-                    //child's pv becomes this node's pv
                     if d < target_d {
-                        pv[d + 1..].copy_from_slice(&child_pv[d + 1..]);
-                        pv[d] = mov;
+                        let cur_ply_s_idx: usize = search_data.pv_ply_indices[d];
+                        let child_ply_s_idx: usize = cur_ply_s_idx + (target_d - d);
+                        let child_ply_e_idx: usize =
+                            child_ply_s_idx + (target_d - (d + 1));
+                        search_data.pv.copy_within(
+                            child_ply_s_idx..child_ply_e_idx,
+                            cur_ply_s_idx + 1,
+                        );
+                        search_data.pv[cur_ply_s_idx] = mov;
                     }
                 }
 
@@ -228,20 +238,21 @@ impl Searcher {
         }
         //iterative deepening:
         let synced_pv_depth: usize = self.count_pv_moves(idx);
+        let mut completed_pv_len: usize = synced_pv_depth;
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
-        let mut pv: [u32; MAX_SEARCH_DEPTH + 1] = search_data.pv;
-        for i in (synced_pv_depth + 1)..=target_d {
-            let prev_pv: [u32; MAX_SEARCH_DEPTH + 1] = pv;
-            pv.fill(NULL_MOVE);
+        for d in (synced_pv_depth + 1)..=target_d {
+            let mut prev_pv = vec![NULL_MOVE; d];
+            prev_pv[..completed_pv_len]
+                .copy_from_slice(&search_data.pv[..completed_pv_len]);
+            search_data.pv_ply_indices = get_triang_pv_ply_idx_table(d);
             let eval: i32 = inner(
                 0,
-                i,
+                d,
                 ALPHA_INIT,
                 BETA_INIT,
                 false,
                 self.search_config.quiescence,
-                &mut pv,
                 &prev_pv,
                 pos,
                 &self.evaluator,
@@ -250,21 +261,19 @@ impl Searcher {
                 zobrist,
             );
             search_data.cumul_positions_searched += search_data.positions_searched;
+
+            completed_pv_len = search_data.pv[..d]
+                .iter()
+                .position(|mov| *mov == NULL_MOVE)
+                .unwrap_or(d);
+
             if self.search_config.log_diagnostics {
-                println!("at depth: {}, eval: {}", i, eval);
+                println!("at depth: {}, eval: {}", d, eval);
                 search_data.log_performance();
             }
             search_data.reset_temp_performance_data();
         }
 
-        let mut i = 0;
-        while i < MAX_SEARCH_DEPTH {
-            search_data.pv[i] = pv[i];
-            if pv[i] == NULL_MOVE {
-                break;
-            }
-            i += 1;
-        }
         if self.search_config.log_diagnostics {
             println!(
                 "got pv: {:?}",
@@ -284,7 +293,6 @@ impl Searcher {
         kill_switch: Option<&AtomicBool>
     ) {
         let start: Instant = Instant::now();
-        //cv: current variation, pv: primary variation
         fn inner(
             d: usize,
             target_d: usize,
@@ -294,7 +302,6 @@ impl Searcher {
             beta: i32,
             mut in_quiescence: bool,
             use_quiescence: bool,
-            pv: &mut [u32],
             prev_pv: &[u32],
             pos: &mut Position,
             evaluator: &Evaluator,
@@ -314,9 +321,13 @@ impl Searcher {
                 return EVAL_QUIT;
             }
 
+            if d < target_d {
+                let row_start = search_data.pv_ply_indices[d];
+                search_data.pv[row_start] = NULL_MOVE;
+            }
+
             search_data.positions_searched += 1;
             let mut eval: i32 = EVAL_INIT;
-            let mut stand_pat: Option<i32> = None;
             let (s, e) = pos.search_move_bounds();
             if s == e {
                 if pos.board.nof_checkers > 0 {
@@ -332,7 +343,6 @@ impl Searcher {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
                         eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
-                        stand_pat = Some(eval);
                         if eval >= beta {
                             return eval;
                         }
@@ -348,10 +358,11 @@ impl Searcher {
             }
 
             for i in s..e {
+                let pv_mv: u32 = if d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
                 let mov: u32 =
-                    partial_selection_sort(&mut pos.move_arr[i..e], prev_pv[d], pos.last_target);
+                    partial_selection_sort(&mut pos.move_arr[i..e], pv_mv, pos.last_target);
 
-                let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
+                //let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
@@ -364,7 +375,6 @@ impl Searcher {
                     -alpha,
                     in_quiescence,
                     use_quiescence,
-                    &mut child_pv,
                     prev_pv,
                     pos,
                     evaluator,
@@ -382,11 +392,14 @@ impl Searcher {
 
                 let new_eval: i32 = -child_eval; //candidate for this node
                 if new_eval > eval {
-                    //child's pv becomes this node's pv
+                    //child ply's pv appended to this ply's pv
                     eval = new_eval;
                     if d < target_d {
-                        pv[d + 1..].copy_from_slice(&child_pv[d + 1..]);
-                        pv[d] = mov;
+                        let cur_ply_s_idx: usize = search_data.pv_ply_indices[d];
+                        let child_ply_s_idx: usize = cur_ply_s_idx + (target_d - d);
+                        let child_ply_e_idx: usize = child_ply_s_idx + (target_d - (d + 1));
+                        search_data.pv.copy_within(child_ply_s_idx..child_ply_e_idx, cur_ply_s_idx + 1);
+                        search_data.pv[cur_ply_s_idx] = mov;
                     }
                 }
 
@@ -401,22 +414,23 @@ impl Searcher {
         }
         //iterative deepening:
         let synced_pv_depth: usize = self.count_pv_moves(idx);
+        let mut completed_pv_len: usize = synced_pv_depth;
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
-        let mut pv: [u32; MAX_SEARCH_DEPTH + 1] = search_data.pv;
-        for i in (synced_pv_depth + 1)..=MAX_SEARCH_DEPTH {
-            let prev_pv: [u32; MAX_SEARCH_DEPTH + 1] = pv;
-            pv.fill(NULL_MOVE);
+        for d in (synced_pv_depth + 1)..=MAX_SEARCH_DEPTH {
+            let mut prev_pv = vec![NULL_MOVE; d];
+            prev_pv[..completed_pv_len]
+                .copy_from_slice(&search_data.pv[..completed_pv_len]);
+            search_data.pv_ply_indices = get_triang_pv_ply_idx_table(d);
             let eval: i32 = inner(
                 0,
-                i,
+                d,
                 start,
                 t,
                 ALPHA_INIT,
                 BETA_INIT,
                 false,
                 self.search_config.quiescence,
-                &mut pv,
                 &prev_pv,
                 pos,
                 &self.evaluator,
@@ -428,22 +442,24 @@ impl Searcher {
             search_data.cumul_positions_searched += search_data.positions_searched;
             if eval == EVAL_QUIT {
                 search_data.reset_temp_performance_data();
-                pv = prev_pv;
+                search_data.pv[0..d].copy_from_slice(&prev_pv);
                 break;
             }
+
+            completed_pv_len = search_data.pv[..d]
+                .iter()
+                .position(|mov| *mov == NULL_MOVE)
+                .unwrap_or(d);
+
             if self.search_config.log_diagnostics {
-                println!("at depth: {}, eval: {}", i, eval);
+                println!("at depth: {}, eval: {}", d, eval);
                 search_data.log_performance();
             }
             search_data.reset_temp_performance_data();
         }
 
-        search_data.pv = pv;
         if self.search_config.log_diagnostics {
-            println!(
-                "got pv: {:?}",
-                search_data.pv.map(|m| _move::to_string(m, true))
-            );
+            println!("got pv: {:?}", search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)));
         }
 
         return;
@@ -464,23 +480,28 @@ impl Searcher {
         if self.multithreaded {
             panic!("multithreaded search");
         } else {
-            match self.search_data[0].pv[1] {
-                NULL_MOVE => None,
-                m => Some(m),
+            if self.count_pv_moves(0) > 1 {
+                match self.search_data[0].pv[1] {
+                    NULL_MOVE => None,
+                    m => Some(m),
+                }
+            } else {
+                return None;
             }
+            
         }
     }
 
     fn drop_pv_head(&mut self, idx: usize) {
-        let mut new_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
-        new_pv[0..MAX_SEARCH_DEPTH]
-            .copy_from_slice(&self.search_data[idx].pv[1..=MAX_SEARCH_DEPTH]);
-        self.search_data[idx].pv = new_pv;
+        let head_ply_e_idx: usize = self.search_data[idx].pv_ply_indices[1];
+        self.search_data[idx].pv.copy_within(1..head_ply_e_idx, 0);
+        self.search_data[idx].pv[head_ply_e_idx - 1] = NULL_MOVE;
     }
 
     fn count_pv_moves(&self, idx: usize) -> usize {
         let mut i: usize = 0;
-        while i < MAX_SEARCH_DEPTH {
+        let root_pv_e_idx: usize = self.search_data[idx].pv_ply_indices[1];
+        while i < root_pv_e_idx {
             if self.search_data[idx].pv[i] == NULL_MOVE {
                 break;
             }

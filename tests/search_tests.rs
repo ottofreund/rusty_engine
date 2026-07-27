@@ -3,22 +3,49 @@ mod common;
 use common::TestEngine;
 use rusty_engine::{
     repr::_move::{self, NULL_MOVE},
-    search::{search_config::SearchMode, searcher::Searcher},
+    repr::position::Position,
+    search::{
+        search_config::SearchMode,
+        search_data::{get_triang_pv_ply_idx_table, TRIANG_PV_TABLE_SIZE},
+        searcher::{Searcher, MAX_SEARCH_DEPTH},
+    },
     utils::fen_tool::DEFAULT_FEN,
 };
+use std::sync::{atomic::AtomicBool, Arc};
 
-fn search_static_depth(
-    engine: &TestEngine,
-    fen: &str,
-    depth: usize,
-    quiescence: bool,
-) -> Searcher {
+const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
+
+fn search_static_depth(engine: &TestEngine, fen: &str, depth: usize, quiescence: bool) -> Searcher {
     let pos = engine.position(fen);
     let mut searcher = Searcher::from(&pos);
     searcher.search_config.search_mode = SearchMode::StaticDepth(depth);
     searcher.search_config.quiescence = quiescence;
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
     searcher
+}
+
+fn root_pv(searcher: &Searcher) -> Vec<u32> {
+    let search_data = &searcher.search_data[0];
+    let root_end = search_data.pv_ply_indices[1];
+
+    search_data.pv[..root_end]
+        .iter()
+        .copied()
+        .take_while(|mov| *mov != NULL_MOVE)
+        .collect()
+}
+
+fn assert_legal_pv(engine: &TestEngine, start: &Position, pv: &[u32]) {
+    let mut replay = start.clone();
+
+    for mov in pv {
+        assert!(
+            replay.legal_search_moves().contains(mov),
+            "illegal PV move {}",
+            _move::to_string(*mov, true)
+        );
+        engine.make_search_move(&mut replay, *mov);
+    }
 }
 
 #[test]
@@ -48,15 +75,182 @@ fn static_depth_quiescence_rejects_poisoned_capture() {
 fn static_depth_quiescence_preserves_nominal_pv_length() {
     let engine = TestEngine::new();
 
-    for depth in [1, 2] {
+    for depth in [1, 2, 3] {
         let searcher = search_static_depth(&engine, DEFAULT_FEN, depth, true);
-        let pv = &searcher.search_data[0].pv;
-        let pv_len = pv
-            .iter()
-            .position(|mov| *mov == NULL_MOVE)
-            .unwrap_or(pv.len());
+        let pv = root_pv(&searcher);
 
-        assert_eq!(pv_len, depth);
-        assert_eq!(pv[depth], NULL_MOVE);
+        assert_eq!(pv.len(), depth);
+        assert_eq!(searcher.search_data[0].pv_ply_indices[1], depth);
     }
+}
+
+#[test]
+fn static_depth_pv_is_legal_with_and_without_quiescence() {
+    let engine = TestEngine::new();
+
+    for depth in [1, 2, 3] {
+        for quiescence in [false, true] {
+            let start = engine.position(DEFAULT_FEN);
+            let searcher = search_static_depth(&engine, DEFAULT_FEN, depth, quiescence);
+            let pv = root_pv(&searcher);
+
+            assert_eq!(pv.len(), depth);
+            assert_legal_pv(&engine, &start, &pv);
+        }
+    }
+}
+
+#[test]
+fn mate_in_one_terminates_static_root_pv() {
+    let engine = TestEngine::new();
+    let start = engine.position(MATE_IN_ONE_FEN);
+    let move_source = start.clone();
+    let seeded_non_mate = move_source
+        .legal_search_moves()
+        .iter()
+        .copied()
+        .find(|mov| {
+            let mut child = start.clone();
+            child.make_move(*mov, false, false, false, &engine.move_gen, &engine.zobrist);
+            !child.legal_search_moves().is_empty()
+        })
+        .expect("position has a non-mating move");
+
+    let mut searcher = Searcher::from(&start);
+    searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+    searcher.search_config.quiescence = false;
+    searcher.search_data[0].pv[0] = seeded_non_mate;
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+    let pv = root_pv(&searcher);
+
+    assert_eq!(pv.len(), 1);
+    assert_ne!(pv[0], seeded_non_mate);
+    assert_eq!(searcher.search_data[0].pv[1], NULL_MOVE);
+    assert_legal_pv(&engine, &start, &pv);
+
+    let mut result = start;
+    result.make_move(
+        pv[0],
+        false,
+        false,
+        false,
+        &engine.move_gen,
+        &engine.zobrist,
+    );
+    assert!(
+        result.in_checkmate(),
+        "expected mate-in-one, got {}",
+        _move::to_string(pv[0], true)
+    );
+}
+
+#[test]
+fn consecutive_static_search_syncs_exact_pv_tail() {
+    let engine = TestEngine::new();
+    let mut pos = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&pos);
+    searcher.search_config.search_mode = SearchMode::StaticDepth(3);
+    searcher.search_config.quiescence = false;
+
+    for _ in 0..2 {
+        searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+        let before = root_pv(&searcher);
+
+        assert_eq!(before.len(), 3);
+        assert_legal_pv(&engine, &pos, &before);
+
+        let best_move = before[0];
+        pos.make_move(
+            best_move,
+            false,
+            false,
+            false,
+            &engine.move_gen,
+            &engine.zobrist,
+        );
+        searcher.sync_new_move(&pos, Some(best_move));
+
+        assert_eq!(root_pv(&searcher), before[1..]);
+        assert_eq!(searcher.collect_best_move(), before.get(1).copied());
+    }
+}
+
+#[test]
+fn static_to_timed_abort_preserves_completed_pv() {
+    let engine = TestEngine::new();
+    let start = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&start);
+    searcher.search_config.quiescence = false;
+    searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let completed = root_pv(&searcher);
+    assert_eq!(completed.len(), 2);
+
+    searcher.search_config.search_mode = SearchMode::StaticTime(u64::MAX);
+    let kill_switch = Arc::new(AtomicBool::new(true));
+    searcher.start_search(&engine.move_gen, &engine.zobrist, Some(kill_switch));
+
+    assert_eq!(root_pv(&searcher), completed);
+    assert_legal_pv(&engine, &start, &completed);
+
+    searcher.search_config.search_mode = SearchMode::StaticDepth(3);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let resumed = root_pv(&searcher);
+    assert_eq!(resumed.len(), 3);
+    assert_legal_pv(&engine, &start, &resumed);
+}
+
+#[test]
+fn shallower_static_depth_reuses_deeper_completed_pv() {
+    let engine = TestEngine::new();
+    let start = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&start);
+    searcher.search_config.quiescence = false;
+    searcher.search_config.search_mode = SearchMode::StaticDepth(3);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+    let deeper = root_pv(&searcher);
+
+    searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    assert_eq!(root_pv(&searcher), deeper);
+}
+
+#[test]
+fn triangular_pv_boundaries_cover_max_depth() {
+    assert_eq!(get_triang_pv_ply_idx_table(1), vec![0, 1]);
+    assert_eq!(get_triang_pv_ply_idx_table(2), vec![0, 2, 3]);
+
+    let max_depth_indices = get_triang_pv_ply_idx_table(MAX_SEARCH_DEPTH);
+    assert_eq!(max_depth_indices.len(), MAX_SEARCH_DEPTH + 1);
+    assert_eq!(max_depth_indices[MAX_SEARCH_DEPTH], TRIANG_PV_TABLE_SIZE);
+    assert_eq!(
+        max_depth_indices[MAX_SEARCH_DEPTH - 1],
+        TRIANG_PV_TABLE_SIZE - 1
+    );
+}
+
+#[test]
+#[should_panic(expected = "exceeds MAX_SEARCH_DEPTH")]
+fn static_depth_rejects_depth_above_table_capacity() {
+    let engine = TestEngine::new();
+    let _ = search_static_depth(&engine, DEFAULT_FEN, MAX_SEARCH_DEPTH + 1, false);
+}
+
+#[test]
+fn static_depth_zero_preserves_existing_pv() {
+    let engine = TestEngine::new();
+    let start = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&start);
+    searcher.search_config.quiescence = false;
+    searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+    let completed = root_pv(&searcher);
+
+    searcher.search_config.search_mode = SearchMode::StaticDepth(0);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    assert_eq!(root_pv(&searcher), completed);
 }

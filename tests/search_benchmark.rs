@@ -11,12 +11,9 @@ use std::time::{Duration, Instant};
 const DEPTH: usize = 6;
 const CONSECUTIVE_SEARCH_REPS: usize = 2;
 const STATIC_TIME_MS: u64 = 3000;
-const SEARCH_CASES: [(&str, usize); 6] = [
+const NON_QUIESCENCE_SEARCH_TIME_MS: u64 = 250;
+const SEARCH_CASES: [(&str, usize); 5] = [
     (DEFAULT_FEN, DEPTH),
-    (
-        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ",
-        6,
-    ),
     (
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ",
         6,
@@ -107,7 +104,8 @@ fn static_timed_search_benchmark() {
     let mut total_time = Duration::ZERO;
 
     for fen in STATIC_TIME_SEARCH_CASES {
-        let (positions, time) = static_timed_search_benchmark_pos(&engine, fen, STATIC_TIME_MS);
+        let (positions, time) =
+            static_timed_search_benchmark_pos(&engine, fen, STATIC_TIME_MS, true);
         println!(
             "static timed search at {}ms from {} took {:.3} seconds and searched {} positions",
             STATIC_TIME_MS,
@@ -131,6 +129,27 @@ fn static_timed_search_benchmark() {
         "\n\nstatic timed search nodes per second: {:.0}, total time: {:.3} seconds, total positions: {}\n\n",
         nodes_per_second, total_seconds, total_positions
     );
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn non_quiescence_search_benchmark() {
+    let engine = TestEngine::new();
+    let (nodes, elapsed) = static_timed_search_benchmark_pos(
+        &engine,
+        DEFAULT_FEN,
+        NON_QUIESCENCE_SEARCH_TIME_MS,
+        false,
+    );
+    let elapsed_secs = elapsed.as_secs_f64();
+    let nps = nodes as f64 / elapsed_secs;
+
+    println!(
+        "\n\nnon-quiescence search: {:.0} NPS ({} nodes in {:.3} seconds)\n\n",
+        nps, nodes, elapsed_secs
+    );
+
+    assert!(nodes > 0);
 }
 
 // Returns (searched nodes, time taken).
@@ -191,10 +210,12 @@ fn static_timed_search_benchmark_pos(
     engine: &TestEngine,
     fen: &str,
     time_ms: u64,
+    quiescence: bool,
 ) -> (u64, Duration) {
     let pos = engine.position(fen);
     let mut searcher = Searcher::from(&pos);
     searcher.search_config.search_mode = SearchMode::StaticTime(time_ms);
+    searcher.search_config.quiescence = quiescence;
     searcher.search_config.log_diagnostics = false;
 
     let kill_switch = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
