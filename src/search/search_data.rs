@@ -3,8 +3,14 @@ use crate::{
     search::searcher::MAX_SEARCH_DEPTH,
 };
 
+pub const TRIANG_PV_TABLE_SIZE: usize = (MAX_SEARCH_DEPTH * (MAX_SEARCH_DEPTH + 1)) / 2;
+
 pub struct SearchData {
-    pub pv: [u32; MAX_SEARCH_DEPTH + 1], //next moves on last search's primary variation (i.e. search result), doesn't contain quiescence moves
+    // Triangular scratch/result table. The completed root PV always starts at index 0
+    // and never contains quiescence moves.
+    pub pv: [u32; TRIANG_PV_TABLE_SIZE],
+    // Start of every ply row followed by the final one-past-end table boundary.
+    pub pv_ply_indices: Vec<usize>,
     pub mate_in: Option<u32>,
     pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
     pub positions_searched: u64,      //per search
@@ -17,7 +23,8 @@ impl SearchData {
         let mut board_hash_history: Vec<u64> = Vec::with_capacity(32);
         board_hash_history.push(pos.board.zhash);
         return Self {
-            pv: [NULL_MOVE; MAX_SEARCH_DEPTH + 1],
+            pv: [NULL_MOVE; TRIANG_PV_TABLE_SIZE],
+            pv_ply_indices: get_triang_pv_ply_idx_table(1),
             mate_in: None,
             board_hash_history: board_hash_history,
             positions_searched: 0,
@@ -66,4 +73,15 @@ impl SearchData {
     pub fn reset_cumul_performance_data(&mut self) {
         self.cumul_positions_searched = 0;
     }
+}
+
+pub fn get_triang_pv_ply_idx_table(target_d: usize) -> Vec<usize> {
+    let mut pv_ply_indices: Vec<usize> = Vec::with_capacity(target_d + 1);
+    let mut cumul: usize = 0;
+    for i in (1..=target_d).rev() {
+        pv_ply_indices.push(cumul);
+        cumul += i;
+    }
+    pv_ply_indices.push(cumul);
+    return pv_ply_indices
 }
