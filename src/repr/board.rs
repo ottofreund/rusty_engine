@@ -2,7 +2,7 @@ use crate::{
     repr::{
         _move::NULL_MOVE,
         move_gen::{add_en_passant, MoveGen},
-        types::{opposite_turn, B_KING, WHITE, W_KING},
+        types::{opposite_turn, B_KING, B_KING_U, B_PAWN_U, WHITE, W_KING, W_KING_U, W_PAWN_U},
     },
     utils::zobrist::Zobrist,
 };
@@ -98,17 +98,17 @@ impl Board {
     /// Some(piece) if exists, None if no piece
     pub fn lift_piece_type_at(&self, sqr: u32, owner: u32) -> Option<u32> {
         //iterate through all piece bitboards of owner until found
-        let mut p: u32;
-        let e: u32;
+        let mut p: usize;
+        let e: usize;
         if owner == WHITE {
-            p = 0;
-            e = 6;
+            p = W_PAWN_U;
+            e = B_PAWN_U;
         } else {
-            p = 6;
-            e = 12;
+            p = B_PAWN_U;
+            e = self.pieces.len();
         }
         while p < e {
-            if self.pieces[p as usize] & (1 << sqr) != 0 {
+            if self.pieces[p] & (1 << sqr) != 0 {
                 //found
                 break;
             }
@@ -117,15 +117,15 @@ impl Board {
         if p == e {
             return None;
         } else {
-            return Some(p);
+            return Some(p as u32);
         }
     }
     ///Gets the idx of king's square for **side**.
     pub fn get_king_sqr_idx(&self, side: u32) -> u32 {
         if side == WHITE {
-            return self.pieces[5].trailing_zeros();
+            return self.pieces[W_KING_U].trailing_zeros();
         } else {
-            return self.pieces[11].trailing_zeros();
+            return self.pieces[B_KING_U].trailing_zeros();
         }
     }
 

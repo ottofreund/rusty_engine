@@ -1,4 +1,4 @@
-use crate::{repr::{board::square_to_string, types::*}, search::eval::PIECE_MATERIAL_VALUE};
+use crate::{repr::{board::square_to_string, types::*}};
 //moves are represented with 32 bit integers
 //0-5: source square
 //6-11: target square

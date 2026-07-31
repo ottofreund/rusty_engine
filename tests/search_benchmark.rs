@@ -8,6 +8,8 @@ use rusty_engine::{
 };
 use std::time::{Duration, Instant};
 
+use crate::common::{BENCH_MULTITHREADED, MULTITHREADED};
+
 const DEPTH: usize = 6;
 const CONSECUTIVE_SEARCH_REPS: usize = 2;
 const STATIC_TIME_MS: u64 = 3000;
@@ -161,7 +163,7 @@ fn search_benchmark_pos(
     reps: usize,
 ) -> (u64, Duration) {
     let mut pos = engine.position(fen);
-    let mut searcher = Searcher::from(&pos);
+    let mut searcher = Searcher::from(&pos, BENCH_MULTITHREADED);
     searcher.search_config.search_mode = SearchMode::StaticDepth(depth);
 
     let mut total_time_took = Duration::ZERO;
@@ -213,7 +215,7 @@ fn static_timed_search_benchmark_pos(
     quiescence: bool,
 ) -> (u64, Duration) {
     let pos = engine.position(fen);
-    let mut searcher = Searcher::from(&pos);
+    let mut searcher = Searcher::from(&pos, BENCH_MULTITHREADED);
     searcher.search_config.search_mode = SearchMode::StaticTime(time_ms);
     searcher.search_config.quiescence = quiescence;
     searcher.search_config.log_diagnostics = false;

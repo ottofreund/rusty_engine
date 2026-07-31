@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use rusty_engine::{
-    repr::types::{BLACK, B_KING, B_KNIGHT, B_PAWN, WHITE, W_KING, W_PAWN},
+    repr::types::{BLACK, B_KING_U, B_KNIGHT_U, B_PAWN_U, WHITE, W_KING_U, W_PAWN_U},
     search::{eval::Evaluator, table_loader::read_table_value_file},
 };
 
@@ -31,8 +31,8 @@ fn eval_uses_piece_square_values_for_white_mover() {
 
     // Put on a2 (index 8) and e2 (index 12), and one white king on e1 (index 4).
     let mut pieces = [0u64; 12];
-    pieces[W_PAWN as usize] = (1u64 << 8) | (1u64 << 12);
-    pieces[W_KING as usize] = 1u64 << 4;
+    pieces[W_PAWN_U] = (1u64 << 8) | (1u64 << 12);
+    pieces[W_KING_U] = 1u64 << 4;
 
     let pawn_table = load_table("pawn_e.txt");
     let king_table = load_table("king_e.txt");
@@ -53,7 +53,7 @@ fn eval_for_black_mover_is_negated_and_mirrored() {
     // One black knight on b8 (index 57). Black lookup mirrors the rank with sq ^ 56.
     let mut pieces = [0u64; 12];
     let knight_square = 57usize;
-    pieces[B_KNIGHT as usize] = 1u64 << knight_square;
+    pieces[B_KNIGHT_U] = 1u64 << knight_square;
 
     let knight_table = load_table("knight.txt");
     let expected = KNIGHT_MATERIAL_VALUE + knight_table[knight_square ^ 56];
@@ -68,8 +68,8 @@ fn eval_uses_late_game_tables_for_pawn_and_king() {
 
     // Choose squares where opening and endgame tables differ.
     let mut pieces = [0u64; 12];
-    pieces[W_PAWN as usize] = 1u64 << 17;
-    pieces[W_KING as usize] = 1u64 << 20;
+    pieces[W_PAWN_U] = 1u64 << 17;
+    pieces[W_KING_U] = 1u64 << 20;
 
     let pawn_open = load_table("pawn_e.txt");
     let king_open = load_table("king_e.txt");
@@ -94,10 +94,10 @@ fn eval_with_both_sides_pieces_is_consistent_for_each_mover() {
     // White: pawn on c3 (18), king on e1 (4)
     // Black: pawn on d6 (43), king on e8 (60)
     let mut pieces = [0u64; 12];
-    pieces[W_PAWN as usize] = 1u64 << 18;
-    pieces[W_KING as usize] = 1u64 << 4;
-    pieces[B_PAWN as usize] = 1u64 << 43;
-    pieces[B_KING as usize] = 1u64 << 60;
+    pieces[W_PAWN_U] = 1u64 << 18;
+    pieces[W_KING_U] = 1u64 << 4;
+    pieces[B_PAWN_U] = 1u64 << 43;
+    pieces[B_KING_U] = 1u64 << 60;
 
     let pawn_table = load_table("pawn_e.txt");
     let king_table = load_table("king_e.txt");

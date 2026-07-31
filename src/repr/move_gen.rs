@@ -20,6 +20,7 @@ pub const KNIGHT_JUMPS: [(i32, i32); 8] = [
 pub const DIAG_STEPS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, -1), (-1, 1)];
 pub const CARDINAL_STEPS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
 pub const AVG_BRANCH_FAC: usize = 35;
+const NO_ATTACKER_SENTINEL: usize = 64; //used in see
 
 const WS_CASTLING_GAP_BB: u64 = 96; //2^5 + 2^6
 const WL_CASTLING_GAP_BB: u64 = 14; //2^1 + 2^2 + 2^3
@@ -191,15 +192,17 @@ impl MoveGen {
             let opponent_horizontal_sliding: u64;
             let opponent_diagonal_sliding: u64;
             if mover == WHITE {
-                opponent_horizontal_sliding = board.pieces[9] | board.pieces[10];
-                opponent_diagonal_sliding = board.pieces[8] | board.pieces[10];
+                opponent_horizontal_sliding = board.pieces[B_ROOK_U] | board.pieces[B_QUEEN_U];
+                opponent_diagonal_sliding =
+                    board.pieces[B_BISHOP_U] | board.pieces[B_QUEEN_U];
             } else {
-                opponent_horizontal_sliding = board.pieces[3] | board.pieces[4];
-                opponent_diagonal_sliding = board.pieces[2] | board.pieces[4];
+                opponent_horizontal_sliding = board.pieces[W_ROOK_U] | board.pieces[W_QUEEN_U];
+                opponent_diagonal_sliding =
+                    board.pieces[W_BISHOP_U] | board.pieces[W_QUEEN_U];
             }
 
             let post_ep_total_occupied: u64 = board.total_occupation() ^ ((1 << init ) | (1  << target) | (1 << (board.ep_square.unwrap() as i32 + ep_offset) as u64));
-            if self.attack_bbs[W_BISHOP as usize][king_sqr_idx] & opponent_diagonal_sliding > 0 {
+            if self.attack_bbs[W_BISHOP_U][king_sqr_idx] & opponent_diagonal_sliding > 0 {
                 //check diagonal
                 let relevant_blockers_diag: u64 = self.get_relevant_blockers(king_sqr_idx, post_ep_total_occupied, false);
                 let diag_king_targets: u64 = self.get_sliding_for(king_sqr_idx, relevant_blockers_diag, false);
@@ -207,7 +210,7 @@ impl MoveGen {
                     return false;
                 }
             }
-            if self.attack_bbs[W_ROOK as usize][king_sqr_idx] & opponent_horizontal_sliding > 0 {
+            if self.attack_bbs[W_ROOK_U][king_sqr_idx] & opponent_horizontal_sliding > 0 {
                 //check cardinal
                 let relevant_blockers_cardinal: u64 = self.get_relevant_blockers(king_sqr_idx, post_ep_total_occupied, true);
                 let cardinal_king_targets: u64 = self.get_sliding_for(king_sqr_idx, relevant_blockers_cardinal, true);
@@ -245,11 +248,11 @@ impl MoveGen {
         let mut i: usize;
         let e: usize;
         if mover == WHITE {
-            i = 0;
-            e = 6;
+            i = W_PAWN_U;
+            e = B_PAWN_U;
         } else {
-            i = 6;
-            e = 12;
+            i = B_PAWN_U;
+            e = board.pieces.len();
         }
         let mut added: usize = 0;
         while i < e {
@@ -317,7 +320,7 @@ impl MoveGen {
         }
 
         let mut targets: u64 = match piece {
-            W_KNIGHT | B_KNIGHT => self.attack_bbs[1][from as usize],
+            W_KNIGHT | B_KNIGHT => self.attack_bbs[W_KNIGHT_U][from as usize],
             W_BISHOP | B_BISHOP => self.get_sliding_for(
                 from as usize,
                 self.get_relevant_blockers(
@@ -348,7 +351,7 @@ impl MoveGen {
                     false,
                 )
             }
-            W_KING | B_KING => self.attack_bbs[5][from as usize],
+            W_KING | B_KING => self.attack_bbs[W_KING_U][from as usize],
             _ => panic!("Couldn't match piece in pseudolegal_for. Reached unreachable case."),
         };
         //3.
@@ -446,19 +449,19 @@ impl MoveGen {
         //set color/direction specific vars
         if side == WHITE {
             if diag {
-                opponent_sliding = board.pieces[10] | board.pieces[8];
-                empty_sliding_from_king = self.attack_bbs[2][king_sqr_idx];
+                opponent_sliding = board.pieces[B_QUEEN_U] | board.pieces[B_BISHOP_U];
+                empty_sliding_from_king = self.attack_bbs[W_BISHOP_U][king_sqr_idx];
             } else {
-                opponent_sliding = board.pieces[10] | board.pieces[9];
-                empty_sliding_from_king = self.attack_bbs[3][king_sqr_idx];
+                opponent_sliding = board.pieces[B_QUEEN_U] | board.pieces[B_ROOK_U];
+                empty_sliding_from_king = self.attack_bbs[W_ROOK_U][king_sqr_idx];
             }
         } else {
             if diag {
-                opponent_sliding = board.pieces[4] | board.pieces[2];
-                empty_sliding_from_king = self.attack_bbs[2][king_sqr_idx];
+                opponent_sliding = board.pieces[W_QUEEN_U] | board.pieces[W_BISHOP_U];
+                empty_sliding_from_king = self.attack_bbs[W_BISHOP_U][king_sqr_idx];
             } else {
-                opponent_sliding = board.pieces[4] | board.pieces[3];
-                empty_sliding_from_king = self.attack_bbs[3][king_sqr_idx];
+                opponent_sliding = board.pieces[W_QUEEN_U] | board.pieces[W_ROOK_U];
+                empty_sliding_from_king = self.attack_bbs[W_ROOK_U][king_sqr_idx];
             }
         }
 
@@ -510,11 +513,11 @@ impl MoveGen {
                                                                                 //with sliding check we have a meta-attack behind king
                 let empty_board_slides: u64;
                 if diag {
-                    empty_board_slides = self.attack_bbs[2][pp_sqr_idx];
+                    empty_board_slides = self.attack_bbs[W_BISHOP_U][pp_sqr_idx];
                 } else {
-                    empty_board_slides = self.attack_bbs[3][pp_sqr_idx];
+                    empty_board_slides = self.attack_bbs[W_ROOK_U][pp_sqr_idx];
                 }
-                board.meta_attacks |= self.attack_bbs[5][king_sqr_idx]
+                board.meta_attacks |= self.attack_bbs[W_KING_U][king_sqr_idx]
                     & empty_board_slides
                     & !specific_rpp
                     & !(1 << king_sqr_idx);
@@ -537,11 +540,11 @@ impl MoveGen {
             let l_offset: i32;
             let r_offset: i32;
             if side == WHITE {
-                mover_pawns = board.pieces[0];
+                mover_pawns = board.pieces[W_PAWN_U];
                 l_offset = -9;
                 r_offset = -7;
             } else {
-                mover_pawns = board.pieces[6];
+                mover_pawns = board.pieces[B_PAWN_U];
                 l_offset = 7;
                 r_offset = 9;
             }
@@ -559,11 +562,11 @@ impl MoveGen {
         let mut i: usize;
         let e: usize;
         if side == WHITE {
-            i = 1;
-            e = 6;
+            i = W_KNIGHT_U;
+            e = B_PAWN_U;
         } else {
-            i = 7;
-            e = 12;
+            i = B_KNIGHT_U;
+            e = board.pieces.len();
         } //no pawns
         while i < e {
             let mut piece_bb: u64 = board.pieces[i];
@@ -611,8 +614,8 @@ fn process_square(
     //1. pawn attacks, flip bb for black corresponding (at different idx)
     let white_pawn_bb: u64 = pawn_attacks_white_for(sqr_idx);
     let black_pawn_bb: u64 = white_pawn_bb.swap_bytes();
-    attack_bbs[0][sqr_idx as usize] = white_pawn_bb;
-    attack_bbs[6][(x % 8 + (7 - y) * 8) as usize] = black_pawn_bb;
+    attack_bbs[W_PAWN_U][sqr_idx as usize] = white_pawn_bb;
+    attack_bbs[B_PAWN_U][(x % 8 + (7 - y) * 8) as usize] = black_pawn_bb;
     //2. knight attacks
     let mut bb_knight: u64 = 0;
     for jump in KNIGHT_JUMPS {
@@ -622,8 +625,8 @@ fn process_square(
             bitboard::set_square(&mut bb_knight, (target.0 % 8 + target.1 * 8) as u32);
         }
     }
-    attack_bbs[1][sqr_idx as usize] = bb_knight;
-    attack_bbs[7][sqr_idx as usize] = bb_knight;
+    attack_bbs[W_KNIGHT_U][sqr_idx as usize] = bb_knight;
+    attack_bbs[B_KNIGHT_U][sqr_idx as usize] = bb_knight;
     //3. bishop attacks
     let mut bishop_bb: u64 = 0;
     let mut king_bb: u64 = 0; //simultaneously compute king diagonals (when 1 step taken)
@@ -642,8 +645,8 @@ fn process_square(
             steps_taken += 1;
         }
     }
-    attack_bbs[2][sqr_idx as usize] = bishop_bb;
-    attack_bbs[8][sqr_idx as usize] = bishop_bb;
+    attack_bbs[W_BISHOP_U][sqr_idx as usize] = bishop_bb;
+    attack_bbs[B_BISHOP_U][sqr_idx as usize] = bishop_bb;
     //4. rook attacks
     let mut rook_bb: u64 = 0;
     //in each diag dir take steps as long as on board, simultaneously get king cardinals
@@ -661,14 +664,14 @@ fn process_square(
             steps_taken += 1;
         }
     }
-    attack_bbs[3][sqr_idx as usize] = rook_bb;
-    attack_bbs[9][sqr_idx as usize] = rook_bb;
+    attack_bbs[W_ROOK_U][sqr_idx as usize] = rook_bb;
+    attack_bbs[B_ROOK_U][sqr_idx as usize] = rook_bb;
     //5. queen attacks: bishop attacks | rook attacks
-    attack_bbs[4][sqr_idx as usize] = rook_bb | bishop_bb;
-    attack_bbs[10][sqr_idx as usize] = rook_bb | bishop_bb;
+    attack_bbs[W_QUEEN_U][sqr_idx as usize] = rook_bb | bishop_bb;
+    attack_bbs[B_QUEEN_U][sqr_idx as usize] = rook_bb | bishop_bb;
     //6. king attacks: computed already inside rook and bishop
-    attack_bbs[5][sqr_idx as usize] = king_bb;
-    attack_bbs[11][sqr_idx as usize] = king_bb;
+    attack_bbs[W_KING_U][sqr_idx as usize] = king_bb;
+    attack_bbs[B_KING_U][sqr_idx as usize] = king_bb;
     //lastly add no-edge variation for rooks and bishops
     rook_bbs_no_edges[sqr_idx as usize] = naive_rook_sliding(sqr_idx, 0, false);
     bishop_bbs_no_edges[sqr_idx as usize] = naive_bishop_sliding(sqr_idx, 0, false);
@@ -838,12 +841,12 @@ pub fn add_en_passant(
         let r_sqr: u32;
         let pawn_piece_idx: u32;
         if mover == WHITE {
-            mover_pawns = board.pieces[0];
+            mover_pawns = board.pieces[W_PAWN_U];
             l_sqr = ep_square - 9;
             r_sqr = ep_square - 7;
             pawn_piece_idx = 0;
         } else {
-            mover_pawns = board.pieces[6];
+            mover_pawns = board.pieces[B_PAWN_U];
             l_sqr = ep_square + 7;
             r_sqr = ep_square + 9;
             pawn_piece_idx = 6;
@@ -894,7 +897,7 @@ pub fn pseudolegal_pawn(
         forward = from + 8;
         forward2 = from + 16;
         pawn_start_rank = RANKS[1];
-        pawn_piece_idx = 0;
+        pawn_piece_idx = W_PAWN_U;
         enemy_occupied = board.black_occupation;
     } else {
         //for black
@@ -902,7 +905,7 @@ pub fn pseudolegal_pawn(
         forward = from - 8;
         forward2 = from.wrapping_sub(16);
         pawn_start_rank = RANKS[6];
-        pawn_piece_idx = 6;
+        pawn_piece_idx = B_PAWN_U;
         enemy_occupied = board.white_occupation;
     }
     //add attacking moves
@@ -993,12 +996,12 @@ pub fn pawn_attacked(board: &Board, side: u32) -> u64 {
     let shift_op: fn(u64, u32) -> u64;
     let mut res: u64 = 0;
     if side == WHITE {
-        pawn_occupation = board.pieces[0];
+        pawn_occupation = board.pieces[W_PAWN_U];
         left_attack_shift = 7;
         right_attack_shift = 9;
         shift_op = |x, n| x << n;
     } else {
-        pawn_occupation = board.pieces[6];
+        pawn_occupation = board.pieces[B_PAWN_U];
         left_attack_shift = 9;
         right_attack_shift = 7;
         shift_op = |x, n| x >> n;

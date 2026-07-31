@@ -7,7 +7,7 @@ use crate::{
         position::Position,
         types::NOF_PIECE_TYPES,
     }, search::{
-        eval::{Evaluator, MATE_EVAL}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table},
+        eval::{Evaluator, MATE_EVAL}, search_config::*, search_data::{self, SearchData, get_triang_pv_ply_idx_table},
     }, utils::zobrist::Zobrist,
 };
 
@@ -24,8 +24,8 @@ const EATING_MULTIPLIER: i32 = 100;
 const BASELINE_SCORE: i32 = 1000; //to avoid underflow
 
 pub struct Searcher {
-    pub positions: [Position; THREAD_COUNT],
-    pub search_data: [SearchData; THREAD_COUNT],
+    pub positions: Vec<Position>,
+    pub search_data: Vec<SearchData>,
     pub multithreaded: bool,
     pub search_config: SearchConfig,
     pub evaluator: Evaluator,
@@ -36,16 +36,24 @@ pub struct Searcher {
 //search heuristics in ordering of moves
 impl Searcher {
     pub fn import_position(&mut self, pos: &Position, board_hash_history: Option<Vec<u64>>) {
-        for i in 0..THREAD_COUNT {
-            self.positions[i] = (*pos).clone();
-        }
-        self.search_data = std::array::from_fn(|_| {
-            if let Some(bhh) = &board_hash_history {
-                return SearchData::with_board_hash_history(pos, bhh.clone());
-            } else {
-                return SearchData::new(pos);
+        if self.multithreaded {
+            for i in 0..THREAD_COUNT {
+                self.positions[i] = (*pos).clone();
+                self.search_data[i] = if let Some(bhh) = &board_hash_history {
+                    SearchData::with_board_hash_history(pos, bhh.clone())
+                } else {
+                    SearchData::new(pos)
+                };
             }
-        });
+        } else {
+            self.positions[0] = (*pos).clone();
+            if let Some(bhh) = &board_hash_history {
+                self.search_data[0] = SearchData::with_board_hash_history(pos, bhh.clone());
+            } else {
+                self.search_data[0] = SearchData::new(pos);
+            }
+        }
+        
         self.last_sync_deviates_from_pv = true;
     }
 
@@ -62,7 +70,8 @@ impl Searcher {
                 self.last_sync_deviates_from_pv
             );
         }
-        for i in 0..THREAD_COUNT {
+        let e: usize = if self.multithreaded { THREAD_COUNT } else { 1 };
+        for i in 0..e {
             self.positions[i] = (*new_pos).clone();
             if mov.is_some() && _move::is_unrepeatable(mov.unwrap()) {
                 self.search_data[i].board_hash_history.clear();
@@ -79,18 +88,21 @@ impl Searcher {
         }
     }
 
-    pub fn from(pos: &Position) -> Searcher {
-        let positions: [Position; THREAD_COUNT] = std::array::from_fn(|_| {
-            return (*pos).clone();
-        });
-        let search_data: [SearchData; THREAD_COUNT] = std::array::from_fn(|_| {
-            return SearchData::new(pos);
-        });
+    pub fn from(pos: &Position, multithreaded: bool) -> Searcher {
+        let positions: Vec<Position>;
+        let search_data: Vec<SearchData>;
+        if multithreaded {
+            positions = (0..THREAD_COUNT).map(|_| (*pos).clone()).collect();
+            search_data = (0..THREAD_COUNT).map(|_| SearchData::new(pos)).collect();
+        } else {
+            positions = vec![(*pos).clone()];
+            search_data = vec![SearchData::new(pos)];
+        }
         let search_config = SearchConfig::default();
         return Self {
             positions,
             search_data,
-            multithreaded: false,
+            multithreaded: multithreaded,
             search_config,
             evaluator: Evaluator::default(),
             last_sync_deviates_from_pv: true,
@@ -534,9 +546,7 @@ fn partial_selection_sort(move_arr_s: &mut [u32], pv_mv: u32, last_target: u32) 
             cur_v += LAST_TARGET_SCORE;
         }
         if _move::is_eating(mov) {
-            cur_v += EATING_MULTIPLIER
-                * ((_move::eaten_piece(mov).unwrap() % NOF_PIECE_TYPES) as i32
-                    - (_move::get_moved_piece(mov) % NOF_PIECE_TYPES) as i32);
+            cur_v += EATING_MULTIPLIER * (_move::eaten_piece(mov).unwrap() % NOF_PIECE_TYPES) as i32;
         }
         if cur_v > best_v {
             best_v = cur_v;

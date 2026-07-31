@@ -84,7 +84,7 @@ impl Default for CpuGame {
         let move_gen = MoveGen::init();
         let zobrist = Zobrist::default();
         let position = Position::default(&move_gen, &zobrist);
-        let searcher = Searcher::from(&position);
+        let searcher = Searcher::from(&position, false);
         Self {
             position,
             searcher,

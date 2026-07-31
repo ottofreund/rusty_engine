@@ -1,5 +1,4 @@
-use iced::event::{self, Event};
-use iced::keyboard::{self};
+use iced::event::{self};
 use iced::widget::image::Handle;
 
 use iced::widget::{button, column, container, row, stack, text, Button, Image, TextInput, pick_list};
@@ -359,7 +358,7 @@ pub fn update(state: &mut AppState, msg: Message) {
     state.sync_game_end_dialog();
     if !state.game.is_over() && state.is_cpu_turn() {
         match state.game.play_cpu_move() {
-            Ok(_) => {}
+            Ok(m) => {println!("CPU played move: {}", _move::to_string(m, true));}
             Err(_) => {}
         }
     }

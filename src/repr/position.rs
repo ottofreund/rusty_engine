@@ -6,7 +6,9 @@ use crate::{
         _move::NULL_MOVE,
         board::Board,
         move_gen::{MoveGen, AVG_BRANCH_FAC},
-        types::{BoardStateInfo, BLACK, B_PAWN, WHITE, W_PAWN},
+        types::{
+            BoardStateInfo, BLACK, B_PAWN, B_PAWN_U, B_ROOK_U, WHITE, W_PAWN, W_PAWN_U, W_ROOK_U,
+        },
     },
     utils::zobrist::Zobrist,
 };
@@ -215,21 +217,21 @@ impl Position {
                 if is_white_turn {
                     rook_from = 7;
                     rook_to = 5;
-                    rook_piece_idx = 3;
+                    rook_piece_idx = W_ROOK_U;
                 } else {
                     rook_from = 63;
                     rook_to = 61;
-                    rook_piece_idx = 9;
+                    rook_piece_idx = B_ROOK_U;
                 }
             } else {
                 if is_white_turn {
                     rook_from = 0;
                     rook_to = 3;
-                    rook_piece_idx = 3;
+                    rook_piece_idx = W_ROOK_U;
                 } else {
                     rook_from = 56;
                     rook_to = 59;
-                    rook_piece_idx = 9;
+                    rook_piece_idx = B_ROOK_U;
                 }
             }
             bitboard::clear_square(&mut self.board.pieces[rook_piece_idx], rook_from);
@@ -243,10 +245,10 @@ impl Position {
             let opponent_pawns: &mut u64;
             let offset: i32;
             if is_white_turn {
-                opponent_pawns = &mut self.board.pieces[6];
+                opponent_pawns = &mut self.board.pieces[B_PAWN_U];
                 offset = -8
             } else {
-                opponent_pawns = &mut self.board.pieces[0];
+                opponent_pawns = &mut self.board.pieces[W_PAWN_U];
                 offset = 8;
             }
             let eating_sqr: u32 = (self
@@ -433,21 +435,21 @@ impl Position {
                 if unmaking_white_move {
                     rook_from = 7;
                     rook_to = 5;
-                    rook_piece_idx = 3;
+                    rook_piece_idx = W_ROOK_U;
                 } else {
                     rook_from = 63;
                     rook_to = 61;
-                    rook_piece_idx = 9;
+                    rook_piece_idx = B_ROOK_U;
                 }
             } else {
                 if unmaking_white_move {
                     rook_from = 0;
                     rook_to = 3;
-                    rook_piece_idx = 3;
+                    rook_piece_idx = W_ROOK_U;
                 } else {
                     rook_from = 56;
                     rook_to = 59;
-                    rook_piece_idx = 9;
+                    rook_piece_idx = B_ROOK_U;
                 }
             }
             bitboard::clear_square(&mut self.board.pieces[rook_piece_idx], rook_to);
@@ -461,10 +463,10 @@ impl Position {
             let opponent_pawns: &mut u64;
             let offset: i32;
             if unmaking_white_move {
-                opponent_pawns = &mut self.board.pieces[6];
+                opponent_pawns = &mut self.board.pieces[B_PAWN_U];
                 offset = -8
             } else {
-                opponent_pawns = &mut self.board.pieces[0];
+                opponent_pawns = &mut self.board.pieces[W_PAWN_U];
                 offset = 8;
             }
             let eating_sqr: u32 = (to as i32 + offset) as u32;

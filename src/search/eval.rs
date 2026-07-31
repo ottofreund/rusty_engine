@@ -16,7 +16,7 @@ const TABLE_SOURCES: [&str; 8] = [
     include_str!("../../assets/piece_square_tables/king_l.txt"),
 ];
 
-pub const PIECE_MATERIAL_VALUE: [i32; 6] = [100, 320, 330, 500, 900, 20000];
+pub const PIECE_MATERIAL_VALUE: [i32; 12] = [100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000];
 
 //pst: piece square table
 pub struct Evaluator {
@@ -37,20 +37,21 @@ impl Evaluator {
     /// mover is only required for negamax algorithm's sake
     pub fn eval(&self, pieces: [u64; 12], mover: u32, is_late_game: bool) -> i32 {
         let mut v: i32 = 0;
-        for p in 0usize..12 {
+        let piece_types_per_color: usize = NOF_PIECE_TYPES as usize;
+        for p in W_PAWN_U..=B_KING_U {
             let mut p_bb: u64 = pieces[p];
             if p_bb == 0 {
                 continue;
             }
-            let v_table: &Vec<i32> = self.get_table(p % 6, is_late_game);
-            if p < 6 {
+            let v_table: &Vec<i32> = self.get_table(p % piece_types_per_color, is_late_game);
+            if p < piece_types_per_color {
                 while p_bb > 0 {
                     v += PIECE_MATERIAL_VALUE[p];
                     v += v_table[bitboard::pop_lsb(&mut p_bb) as usize];
                 }
             } else {
                 while p_bb > 0 {
-                    v -= PIECE_MATERIAL_VALUE[p - 6];
+                    v -= PIECE_MATERIAL_VALUE[p];
                     v -= v_table[bitboard::pop_lsb(&mut p_bb) as usize ^ 56];
                 }
             }

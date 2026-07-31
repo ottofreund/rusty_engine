@@ -8,6 +8,9 @@ use rusty_engine::{
     },
 };
 
+pub const MULTITHREADED: bool = false;
+pub const BENCH_MULTITHREADED: bool = false;
+
 pub struct TestEngine {
     pub move_gen: MoveGen,
     pub zobrist: Zobrist,

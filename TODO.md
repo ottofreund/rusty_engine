@@ -13,6 +13,8 @@
 
 
 Others:
+- Don't apply SEE to EP, and promotions. Also don't allow king take if other still has attackers
+- EP accurate hashing in search too (distinguish legal EP move available from just double push)
 - Try out different RNG seeds for Zobrist, can affect a lot
 - Previous PV move is still ranked high in ordering even if out of PV line in search, probably not a huge deal but worth to check
 - UCI ponder for GUI

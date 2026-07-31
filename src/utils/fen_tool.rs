@@ -1,7 +1,9 @@
 use crate::repr::bitboard;
 use crate::repr::board::Board;
 use crate::repr::move_gen::MoveGen;
-use crate::repr::types::{B_KING, B_PAWN, B_ROOK, BLACK, W_KING, W_PAWN, W_ROOK, WHITE};
+use crate::repr::types::{
+    BLACK, B_KING_U, B_PAWN_U, B_ROOK_U, WHITE, W_KING_U, W_PAWN_U, W_ROOK_U,
+};
 use crate::utils::zobrist::Zobrist;
 
 const VALID_PIECE_CHARS: [char; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
@@ -122,28 +124,28 @@ fn is_legal_piece_row(row: &str) -> bool {
 
 
 fn castling_pieces_on_right_squares(castling_str: &str, board: &Board) -> bool {
-    if castling_str.contains('K') && 
-        (  !bitboard::contains_square(board.pieces[W_KING as usize], 4) 
-        || !bitboard::contains_square(board.pieces[W_ROOK as usize], 7)
-    ) {
+    if castling_str.contains('K')
+        && (!bitboard::contains_square(board.pieces[W_KING_U], 4)
+            || !bitboard::contains_square(board.pieces[W_ROOK_U], 7))
+    {
         return false;
     }
-    if castling_str.contains('Q') && 
-        (  !bitboard::contains_square(board.pieces[W_KING as usize], 4) 
-        || !bitboard::contains_square(board.pieces[W_ROOK as usize], 0)
-    ) {
+    if castling_str.contains('Q')
+        && (!bitboard::contains_square(board.pieces[W_KING_U], 4)
+            || !bitboard::contains_square(board.pieces[W_ROOK_U], 0))
+    {
         return false;
     }
-    if castling_str.contains('k') && 
-        (  !bitboard::contains_square(board.pieces[B_KING as usize], 60) 
-        || !bitboard::contains_square(board.pieces[B_ROOK as usize], 63)
-    ) {
+    if castling_str.contains('k')
+        && (!bitboard::contains_square(board.pieces[B_KING_U], 60)
+            || !bitboard::contains_square(board.pieces[B_ROOK_U], 63))
+    {
         return false;
     }
-    if castling_str.contains('q') && 
-        (  !bitboard::contains_square(board.pieces[B_KING as usize], 60) 
-        || !bitboard::contains_square(board.pieces[B_ROOK as usize], 56)
-    ) {
+    if castling_str.contains('q')
+        && (!bitboard::contains_square(board.pieces[B_KING_U], 60)
+            || !bitboard::contains_square(board.pieces[B_ROOK_U], 56))
+    {
         return false;
     }
     return true;
@@ -154,12 +156,12 @@ fn ep_square_consistent_with_pieces(ep_square: Option<u32>, board: &Board) -> bo
         let rank = square / 8;
         if rank == 2 {
             //white pawn must be on rank 4
-            if !bitboard::contains_square(board.pieces[W_PAWN as usize], square + 8) {
+            if !bitboard::contains_square(board.pieces[W_PAWN_U], square + 8) {
                 return false;
             }
         } else if rank == 5 {
             //black pawn must be on rank 5
-            if !bitboard::contains_square(board.pieces[B_PAWN as usize], square - 8) {
+            if !bitboard::contains_square(board.pieces[B_PAWN_U], square - 8) {
                 return false;
             }
         } else {

@@ -15,7 +15,6 @@ pub enum ArbiterCommand {
 pub enum EngineCommand {
     ID(String),
     BestMove(String, Option<String>),
-    Option(OptionCommand),
 }
 
 impl EngineCommand {
@@ -115,9 +114,4 @@ impl PositionCommand {
         return true;
     }
 
-}
-
-struct OptionCommand {
-    pub option: _Option,
-    pub default_value: String,
 }

@@ -13,11 +13,13 @@ use rusty_engine::{
 };
 use std::sync::{atomic::AtomicBool, Arc};
 
+use crate::common::MULTITHREADED;
+
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
 
 fn search_static_depth(engine: &TestEngine, fen: &str, depth: usize, quiescence: bool) -> Searcher {
     let pos = engine.position(fen);
-    let mut searcher = Searcher::from(&pos);
+    let mut searcher = Searcher::from(&pos, MULTITHREADED);
     searcher.search_config.search_mode = SearchMode::StaticDepth(depth);
     searcher.search_config.quiescence = quiescence;
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
@@ -116,7 +118,7 @@ fn mate_in_one_terminates_static_root_pv() {
         })
         .expect("position has a non-mating move");
 
-    let mut searcher = Searcher::from(&start);
+    let mut searcher = Searcher::from(&start, MULTITHREADED);
     searcher.search_config.search_mode = SearchMode::StaticDepth(2);
     searcher.search_config.quiescence = false;
     searcher.search_data[0].pv[0] = seeded_non_mate;
@@ -148,7 +150,7 @@ fn mate_in_one_terminates_static_root_pv() {
 fn consecutive_static_search_syncs_exact_pv_tail() {
     let engine = TestEngine::new();
     let mut pos = engine.position(DEFAULT_FEN);
-    let mut searcher = Searcher::from(&pos);
+    let mut searcher = Searcher::from(&pos, MULTITHREADED);
     searcher.search_config.search_mode = SearchMode::StaticDepth(3);
     searcher.search_config.quiescence = false;
 
@@ -179,7 +181,7 @@ fn consecutive_static_search_syncs_exact_pv_tail() {
 fn static_to_timed_abort_preserves_completed_pv() {
     let engine = TestEngine::new();
     let start = engine.position(DEFAULT_FEN);
-    let mut searcher = Searcher::from(&start);
+    let mut searcher = Searcher::from(&start, MULTITHREADED);
     searcher.search_config.quiescence = false;
     searcher.search_config.search_mode = SearchMode::StaticDepth(2);
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
@@ -206,7 +208,7 @@ fn static_to_timed_abort_preserves_completed_pv() {
 fn shallower_static_depth_reuses_deeper_completed_pv() {
     let engine = TestEngine::new();
     let start = engine.position(DEFAULT_FEN);
-    let mut searcher = Searcher::from(&start);
+    let mut searcher = Searcher::from(&start, MULTITHREADED);
     searcher.search_config.quiescence = false;
     searcher.search_config.search_mode = SearchMode::StaticDepth(3);
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
@@ -243,7 +245,7 @@ fn static_depth_rejects_depth_above_table_capacity() {
 fn static_depth_zero_preserves_existing_pv() {
     let engine = TestEngine::new();
     let start = engine.position(DEFAULT_FEN);
-    let mut searcher = Searcher::from(&start);
+    let mut searcher = Searcher::from(&start, MULTITHREADED);
     searcher.search_config.quiescence = false;
     searcher.search_config.search_mode = SearchMode::StaticDepth(2);
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);

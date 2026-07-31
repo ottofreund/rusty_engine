@@ -126,7 +126,7 @@ impl Default for Game {
         let move_gen: MoveGen = MoveGen::init();
         let zobrist: Zobrist = Zobrist::default();
         let position: Position = Position::default(&move_gen, &zobrist);
-        let searcher: Searcher = Searcher::from(&position);
+        let searcher: Searcher = Searcher::from(&position, false);
         let board_history: Vec<Board> = vec![position.board.clone()];
 
         return Self {

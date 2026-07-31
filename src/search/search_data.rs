@@ -1,6 +1,5 @@
 use crate::{
-    repr::{_move::NULL_MOVE, position::Position},
-    search::searcher::MAX_SEARCH_DEPTH,
+    repr::{_move::NULL_MOVE, position::Position}, search::{searcher::MAX_SEARCH_DEPTH, see::SeeWorker},
 };
 
 pub const TRIANG_PV_TABLE_SIZE: usize = (MAX_SEARCH_DEPTH * (MAX_SEARCH_DEPTH + 1)) / 2;
@@ -13,6 +12,7 @@ pub struct SearchData {
     pub pv_ply_indices: Vec<usize>,
     pub mate_in: Option<u32>,
     pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
+    pub see_helper: SeeWorker,
     pub positions_searched: u64,      //per search
     pub ab_cutoffs: u64,
     pub cumul_positions_searched: u64,
@@ -27,6 +27,7 @@ impl SearchData {
             pv_ply_indices: get_triang_pv_ply_idx_table(1),
             mate_in: None,
             board_hash_history: board_hash_history,
+            see_helper: SeeWorker::default(),
             positions_searched: 0,
             ab_cutoffs: 0,
             cumul_positions_searched: 0,

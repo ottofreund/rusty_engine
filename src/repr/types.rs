@@ -11,10 +11,24 @@ pub const B_ROOK: u32 = 9;
 pub const B_QUEEN: u32 = 10;
 pub const B_KING: u32 = 11;
 
+pub const W_PAWN_U: usize = 0;
+pub const W_KNIGHT_U: usize = 1;
+pub const W_BISHOP_U: usize = 2;
+pub const W_ROOK_U: usize = 3;
+pub const W_QUEEN_U: usize = 4;
+pub const W_KING_U: usize = 5;
+pub const B_PAWN_U: usize = 6;
+pub const B_KNIGHT_U: usize = 7;
+pub const B_BISHOP_U: usize = 8;
+pub const B_ROOK_U: usize = 9;
+pub const B_QUEEN_U: usize = 10;
+pub const B_KING_U: usize = 11;
+
 pub const WHITE: u32 = 0;
 pub const BLACK: u32 = 1;
 
 pub const NOF_PIECE_TYPES: u32 = 6;
+pub const NOF_PIECE_TYPES_U: usize = 6;
 
 pub const MAX_PSEUDO_MOVES_IN_POS: usize = 512; //approximate power of two
 

@@ -1,4 +1,5 @@
 use crate::repr::move_gen::{self, naive_bishop_sliding, naive_rook_sliding};
+use crate::repr::types::{W_BISHOP_U, W_ROOK_U};
 use rand::prelude::*;
 ///Contains magically indexed precomputed slide_bbs and is associated with the methods and data needed to compute them
 ///Total size roughly a megabyte
@@ -34,10 +35,10 @@ impl MagicBitboard {
         for sqr in 0..64 {
             rook_sqr_offset[sqr] = cur_rook_offset;
             bishop_sqr_offset[sqr] = cur_bishop_offset;
-            let rook_empty_board_attack_bb: u64 = empty_board_attack_bbs[3][sqr];
+            let rook_empty_board_attack_bb: u64 = empty_board_attack_bbs[W_ROOK_U][sqr];
             let rook_empty_board_attack_bb_no_edges: u64 =
                 rook_empty_board_attack_bbs_no_edges[sqr];
-            let bishop_empty_board_attack_bb: u64 = empty_board_attack_bbs[2][sqr];
+            let bishop_empty_board_attack_bb: u64 = empty_board_attack_bbs[W_BISHOP_U][sqr];
             let bishop_empty_board_attack_bb_no_edges: u64 =
                 bishop_empty_board_attack_bbs_no_edges[sqr];
             //we don't want edges here with the block masks, lookups are done with relevant blocker bitboards

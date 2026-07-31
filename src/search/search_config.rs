@@ -1,5 +1,4 @@
-const DEFAULT_STATIC_TIME: f32 = 2000.0;
-const DEFAULT_STATIC_DEPTH: usize = 8;
+const DEFAULT_STATIC_TIME: u64 = 5000;
 
 const SEARCH_RESPONSE_MARGIN: u64 = 50; //ms
 
@@ -14,7 +13,7 @@ pub struct SearchConfig {
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
-            search_mode: SearchMode::StaticTime(5000),
+            search_mode: SearchMode::StaticTime(DEFAULT_STATIC_TIME),
             quiescence: true,
             log_diagnostics: false,
         }

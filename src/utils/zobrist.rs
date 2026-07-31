@@ -3,7 +3,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::repr::bitboard;
 use crate::repr::board::Board;
-use crate::repr::types::{BLACK, NOF_PIECE_TYPES};
+use crate::repr::types::{BLACK, B_PAWN_U, B_ROOK_U, NOF_PIECE_TYPES, W_PAWN_U, W_ROOK_U};
 
 const PIECE_RANDS_LEN: usize = NOF_PIECE_TYPES as usize * 2 * 64;
 const NOF_SQUARES: usize = 64;
@@ -100,21 +100,21 @@ impl Zobrist {
                 if is_white_turn {
                     rook_from = 7;
                     rook_to = 5;
-                    rook_piece_idx = 3;
+                    rook_piece_idx = W_ROOK_U;
                 } else {
                     rook_from = 63;
                     rook_to = 61;
-                    rook_piece_idx = 9;
+                    rook_piece_idx = B_ROOK_U;
                 }
             } else {
                 if is_white_turn {
                     rook_from = 0;
                     rook_to = 3;
-                    rook_piece_idx = 3;
+                    rook_piece_idx = W_ROOK_U;
                 } else {
                     rook_from = 56;
                     rook_to = 59;
-                    rook_piece_idx = 9;
+                    rook_piece_idx = B_ROOK_U;
                 }
             }
             new ^= self.piece_rands[rook_piece_idx * NOF_SQUARES + rook_from];
@@ -139,10 +139,10 @@ impl Zobrist {
             let opponent_pawn_idx: usize;
             let offset: usize;
             if is_white_turn {
-                opponent_pawn_idx = 6;
+                opponent_pawn_idx = B_PAWN_U;
                 offset = 4 * ROW_LEN
             } else {
-                opponent_pawn_idx = 0;
+                opponent_pawn_idx = W_PAWN_U;
                 offset = 3 * ROW_LEN;
             }
             let eating_sqr: usize =
@@ -211,21 +211,21 @@ impl Zobrist {
                 if is_white_turn {
                     rook_from = 7;
                     rook_to = 5;
-                    rook_piece_idx = 3;
+                    rook_piece_idx = W_ROOK_U;
                 } else {
                     rook_from = 63;
                     rook_to = 61;
-                    rook_piece_idx = 9;
+                    rook_piece_idx = B_ROOK_U;
                 }
             } else {
                 if is_white_turn {
                     rook_from = 0;
                     rook_to = 3;
-                    rook_piece_idx = 3;
+                    rook_piece_idx = W_ROOK_U;
                 } else {
                     rook_from = 56;
                     rook_to = 59;
-                    rook_piece_idx = 9;
+                    rook_piece_idx = B_ROOK_U;
                 }
             }
 
@@ -251,10 +251,10 @@ impl Zobrist {
             let offset: usize;
 
             if is_white_turn {
-                opponent_pawn_idx = 6;
+                opponent_pawn_idx = B_PAWN_U;
                 offset = 4 * ROW_LEN;
             } else {
-                opponent_pawn_idx = 0;
+                opponent_pawn_idx = W_PAWN_U;
                 offset = 3 * ROW_LEN;
             }
 
