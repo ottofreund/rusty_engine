@@ -8,6 +8,7 @@ pub struct SearchConfig {
     pub search_mode: SearchMode,
     pub quiescence: bool,
     pub log_diagnostics: bool,
+    pub log_uci_diagnostics: bool,
 }
 
 impl Default for SearchConfig {
@@ -16,6 +17,7 @@ impl Default for SearchConfig {
             search_mode: SearchMode::StaticTime(DEFAULT_STATIC_TIME),
             quiescence: true,
             log_diagnostics: false,
+            log_uci_diagnostics: true,
         }
     }
 }
@@ -27,6 +29,7 @@ impl SearchConfig {
             search_mode: SearchMode::StaticDepth(d),
             quiescence: true,
             log_diagnostics: false,
+            log_uci_diagnostics: true,
         }
     }
 

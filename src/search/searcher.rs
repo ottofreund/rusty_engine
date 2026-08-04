@@ -166,6 +166,7 @@ impl Searcher {
             }
 
             search_data.positions_searched += 1;
+            search_data.sel_depth = max(search_data.sel_depth, d);
             let mut eval: i32 = EVAL_INIT;
             let (s, e) = pos.search_move_bounds();
             if s == e {
@@ -279,18 +280,10 @@ impl Searcher {
                 .position(|mov| *mov == NULL_MOVE)
                 .unwrap_or(d);
 
-            if self.search_config.log_diagnostics {
-                println!("at depth: {}, eval: {}", d, eval);
-                search_data.log_performance();
+            if self.search_config.log_uci_diagnostics {
+                println!("info depth {d} seldepth {} score cp {eval} nodes {} pv {}", search_data.sel_depth, search_data.cumul_positions_searched, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" "));
             }
             search_data.reset_temp_performance_data();
-        }
-
-        if self.search_config.log_diagnostics {
-            println!(
-                "got pv: {:?}",
-                search_data.pv.map(|m| _move::to_string(m, true))
-            );
         }
 
         return;
@@ -339,6 +332,8 @@ impl Searcher {
             }
 
             search_data.positions_searched += 1;
+            search_data.sel_depth = max(search_data.sel_depth, d);
+
             let mut eval: i32 = EVAL_INIT;
             let (s, e) = pos.search_move_bounds();
             if s == e {
@@ -463,15 +458,10 @@ impl Searcher {
                 .position(|mov| *mov == NULL_MOVE)
                 .unwrap_or(d);
 
-            if self.search_config.log_diagnostics {
-                println!("at depth: {}, eval: {}", d, eval);
-                search_data.log_performance();
+            if self.search_config.log_uci_diagnostics {
+                println!("info depth {d} seldepth {} score cp {eval} nodes {} pv {}", search_data.sel_depth, search_data.cumul_positions_searched, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" "));
             }
             search_data.reset_temp_performance_data();
-        }
-
-        if self.search_config.log_diagnostics {
-            println!("got pv: {:?}", search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)));
         }
 
         return;

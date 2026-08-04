@@ -20,7 +20,6 @@ pub const KNIGHT_JUMPS: [(i32, i32); 8] = [
 pub const DIAG_STEPS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, -1), (-1, 1)];
 pub const CARDINAL_STEPS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
 pub const AVG_BRANCH_FAC: usize = 35;
-const NO_ATTACKER_SENTINEL: usize = 64; //used in see
 
 const WS_CASTLING_GAP_BB: u64 = 96; //2^5 + 2^6
 const WL_CASTLING_GAP_BB: u64 = 14; //2^1 + 2^2 + 2^3

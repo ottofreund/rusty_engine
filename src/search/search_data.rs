@@ -13,8 +13,11 @@ pub struct SearchData {
     pub mate_in: Option<u32>,
     pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
     pub see_helper: SeeWorker,
-    pub positions_searched: u64,      //per search
+    //per search data
+    pub positions_searched: u64,
     pub ab_cutoffs: u64,
+    pub sel_depth: usize,
+    //cumulative data
     pub cumul_positions_searched: u64,
 }
 
@@ -30,6 +33,7 @@ impl SearchData {
             see_helper: SeeWorker::default(),
             positions_searched: 0,
             ab_cutoffs: 0,
+            sel_depth: 0,
             cumul_positions_searched: 0,
         };
     }
@@ -69,6 +73,7 @@ impl SearchData {
     pub fn reset_temp_performance_data(&mut self) {
         self.positions_searched = 0;
         self.ab_cutoffs = 0;
+        self.sel_depth = 0;
     }
 
     pub fn reset_cumul_performance_data(&mut self) {
