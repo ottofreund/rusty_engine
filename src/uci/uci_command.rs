@@ -1,4 +1,6 @@
-use crate::{repr::_move, utils::fen_tool::DEFAULT_FEN};
+use crate::{
+    repr::_move, search::searcher::MAX_SEARCH_DEPTH, utils::fen_tool::DEFAULT_FEN,
+};
 
 pub enum ArbiterCommand {
     UCI,
@@ -49,17 +51,21 @@ pub struct GoCommand {
     pub winc: Option<u64>,
     pub binc: Option<u64>,
     pub movetime: Option<u64>,
+    pub depth: Option<usize>,
 }
 
 impl GoCommand {
     pub fn is_valid(&self) -> bool {
-        if self.wtime.is_some() && self.btime.is_some() {
-            return true;
-        }
-        if self.movetime.is_some() {
-            return true;
-        }
-        return false;
+        let has_clock = self.wtime.is_some() && self.btime.is_some();
+        let has_partial_clock = self.wtime.is_some() != self.btime.is_some();
+        let mode_count =
+            has_clock as u8 + self.movetime.is_some() as u8 + self.depth.is_some() as u8;
+
+        !has_partial_clock
+            && mode_count == 1
+            && self
+                .depth
+                .map_or(true, |depth| depth <= MAX_SEARCH_DEPTH)
     }
 
     pub fn new_clock_tc(ponder: bool, wtime: u64, btime: u64, winc: u64, binc: u64) -> Self {
@@ -70,6 +76,7 @@ impl GoCommand {
             winc: Some(winc),
             binc: Some(binc),
             movetime: None,
+            depth: None,
         }
     }
 
@@ -81,6 +88,19 @@ impl GoCommand {
             winc: None,
             binc: None,
             movetime: Some(movetime),
+            depth: None,
+        }
+    }
+
+    pub fn new_depth_tc(ponder: bool, depth: usize) -> Self {
+        Self {
+            ponder: ponder,
+            wtime: None,
+            btime: None,
+            winc: None,
+            binc: None,
+            movetime: None,
+            depth: Some(depth),
         }
     }
 }
