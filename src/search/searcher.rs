@@ -2,12 +2,9 @@ use std::{cmp::max, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}, time::
 
 use crate::{
     repr::{
-        _move::{self, *},
-        move_gen::MoveGen,
-        position::Position,
-        types::NOF_PIECE_TYPES,
+        _move::{self, *}, board::Board, move_gen::MoveGen, position::Position,
     }, search::{
-        eval::{Evaluator, MATE_EVAL}, search_config::*, search_data::{self, SearchData, get_triang_pv_ply_idx_table},
+        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table},
     }, utils::zobrist::Zobrist,
 };
 
@@ -18,10 +15,10 @@ const BETA_INIT: i32 = 1_000_000_000;
 const EVAL_INIT: i32 = -1_000_000_000;
 const EVAL_QUIT: i32 = 555_555_555;
 
-const PROMOTION_SCORE: i32 = 1_000_000;
-const LAST_TARGET_SCORE: i32 = 10_000;
-const EATING_MULTIPLIER: i32 = 100;
-const BASELINE_SCORE: i32 = 1000; //to avoid underflow
+const PROMOTION_SCORE: i32 = 1_000;
+const EATING_MULTIPLIER: i32 = 7;
+const NON_CAPTURE_BONUS: i32 = 10_000;
+const GOOD_CAPTURE_BONUS: i32 = 100_000;
 
 pub struct Searcher {
     pub positions: Vec<Position>,
@@ -153,6 +150,7 @@ impl Searcher {
             beta: i32,
             mut in_quiescence: bool,
             use_quiescence: bool,
+            mut follows_prev_pv: bool,
             prev_pv: &[u32],
             pos: &mut Position,
             evaluator: &Evaluator,
@@ -197,14 +195,18 @@ impl Searcher {
                 in_quiescence = true;
             }
 
+            let mut only_bad_captures_left: Option<bool> = None;
+
             for i in s..e {
-                let pv_mv: u32 = if d < prev_pv.len() {
+                let pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { // i == s because pv always gets picked first after which not available
                     prev_pv[d]
                 } else {
                     NULL_MOVE
                 };
                 let mov: u32 =
-                    partial_selection_sort(&mut pos.move_arr[i..e], pv_mv, pos.last_target);
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], pv_mv, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+
+                follows_prev_pv = follows_prev_pv && mov == pv_mv;
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
@@ -215,6 +217,7 @@ impl Searcher {
                     -alpha,
                     in_quiescence,
                     use_quiescence,
+                    follows_prev_pv,
                     prev_pv,
                     pos,
                     evaluator,
@@ -266,6 +269,7 @@ impl Searcher {
                 BETA_INIT,
                 false,
                 self.search_config.quiescence,
+                true,
                 &prev_pv,
                 pos,
                 &self.evaluator,
@@ -307,6 +311,7 @@ impl Searcher {
             beta: i32,
             mut in_quiescence: bool,
             use_quiescence: bool,
+            mut follows_prev_pv: bool,
             prev_pv: &[u32],
             pos: &mut Position,
             evaluator: &Evaluator,
@@ -364,10 +369,14 @@ impl Searcher {
                 in_quiescence = true;
             }
 
+            let mut only_bad_captures_left: Option<bool> = None;
+
             for i in s..e {
-                let pv_mv: u32 = if d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
+                let pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv[d] } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
                 let mov: u32 =
-                    partial_selection_sort(&mut pos.move_arr[i..e], pv_mv, pos.last_target);
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], pv_mv, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+
+                follows_prev_pv = follows_prev_pv && mov == pv_mv;
 
                 //let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
 
@@ -382,6 +391,7 @@ impl Searcher {
                     -alpha,
                     in_quiescence,
                     use_quiescence,
+                    follows_prev_pv,
                     prev_pv,
                     pos,
                     evaluator,
@@ -438,6 +448,7 @@ impl Searcher {
                 BETA_INIT,
                 false,
                 self.search_config.quiescence,
+                true,
                 &prev_pv,
                 pos,
                 &self.evaluator,
@@ -511,43 +522,87 @@ impl Searcher {
         }
         return i;
     }
-}
 
-//k == 1, so "selection pick", in place
-fn partial_selection_sort(move_arr_s: &mut [u32], pv_mv: u32, last_target: u32) -> u32 {
-    if move_arr_s.len() == 0 {
-        return NULL_MOVE;
+    //k == 1, so "selection pick", in place
+    //only_bad_captures_left is on all calls after first bad capture is returned
+    fn partial_selection_sort(
+        move_arr_s: &mut [u32],
+        pv_mv: u32,
+        only_bad_captures_left: &mut Option<bool>,
+        move_gen: &MoveGen,
+        search_data: &mut SearchData,
+        board: &Board
+    ) -> u32 {
+        let mut best_i: usize = usize::MAX;
+        if pv_mv != NULL_MOVE {
+            let idx = move_arr_s.iter().position(|m| *m == pv_mv).expect("pv move was some but not generated");
+            best_i = idx;
+        } else { //no pv move available
+            //non-dominating is non-captures if !*only_bad_captures_left, else if *only_bad_captures_left then only bad captures.
+            //If only_bad_captures_left == None, then non-dominating are both non-captures and bad captures
+            let mut best_v: i32 = i32::MIN;
+            let mut found_dominating: bool = false;
+            let mut non_capture_count: usize = 0;
+
+            for i in 0..move_arr_s.len() {
+                let mov: u32 = move_arr_s[i];
+                let mut cur_v: i32 = 0;
+                if _move::is_eating(mov) {
+                    if _move::is_negative_see(mov) {
+                        if let Some(only_bad_left) = only_bad_captures_left {
+                            if *only_bad_left {
+                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                            } //else quiets left so ignore bad capture
+                        } else { //quiets may remain but we don't know yet
+                            cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                        }
+                    } else if _move::is_positive_see(mov) {
+                        cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                        found_dominating = true;
+                    } else { //unevaluated capture
+                        let is_good_capture: bool =
+                            search_data.see_helper.see_positive(mov, board, move_gen);
+
+                        if is_good_capture {
+                            move_arr_s[i] = _move::with_positive_see(mov);
+                            cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                            found_dominating = true;
+                        } else {
+                            move_arr_s[i] = _move::with_negative_see(mov);
+                            if let Some(only_bad_left) = only_bad_captures_left {
+                                if *only_bad_left {
+                                    cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                                } //else quiets left so ignore bad capture
+                            } else { //quiets may remain but we don't know yet
+                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                            }
+                        }
+                    }
+                } else if !found_dominating { //non-capture still candidate
+                    //TODO history heuristic
+                    if _move::is_promotion(mov) {
+                        cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
+                    }
+                    cur_v += NON_CAPTURE_BONUS; //give edge over bad captures
+                    non_capture_count += 1;
+                } else {
+                    non_capture_count += 1;
+                }
+
+                if cur_v > best_v {
+                    best_v = cur_v;
+                    best_i = i;
+                }
+            }
+
+            if non_capture_count == 0 {
+                *only_bad_captures_left = Some(true);
+            }
+        }
+
+        move_arr_s.swap(0, best_i);
+        move_arr_s[0] = _move::with_see_cleared(move_arr_s[0]);
+        return move_arr_s[0];
     }
-    let mut best_v: i32 = BASELINE_SCORE;
-    let mut best_i: usize = 0;
-    let mut best_m: u32 = NULL_MOVE;
-    for i in 0..move_arr_s.len() {
-        let mut cur_v: i32 = BASELINE_SCORE;
-        let mov: u32 = move_arr_s[i];
-        if mov == pv_mv {
-            best_i = i;
-            best_m = mov;
-            break;
-        }
-        if _move::is_promotion(mov) {
-            cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
-        }
-        if _move::get_target(mov) == last_target {
-            cur_v += LAST_TARGET_SCORE;
-        }
-        if _move::is_eating(mov) {
-            cur_v += EATING_MULTIPLIER * (_move::eaten_piece(mov).unwrap() % NOF_PIECE_TYPES) as i32;
-        }
-        if cur_v > best_v {
-            best_v = cur_v;
-            best_i = i;
-            best_m = mov;
-        }
-    }
-    if best_m != NULL_MOVE {
-        let t: u32 = move_arr_s[0];
-        move_arr_s[0] = best_m;
-        move_arr_s[best_i] = t;
-    }
-    return move_arr_s[0];
+
 }

@@ -6,6 +6,7 @@
 - SEE in quiescence and maybe elsewhere too
 - Futility pruning, should be easy gains
 - Transposition table
+- History heuristic for sorting quiets. Should be easy gains
 
 - Tapered eval
 - Draw by insufficient material

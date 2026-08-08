@@ -5,7 +5,9 @@ use crate::{repr::{board::square_to_string, types::*}};
 //12: is eating move?
 //13: is pawn double push?
 //14-17: eaten piece
-//18: free
+//18: see is negative?
+//19: see is positive?
+//20: free
 //21: is promotion?
 //22-25: promotion piece
 //26-29: moved piece
@@ -15,13 +17,14 @@ use crate::{repr::{board::square_to_string, types::*}};
 
 pub const NULL_MOVE: u32 = u32::MAX;
 //castling moves:
-pub const WHITE_SHORT: u32 = 2483159428; //1 0010100 0000 0 0 1 0000 0 000110 000100
-pub const WHITE_LONG: u32 = 2483290244; //1 0010100 0000 0 1 0 0000 0 000010 000100
-pub const BLACK_SHORT: u32 = 738332604; //0 0101100 0000 0 0 1 0000 0 111110 111100
-pub const BLACK_LONG: u32 = 738463420; //0 0101100 0000 0 1 0 0000 0 111010 111100
+pub const WHITE_SHORT: u32 = 2483028356; //1 0 0101 0000 0 00 0 0000 0 0 000110 000100
+pub const WHITE_LONG: u32 = 2483028100;  //1 0 0101 0000 0 00 0 0000 0 0 000010 000100
+pub const BLACK_SHORT: u32 = 738201532;  //0 0 1011 0000 0 00 0 0000 0 0 111110 111100
+pub const BLACK_LONG: u32 = 738201276;   //0 0 1011 0000 0 00 0 0000 0 0 111010 111100
 
 ///Encode move to u32 <br>
 ///taken piece idx is found and added after checking pseudolegal is legal to save compute
+#[inline]
 pub fn create(from: u32, to: u32, is_take: bool, mover: u32, moved_piece: u32) -> u32 {
     let mut res: u32 = from;
     res = res | (to << 6);
@@ -35,6 +38,7 @@ pub fn create(from: u32, to: u32, is_take: bool, mover: u32, moved_piece: u32) -
     return res;
 }
 ///Castling move creator
+#[inline]
 pub fn create_castling(mover: u32, is_short: bool) -> u32 {
     if mover == WHITE {
         if is_short {
@@ -52,16 +56,19 @@ pub fn create_castling(mover: u32, is_short: bool) -> u32 {
 }
 
 ///Pawn double push move
+#[inline]
 pub fn create_double_push(from: u32, to: u32, mover: u32, moved_piece: u32) -> u32 {
     return create(from, to, false, mover, moved_piece) | 8192; // | 2^13
 }
 
 ///**to** is the ep_square the pawn ends up on, eaten pawn must be cleared in make_move with some extra logic
+#[inline]
 pub fn create_en_passant(from: u32, to: u32, mover: u32, moved_piece: u32) -> u32 {
     return create(from, to, true, mover, moved_piece) | 1073741824; // | 2^30
 }
 
 /// Promotion move creator
+#[inline]
 pub fn create_promotion(
     from: u32,
     to: u32,
@@ -204,6 +211,7 @@ pub fn is_double_push(mov: u32) -> bool {
     return (mov & 8192) > 0;
 }
 
+#[inline]
 pub fn eaten_piece(mov: u32) -> Option<u32> {
     if is_eating(mov) {
         return Some((mov >> 14) & 0xF);
@@ -212,22 +220,53 @@ pub fn eaten_piece(mov: u32) -> Option<u32> {
     }
 }
 
+#[inline]
 pub fn with_eaten_piece(mov: u32, eaten: u32) -> u32 {
     return mov | (eaten << 14);
 }
 
+#[inline]
 pub fn breaks_fifty_move(mov: u32) -> bool {
     return is_eating(mov) || (get_moved_piece(mov) % 6) == W_PAWN;
 }
 
+#[inline]
 pub fn is_unrepeatable(mov: u32) -> bool {
     return is_eating(mov) || (get_moved_piece(mov) % 6) == W_PAWN || is_castle(mov);
 }
 
+#[inline]
 pub fn breaks_fifty_counter(mov: u32) -> bool {
     return is_eating(mov) || (get_moved_piece(mov) % 6) == W_PAWN;
 }
 
+#[inline]
+pub fn is_negative_see(mov: u32) -> bool {
+    return (mov & 262144) > 0; //2^18
+}
+
+#[inline]
+pub fn with_negative_see(mov: u32) -> u32 {
+    mov | 262144 //2^18
+}
+
+#[inline]
+pub fn is_positive_see(mov: u32) -> bool {
+    return (mov & 524288) > 0; //2^19
+}
+
+#[inline]
+pub fn with_positive_see(mov: u32) -> u32 {
+    mov | 524288 //2^19
+}
+
+#[inline]
+pub fn with_see_cleared(mov: u32) -> u32 {
+    return mov & 0xFFF3FFFF; //clear bits 18 and 19
+}
+
+
+#[inline]
 pub fn promotion_matches(mov: u32, promotion: Option<u32>) -> bool {
     match promotion {
         Some(piece) => return is_promotion(mov) && get_promotion_piece(mov) == piece,

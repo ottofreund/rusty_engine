@@ -32,6 +32,7 @@ pub const NOF_PIECE_TYPES_U: usize = 6;
 
 pub const MAX_PSEUDO_MOVES_IN_POS: usize = 512; //approximate power of two
 
+#[inline]
 pub fn opposite_turn(color: u32) -> u32 {
     return color ^ 1;
 }

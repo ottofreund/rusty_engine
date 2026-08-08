@@ -205,6 +205,26 @@ fn static_to_timed_abort_preserves_completed_pv() {
 }
 
 #[test]
+fn timed_search_only_applies_previous_pv_on_pv_path() {
+    let engine = TestEngine::new();
+    let start = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&start, MULTITHREADED);
+    searcher.search_config.quiescence = false;
+    searcher.search_config.search_mode = SearchMode::StaticDepth(3);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let completed = root_pv(&searcher);
+    assert_eq!(completed.len(), 3);
+    assert_legal_pv(&engine, &start, &completed);
+
+    searcher.search_config.search_mode = SearchMode::StaticTime(0);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    assert_eq!(root_pv(&searcher), completed);
+    assert_legal_pv(&engine, &start, &completed);
+}
+
+#[test]
 fn shallower_static_depth_reuses_deeper_completed_pv() {
     let engine = TestEngine::new();
     let start = engine.position(DEFAULT_FEN);
