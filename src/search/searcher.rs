@@ -182,6 +182,7 @@ impl Searcher {
                     if pos.board.nof_checkers == 0 {
                         eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
                         if eval >= beta {
+                            search_data.stand_pat_cutoffs += 1;
                             return eval;
                         }
                         alpha = max(alpha, eval);
@@ -285,7 +286,10 @@ impl Searcher {
                 .unwrap_or(d);
 
             if self.search_config.log_uci_diagnostics {
-                println!("info depth {d} seldepth {} score cp {eval} nodes {} pv {}", search_data.sel_depth, search_data.cumul_positions_searched, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" "));
+                println!(
+                    "info depth {d} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}", 
+                    search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
+                );
             }
             search_data.reset_temp_performance_data();
         }
@@ -356,6 +360,7 @@ impl Searcher {
                     if pos.board.nof_checkers == 0 {
                         eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
                         if eval >= beta {
+                            search_data.stand_pat_cutoffs += 1;
                             return eval;
                         }
                         alpha = max(alpha, eval);
@@ -470,7 +475,10 @@ impl Searcher {
                 .unwrap_or(d);
 
             if self.search_config.log_uci_diagnostics {
-                println!("info depth {d} seldepth {} score cp {eval} nodes {} pv {}", search_data.sel_depth, search_data.cumul_positions_searched, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" "));
+                println!(
+                    "info depth {d} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}", 
+                    search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
+                );
             }
             search_data.reset_temp_performance_data();
         }

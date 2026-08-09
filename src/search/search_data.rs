@@ -15,6 +15,7 @@ pub struct SearchData {
     pub see_helper: SeeWorker,
     //per search data
     pub positions_searched: u64,
+    pub stand_pat_cutoffs: u64,
     pub ab_cutoffs: u64,
     pub sel_depth: usize,
     //cumulative data
@@ -32,6 +33,7 @@ impl SearchData {
             board_hash_history: board_hash_history,
             see_helper: SeeWorker::default(),
             positions_searched: 0,
+            stand_pat_cutoffs: 0,
             ab_cutoffs: 0,
             sel_depth: 0,
             cumul_positions_searched: 0,
@@ -63,17 +65,11 @@ impl SearchData {
         return count >= 3;
     }
 
-    pub fn log_performance(&self) {
-        println!(
-            "positions searched: {}, ab cutoffs: {}",
-            self.positions_searched, self.ab_cutoffs
-        );
-    }
-
     pub fn reset_temp_performance_data(&mut self) {
         self.positions_searched = 0;
         self.ab_cutoffs = 0;
         self.sel_depth = 0;
+        self.stand_pat_cutoffs = 0;
     }
 
     pub fn reset_cumul_performance_data(&mut self) {
