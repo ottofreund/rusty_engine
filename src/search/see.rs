@@ -1,4 +1,4 @@
-use crate::{repr::{_move, bitboard, board::{Board, FILES}, move_gen::MoveGen, types::{B_BISHOP_U, B_KING_U, B_KNIGHT_U, B_PAWN_U, B_QUEEN_U, B_ROOK_U, BLACK, NOF_PIECE_TYPES_U, W_BISHOP_U, W_KING_U, W_KNIGHT_U, W_PAWN_U, W_QUEEN_U, W_ROOK_U, WHITE}}, search::eval::PIECE_MATERIAL_VALUE};
+use crate::{repr::{_move, bitboard, board::{Board, FILES, RANKS}, move_gen::MoveGen, types::{B_BISHOP_U, B_KING_U, B_KNIGHT_U, B_PAWN_U, B_QUEEN_U, B_ROOK_U, BLACK, NOF_PIECE_TYPES_U, W_BISHOP_U, W_KING_U, W_KNIGHT_U, W_PAWN_U, W_QUEEN_U, W_ROOK_U, WHITE}}, search::eval::PIECE_MATERIAL_VALUE};
 
 const NO_ENTRIES_IDX: usize = usize::MAX;
 
@@ -32,7 +32,10 @@ impl SeeWorker {
             return true;
         }
 
-        if PIECE_MATERIAL_VALUE[_move::eaten_piece(initiating_move).expect("non-take initiating move") as usize] >= PIECE_MATERIAL_VALUE[moved_piece] {
+        let opponent_promotion_rank: u64 = if board.turn == WHITE { RANKS[0] } else { RANKS[7] };
+        if !bitboard::contains_square(opponent_promotion_rank, _move::get_target(initiating_move)) //avoid promotion recapture edge case
+           && PIECE_MATERIAL_VALUE[_move::eaten_piece(initiating_move).expect("non-take initiating move") as usize] >= PIECE_MATERIAL_VALUE[moved_piece] 
+        {
             return true;
         } 
         
