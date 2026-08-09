@@ -21,6 +21,20 @@ impl SeeWorker {
         if _move::is_en_passant(initiating_move) { //fuck en passant
             return true;
         }
+
+        let moved_piece: usize = _move::get_moved_piece(initiating_move) as usize;
+
+        if moved_piece % NOF_PIECE_TYPES_U == W_KING_U {
+            return true;
+        }
+
+        if _move::is_promotion(initiating_move) {
+            return true;
+        }
+
+        if PIECE_MATERIAL_VALUE[_move::eaten_piece(initiating_move).expect("non-take initiating move") as usize] >= PIECE_MATERIAL_VALUE[moved_piece] {
+            return true;
+        } 
         
         let action_sqr: usize = _move::get_target(initiating_move) as usize;
         self.reset_for_new_see();
