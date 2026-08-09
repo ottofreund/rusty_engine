@@ -586,6 +586,9 @@ impl Searcher {
                             }
                         }
                     }
+                    if _move::is_promotion(mov) {
+                        cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
+                    }
                 } else if !found_dominating { //non-capture still candidate
                     //TODO history heuristic
                     if _move::is_promotion(mov) {
