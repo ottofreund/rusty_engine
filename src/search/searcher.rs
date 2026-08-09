@@ -17,7 +17,7 @@ const EVAL_QUIT: i32 = 555_555_555;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
-const NON_CAPTURE_BONUS: i32 = 10_000;
+const BAD_CAPTURE_BONUS: i32 = 10_000;
 const GOOD_CAPTURE_BONUS: i32 = 100_000;
 
 pub struct Searcher {
@@ -559,10 +559,10 @@ impl Searcher {
                     if _move::is_negative_see(mov) {
                         if let Some(only_bad_left) = only_bad_captures_left {
                             if *only_bad_left {
-                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                                cur_v = BAD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
                             } //else quiets left so ignore bad capture
                         } else { //quiets may remain but we don't know yet
-                            cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                            cur_v = BAD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
                         }
                     } else if _move::is_positive_see(mov) {
                         cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
@@ -579,10 +579,10 @@ impl Searcher {
                             move_arr_s[i] = _move::with_negative_see(mov);
                             if let Some(only_bad_left) = only_bad_captures_left {
                                 if *only_bad_left {
-                                    cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                                    cur_v = BAD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
                                 } //else quiets left so ignore bad capture
                             } else { //quiets may remain but we don't know yet
-                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                                cur_v = BAD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
                             }
                         }
                     }
@@ -594,7 +594,6 @@ impl Searcher {
                     if _move::is_promotion(mov) {
                         cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
                     }
-                    cur_v += NON_CAPTURE_BONUS; //give edge over bad captures
                     non_capture_count += 1;
                 } else {
                     non_capture_count += 1;
