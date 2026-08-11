@@ -383,8 +383,6 @@ impl Searcher {
 
                 follows_prev_pv = follows_prev_pv && mov == pv_mv;
 
-                //let mut child_pv: [u32; MAX_SEARCH_DEPTH + 1] = [NULL_MOVE; MAX_SEARCH_DEPTH + 1];
-
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
                 let child_eval: i32 = inner(
@@ -465,7 +463,9 @@ impl Searcher {
             search_data.cumul_positions_searched += search_data.positions_searched;
             if eval == EVAL_QUIT {
                 search_data.reset_temp_performance_data();
-                search_data.pv[0..d].copy_from_slice(&prev_pv);
+                if search_data.pv[0] == NULL_MOVE { //didn't finish any root move in time
+                    search_data.pv[..d].copy_from_slice(&prev_pv);
+                }
                 break;
             }
 

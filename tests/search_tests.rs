@@ -205,7 +205,7 @@ fn static_to_timed_abort_preserves_completed_pv() {
 }
 
 #[test]
-fn timed_search_only_applies_previous_pv_on_pv_path() {
+fn timed_search_gracefully_handles_abort_and_uses_incomplete_search_when_possible() {
     let engine = TestEngine::new();
     let start = engine.position(DEFAULT_FEN);
     let mut searcher = Searcher::from(&start, MULTITHREADED);
@@ -220,7 +220,7 @@ fn timed_search_only_applies_previous_pv_on_pv_path() {
     searcher.search_config.search_mode = SearchMode::StaticTime(0);
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
 
-    assert_eq!(root_pv(&searcher), completed);
+    assert_legal_pv(&engine, &start, &root_pv(&searcher));
     assert_legal_pv(&engine, &start, &completed);
 }
 

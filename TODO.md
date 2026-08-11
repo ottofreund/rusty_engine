@@ -1,14 +1,17 @@
 - full principal variation search with null windows
 - Multithreaded search
-- Incremental eval?
+- Incremental eval? Should be really easy with additions in make_move & unmake_move
+- Use partial search results after interrupting search, no point in discarding since guaranteed better than previous depth complete search
+- Search extensions
 
 
-- SEE in quiescence and maybe elsewhere too
 - Futility pruning, should be easy gains
 - Transposition table
 - History heuristic for sorting quiets. Should be easy gains
+- Late move reductions
 
 - Tapered eval
+- More eval heuristics, passed pawn bonus, isolated pawn penalty
 - Draw by insufficient material
 - Eval to factor in controlled squares + other heuristics
 
