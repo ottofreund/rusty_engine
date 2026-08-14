@@ -119,6 +119,7 @@ impl Searcher {
     }
 
     fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<&AtomicBool>) {
+        self.search_data[idx].age_history();
         match self.search_config.search_mode {
             SearchMode::StaticDepth(d) => {
                 self.search_static_d(d, idx, move_gen, zobrist);

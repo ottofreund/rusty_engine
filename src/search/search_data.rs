@@ -5,6 +5,8 @@ use crate::{
 pub const TRIANG_PV_TABLE_SIZE: usize = (MAX_SEARCH_DEPTH * (MAX_SEARCH_DEPTH + 1)) / 2;
 const MAX_HISTORY_VAL: i32 = 7183; //from stockfish
 const BONUS_MULTIPLIER: i32 = 7;
+const HISTORY_AGING_NUMERATOR: i32 = 3;
+const HISTORY_AGING_DENOMINATOR: i32 = 4;
 
 pub struct SearchData {
     // Triangular scratch/result table. The completed root PV always starts at index 0
@@ -14,7 +16,7 @@ pub struct SearchData {
     pub pv_ply_indices: Vec<usize>,
     pub mate_in: Option<u32>,
     pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
-    pub history_table: [i32 ; 2 * 64 * 64], //history_table[side * 4096 + from_sq * 64 + to_sq]
+    pub history_table: [i16; 2 * 64 * 64], //history_table[side * 4096 + from_sq * 64 + to_sq]
     pub see_helper: SeeWorker,
     //per search data
     pub positions_searched: u64,
@@ -80,20 +82,28 @@ impl SearchData {
         self.cumul_positions_searched = 0;
     }
 
+    pub(crate) fn age_history(&mut self) {
+        for entry in &mut self.history_table {
+            *entry = (*entry as i32 * HISTORY_AGING_NUMERATOR
+                / HISTORY_AGING_DENOMINATOR) as i16;
+        }
+    }
+
     #[inline]
     pub fn update_history_entry(&mut self, side: u32, from: u32, to: u32, bonus: i32) {
         let idx: usize = (side * 4096 + from * 64 + to) as usize;
         let bonus = (BONUS_MULTIPLIER * bonus)
             .clamp(-MAX_HISTORY_VAL, MAX_HISTORY_VAL);
+        let entry = self.history_table[idx] as i32;
+        let updated_entry = entry + bonus - entry * bonus.abs() / MAX_HISTORY_VAL;
 
-        self.history_table[idx] +=
-            bonus - self.history_table[idx] * bonus.abs() / MAX_HISTORY_VAL;   
+        self.history_table[idx] = updated_entry as i16;
     }
 
     #[inline]
     pub fn get_history_entry(&self, side: u32, mov: u32) -> i32 {
         let idx: usize = (side * 4096 + _move::get_init(mov) * 64 + _move::get_target(mov)) as usize;
-        return self.history_table[idx];
+        return self.history_table[idx] as i32;
     }
 
 

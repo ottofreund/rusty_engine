@@ -117,6 +117,54 @@ fn static_depth_updates_quiet_history() {
 }
 
 #[test]
+fn root_search_ages_history_once_toward_zero() {
+    let engine = TestEngine::new();
+    let pos = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&pos, MULTITHREADED);
+
+    searcher.search_data[0].history_table[0] = 100;
+    searcher.search_data[0].history_table[1] = -100;
+    searcher.search_data[0].history_table[2] = 1;
+    searcher.search_data[0].history_table[3] = -1;
+    searcher.search_config.search_mode = SearchMode::StaticDepth(0);
+
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    assert_eq!(searcher.search_data[0].history_table[0], 75);
+    assert_eq!(searcher.search_data[0].history_table[1], -75);
+    assert_eq!(searcher.search_data[0].history_table[2], 0);
+    assert_eq!(searcher.search_data[0].history_table[3], 0);
+
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    assert_eq!(searcher.search_data[0].history_table[0], 56);
+    assert_eq!(searcher.search_data[0].history_table[1], -56);
+}
+
+#[test]
+fn timed_root_search_ages_history() {
+    let engine = TestEngine::new();
+    let pos = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&pos, MULTITHREADED);
+    let impossible_move_entry = 63 * 64 + 63;
+
+    searcher.search_data[0].history_table[impossible_move_entry] = 100;
+    searcher.search_config.search_mode = SearchMode::StaticTime(u64::MAX);
+    let kill_switch = Arc::new(AtomicBool::new(true));
+
+    searcher.start_search(
+        &engine.move_gen,
+        &engine.zobrist,
+        Some(kill_switch),
+    );
+
+    assert_eq!(
+        searcher.search_data[0].history_table[impossible_move_entry],
+        75
+    );
+}
+
+#[test]
 fn mate_in_one_terminates_static_root_pv() {
     let engine = TestEngine::new();
     let start = engine.position(MATE_IN_ONE_FEN);
