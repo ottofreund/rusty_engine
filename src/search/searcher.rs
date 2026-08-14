@@ -17,6 +17,8 @@ const EVAL_QUIT: i32 = 555_555_555;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
+// Keep capture history inside the existing SEE/MVV ordering bands.
+const CAPTURE_HISTORY_SCORE_DIVISOR: i32 = 72;
 const NON_CAPTURE_BONUS: i32 = 10_000;
 const GOOD_CAPTURE_BONUS: i32 = 100_000;
 
@@ -250,7 +252,7 @@ impl Searcher {
                 if alpha >= beta {
                     search_data.ab_cutoffs += 1;
                     if d < target_d {
-                        Searcher::update_quiet_history_after_cutoff(
+                        Searcher::update_histories_after_cutoff(
                             search_data,
                             pos.board.turn,
                             mov,
@@ -438,7 +440,7 @@ impl Searcher {
                 if alpha >= beta {
                     search_data.ab_cutoffs += 1;
                     if d < target_d {
-                        Searcher::update_quiet_history_after_cutoff(
+                        Searcher::update_histories_after_cutoff(
                             search_data,
                             pos.board.turn,
                             mov,
@@ -551,27 +553,39 @@ impl Searcher {
     }
 
     #[inline]
-    fn update_quiet_history_after_cutoff(
+    fn update_histories_after_cutoff(
         search_data: &mut SearchData,
         side: u32,
         cutoff_move: u32,
         previously_searched_moves: &[u32],
         remaining_depth: usize,
     ) {
-        if _move::is_eating(cutoff_move) || _move::is_promotion(cutoff_move) {
-            return;
+        let bonus = remaining_depth as i32;
+        let cutoff_is_quiet =
+            !_move::is_eating(cutoff_move) && !_move::is_promotion(cutoff_move);
+
+        if !_move::is_promotion(cutoff_move) {
+            if _move::is_eating(cutoff_move) {
+                search_data.update_capture_history_entry(cutoff_move, bonus);
+            } else {
+                search_data.update_history_entry(
+                    side,
+                    _move::get_init(cutoff_move),
+                    _move::get_target(cutoff_move),
+                    bonus,
+                );
+            }
         }
 
-        let bonus = remaining_depth as i32;
-        search_data.update_history_entry(
-            side,
-            _move::get_init(cutoff_move),
-            _move::get_target(cutoff_move),
-            bonus,
-        );
-
         for &previous_move in previously_searched_moves {
-            if !_move::is_eating(previous_move) && !_move::is_promotion(previous_move) {
+            if _move::is_promotion(previous_move) {
+                continue;
+            }
+
+            // A capture failed even when the eventual cutoff move was quiet.
+            if _move::is_eating(previous_move) {
+                search_data.update_capture_history_entry(previous_move, -bonus);
+            } else if cutoff_is_quiet {
                 search_data.update_history_entry(
                     side,
                     _move::get_init(previous_move),
@@ -639,6 +653,9 @@ impl Searcher {
                     }
                     if _move::is_promotion(mov) {
                         cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
+                    } else {
+                        cur_v += search_data.get_capture_history_entry(mov)
+                            / CAPTURE_HISTORY_SCORE_DIVISOR;
                     }
                 } else if !found_dominating { //non-capture still candidate
                     if _move::is_promotion(mov) {

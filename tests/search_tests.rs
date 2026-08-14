@@ -4,6 +4,7 @@ use common::TestEngine;
 use rusty_engine::{
     repr::_move::{self, NULL_MOVE},
     repr::position::Position,
+    repr::types::{B_PAWN, B_ROOK, WHITE, W_KNIGHT, W_PAWN, W_QUEEN},
     search::{
         search_config::SearchMode,
         search_data::{get_triang_pv_ply_idx_table, TRIANG_PV_TABLE_SIZE},
@@ -16,6 +17,8 @@ use std::sync::{atomic::AtomicBool, Arc};
 use crate::common::MULTITHREADED;
 
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
+const TACTICAL_FEN: &str =
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ";
 
 fn search_static_depth(engine: &TestEngine, fen: &str, depth: usize, quiescence: bool) -> Searcher {
     let pos = engine.position(fen);
@@ -117,6 +120,63 @@ fn static_depth_updates_quiet_history() {
 }
 
 #[test]
+fn capture_history_uses_attacker_target_and_victim_context() {
+    let engine = TestEngine::new();
+    let pos = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&pos, MULTITHREADED);
+    let search_data = &mut searcher.search_data[0];
+    let pawn_takes_pawn =
+        _move::with_eaten_piece(_move::create(8, 17, true, WHITE, W_PAWN), B_PAWN);
+    let knight_takes_pawn =
+        _move::with_eaten_piece(_move::create(8, 17, true, WHITE, W_KNIGHT), B_PAWN);
+    let pawn_takes_rook =
+        _move::with_eaten_piece(_move::create(8, 17, true, WHITE, W_PAWN), B_ROOK);
+
+    search_data.update_capture_history_entry(pawn_takes_pawn, 4);
+
+    assert!(search_data.get_capture_history_entry(pawn_takes_pawn) > 0);
+    assert_eq!(search_data.get_capture_history_entry(knight_takes_pawn), 0);
+    assert_eq!(search_data.get_capture_history_entry(pawn_takes_rook), 0);
+}
+
+#[test]
+fn capture_history_is_bounded_and_excludes_promotions() {
+    let engine = TestEngine::new();
+    let pos = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&pos, MULTITHREADED);
+    let search_data = &mut searcher.search_data[0];
+    let capture =
+        _move::with_eaten_piece(_move::create(8, 17, true, WHITE, W_PAWN), B_PAWN);
+    let promotion = _move::with_eaten_piece(
+        _move::create_promotion(54, 63, true, W_QUEEN, WHITE, W_PAWN),
+        B_ROOK,
+    );
+
+    for _ in 0..10_000 {
+        search_data.update_capture_history_entry(capture, 50);
+    }
+    assert!(search_data.get_capture_history_entry(capture).abs() <= 7183);
+
+    for _ in 0..20_000 {
+        search_data.update_capture_history_entry(capture, -50);
+    }
+    assert!(search_data.get_capture_history_entry(capture).abs() <= 7183);
+
+    search_data.update_capture_history_entry(promotion, 50);
+    assert_eq!(search_data.get_capture_history_entry(promotion), 0);
+}
+
+#[test]
+fn static_depth_updates_capture_history_with_rewards_and_penalties() {
+    let engine = TestEngine::new();
+    let searcher = search_static_depth(&engine, TACTICAL_FEN, 4, false);
+    let capture_history = &searcher.search_data[0].capture_history_table;
+
+    assert!(capture_history.iter().any(|entry| *entry > 0));
+    assert!(capture_history.iter().any(|entry| *entry < 0));
+}
+
+#[test]
 fn root_search_ages_history_once_toward_zero() {
     let engine = TestEngine::new();
     let pos = engine.position(DEFAULT_FEN);
@@ -126,6 +186,8 @@ fn root_search_ages_history_once_toward_zero() {
     searcher.search_data[0].history_table[1] = -100;
     searcher.search_data[0].history_table[2] = 1;
     searcher.search_data[0].history_table[3] = -1;
+    searcher.search_data[0].capture_history_table[0] = 100;
+    searcher.search_data[0].capture_history_table[1] = -100;
     searcher.search_config.search_mode = SearchMode::StaticDepth(0);
 
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
@@ -134,6 +196,8 @@ fn root_search_ages_history_once_toward_zero() {
     assert_eq!(searcher.search_data[0].history_table[1], -75);
     assert_eq!(searcher.search_data[0].history_table[2], 0);
     assert_eq!(searcher.search_data[0].history_table[3], 0);
+    assert_eq!(searcher.search_data[0].capture_history_table[0], 75);
+    assert_eq!(searcher.search_data[0].capture_history_table[1], -75);
 
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
 
