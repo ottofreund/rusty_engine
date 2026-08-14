@@ -248,6 +248,15 @@ impl Searcher {
 
                 if alpha >= beta {
                     search_data.ab_cutoffs += 1;
+                    if d < target_d {
+                        Searcher::update_quiet_history_after_cutoff(
+                            search_data,
+                            pos.board.turn,
+                            mov,
+                            &pos.move_arr[s..i],
+                            target_d - d,
+                        );
+                    }
                     return alpha;
                 }
             }
@@ -427,15 +436,15 @@ impl Searcher {
 
                 if alpha >= beta {
                     search_data.ab_cutoffs += 1;
-                    if d < target_d && !_move::is_eating(mov) && !_move::is_promotion(mov) {
-                        search_data.update_history_entry(pos.board.turn, _move::get_init(mov), _move::get_target(mov), (target_d - d) as i32);
-                        for j in s..i {
-                            let other_mov: u32 = pos.move_arr[j];
-                            if !_move::is_eating(other_mov) && !_move::is_promotion(other_mov) {
-                                search_data.update_history_entry(pos.board.turn, _move::get_init(other_mov), _move::get_target(other_mov), -((target_d - d) as i32));
-                            }
-                        }
-                    }     
+                    if d < target_d {
+                        Searcher::update_quiet_history_after_cutoff(
+                            search_data,
+                            pos.board.turn,
+                            mov,
+                            &pos.move_arr[s..i],
+                            target_d - d,
+                        );
+                    }
                     return alpha;
                 }
             }
@@ -538,6 +547,38 @@ impl Searcher {
             i += 1;
         }
         return i;
+    }
+
+    #[inline]
+    fn update_quiet_history_after_cutoff(
+        search_data: &mut SearchData,
+        side: u32,
+        cutoff_move: u32,
+        previously_searched_moves: &[u32],
+        remaining_depth: usize,
+    ) {
+        if _move::is_eating(cutoff_move) || _move::is_promotion(cutoff_move) {
+            return;
+        }
+
+        let bonus = remaining_depth as i32;
+        search_data.update_history_entry(
+            side,
+            _move::get_init(cutoff_move),
+            _move::get_target(cutoff_move),
+            bonus,
+        );
+
+        for &previous_move in previously_searched_moves {
+            if !_move::is_eating(previous_move) && !_move::is_promotion(previous_move) {
+                search_data.update_history_entry(
+                    side,
+                    _move::get_init(previous_move),
+                    _move::get_target(previous_move),
+                    -bonus,
+                );
+            }
+        }
     }
 
     //k == 1, so "selection pick", in place

@@ -103,6 +103,20 @@ fn static_depth_pv_is_legal_with_and_without_quiescence() {
 }
 
 #[test]
+fn static_depth_updates_quiet_history() {
+    let engine = TestEngine::new();
+    let searcher = search_static_depth(&engine, DEFAULT_FEN, 3, false);
+
+    assert!(
+        searcher.search_data[0]
+            .history_table
+            .iter()
+            .any(|entry| *entry != 0),
+        "expected static-depth beta cutoffs to update quiet-move history"
+    );
+}
+
+#[test]
 fn mate_in_one_terminates_static_root_pv() {
     let engine = TestEngine::new();
     let start = engine.position(MATE_IN_ONE_FEN);
