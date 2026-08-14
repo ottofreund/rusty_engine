@@ -377,11 +377,11 @@ impl Searcher {
             let mut only_bad_captures_left: Option<bool> = None;
 
             for i in s..e {
-                let pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv[d] } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
+                let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv[d] } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
                 let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], pv_mv, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], prev_pv_mv, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
 
-                follows_prev_pv = follows_prev_pv && mov == pv_mv;
+                follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
@@ -427,6 +427,15 @@ impl Searcher {
 
                 if alpha >= beta {
                     search_data.ab_cutoffs += 1;
+                    if d < target_d && !_move::is_eating(mov) && !_move::is_promotion(mov) {
+                        search_data.update_history_entry(pos.board.turn, _move::get_init(mov), _move::get_target(mov), (target_d - d) as i32);
+                        for j in s..i {
+                            let other_mov: u32 = pos.move_arr[j];
+                            if !_move::is_eating(other_mov) && !_move::is_promotion(other_mov) {
+                                search_data.update_history_entry(pos.board.turn, _move::get_init(other_mov), _move::get_target(other_mov), -((target_d - d) as i32));
+                            }
+                        }
+                    }     
                     return alpha;
                 }
             }
@@ -590,9 +599,10 @@ impl Searcher {
                         cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
                     }
                 } else if !found_dominating { //non-capture still candidate
-                    //TODO history heuristic
                     if _move::is_promotion(mov) {
                         cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
+                    } else {
+                        cur_v += search_data.get_history_entry(board.turn, mov)
                     }
                     cur_v += NON_CAPTURE_BONUS; //give edge over bad captures
                     non_capture_count += 1;

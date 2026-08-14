@@ -1,11 +1,10 @@
 - full principal variation search with null windows
 - Multithreaded search
 - Incremental eval? Should be really easy with additions in make_move & unmake_move
-- Use partial search results after interrupting search, no point in discarding since guaranteed better than previous depth complete search
 - Search extensions
 
 
-- Futility pruning, should be easy gains
+- Futility pruning, should be easy gains. Also reverse futility pruning?
 - Transposition table
 - History heuristic for sorting quiets. Should be easy gains
 - Late move reductions
