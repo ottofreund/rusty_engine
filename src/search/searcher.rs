@@ -17,8 +17,6 @@ const EVAL_QUIT: i32 = 555_555_555;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
-// Keep capture history inside the existing SEE/MVV ordering bands.
-const CAPTURE_HISTORY_SCORE_DIVISOR: i32 = 72;
 const NON_CAPTURE_BONUS: i32 = 10_000;
 const GOOD_CAPTURE_BONUS: i32 = 100_000;
 
@@ -654,8 +652,7 @@ impl Searcher {
                     if _move::is_promotion(mov) {
                         cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
                     } else {
-                        cur_v += search_data.get_capture_history_entry(mov)
-                            / CAPTURE_HISTORY_SCORE_DIVISOR;
+                        cur_v += search_data.get_capture_history_score(mov);
                     }
                 } else if !found_dominating { //non-capture still candidate
                     if _move::is_promotion(mov) {

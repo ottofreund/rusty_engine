@@ -13,6 +13,7 @@ const QUIET_HISTORY_BONUS_MULTIPLIER: i32 = 7;
 const CAPTURE_HISTORY_MAX: i32 = 7183;
 const CAPTURE_HISTORY_BONUS_MULTIPLIER: i32 = 7;
 const CAPTURE_HISTORY_MALUS_MULTIPLIER: i32 = 7;
+const CAPTURE_HISTORY_SCORE_DIVISOR: i32 = 72;
 const HISTORY_AGING_NUMERATOR: i32 = 3;
 const HISTORY_AGING_DENOMINATOR: i32 = 4;
 const PIECE_COUNT: usize = 2 * NOF_PIECE_TYPES_U;
@@ -149,6 +150,11 @@ impl SearchData {
     }
 
     #[inline]
+    pub fn get_capture_history_score(&self, mov: u32) -> i32 {
+        return self.get_capture_history_entry(mov) / CAPTURE_HISTORY_SCORE_DIVISOR;
+    }
+
+    #[inline]
     fn capture_history_idx(mov: u32) -> usize {
         let moving_piece = _move::get_moved_piece(mov) as usize;
         let target = _move::get_target(mov) as usize;
@@ -166,7 +172,6 @@ impl SearchData {
         let scaled_bonus = (multiplier * bonus).clamp(-max, max);
         let current = *entry as i32;
         let updated = current + scaled_bonus - current * scaled_bonus.abs() / max;
-        debug_assert!(updated.abs() <= max);
         *entry = updated as i16;
     }
 }
