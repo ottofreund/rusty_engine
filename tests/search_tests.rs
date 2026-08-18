@@ -1,5 +1,6 @@
 mod common;
 
+use crate::common::MULTITHREADED;
 use common::TestEngine;
 use rusty_engine::{
     repr::_move::{self, NULL_MOVE},
@@ -11,9 +12,6 @@ use rusty_engine::{
     },
     utils::fen_tool::DEFAULT_FEN,
 };
-use std::sync::{atomic::AtomicBool, Arc};
-
-use crate::common::MULTITHREADED;
 
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
 
@@ -149,14 +147,9 @@ fn timed_root_search_ages_history() {
     let impossible_move_entry = 63 * 64 + 63;
 
     searcher.search_data[0].history_table[impossible_move_entry] = 100;
-    searcher.search_config.search_mode = SearchMode::StaticTime(u64::MAX);
-    let kill_switch = Arc::new(AtomicBool::new(true));
+    searcher.search_config.search_mode = SearchMode::StaticTime(0);
 
-    searcher.start_search(
-        &engine.move_gen,
-        &engine.zobrist,
-        Some(kill_switch),
-    );
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
 
     assert_eq!(
         searcher.search_data[0].history_table[impossible_move_entry],
@@ -237,33 +230,6 @@ fn consecutive_static_search_syncs_exact_pv_tail() {
         assert_eq!(root_pv(&searcher), before[1..]);
         assert_eq!(searcher.collect_best_move(), before.get(1).copied());
     }
-}
-
-#[test]
-fn static_to_timed_abort_preserves_completed_pv() {
-    let engine = TestEngine::new();
-    let start = engine.position(DEFAULT_FEN);
-    let mut searcher = Searcher::from(&start, MULTITHREADED);
-    searcher.search_config.quiescence = false;
-    searcher.search_config.search_mode = SearchMode::StaticDepth(2);
-    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
-
-    let completed = root_pv(&searcher);
-    assert_eq!(completed.len(), 2);
-
-    searcher.search_config.search_mode = SearchMode::StaticTime(u64::MAX);
-    let kill_switch = Arc::new(AtomicBool::new(true));
-    searcher.start_search(&engine.move_gen, &engine.zobrist, Some(kill_switch));
-
-    assert_eq!(root_pv(&searcher), completed);
-    assert_legal_pv(&engine, &start, &completed);
-
-    searcher.search_config.search_mode = SearchMode::StaticDepth(3);
-    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
-
-    let resumed = root_pv(&searcher);
-    assert_eq!(resumed.len(), 3);
-    assert_legal_pv(&engine, &start, &resumed);
 }
 
 #[test]

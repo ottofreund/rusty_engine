@@ -335,11 +335,12 @@ impl Searcher {
             kill_switch: Option<&AtomicBool>
         ) -> i32 {
             if search_data.positions_searched != 0
-                && ((search_data.positions_searched % 8192 == 0
-                     && start_t.elapsed().as_millis() as u64 > target_t
-                    ) || (
-                     kill_switch.is_some() 
-                     && kill_switch.unwrap().load(Relaxed))
+                && search_data.positions_searched % 8192 == 0
+                && (start_t.elapsed().as_millis() as u64 > target_t
+                    || (
+                        kill_switch.is_some() 
+                        && kill_switch.unwrap().load(Relaxed)
+                        )
                     )
             {
                 return EVAL_QUIT;
