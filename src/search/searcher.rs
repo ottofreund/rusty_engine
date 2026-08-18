@@ -4,7 +4,7 @@ use crate::{
     repr::{
         _move::{self, *}, board::Board, move_gen::MoveGen, position::Position,
     }, search::{
-        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table},
+        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::TranspositionTable,
     }, utils::zobrist::Zobrist,
 };
 
@@ -26,6 +26,7 @@ pub struct Searcher {
     pub multithreaded: bool,
     pub search_config: SearchConfig,
     pub evaluator: Evaluator,
+    pub tt: TranspositionTable,
     last_sync_deviates_from_pv: bool,
 }
 
@@ -102,11 +103,13 @@ impl Searcher {
             multithreaded: multithreaded,
             search_config,
             evaluator: Evaluator::default(),
+            tt: TranspositionTable::default(),
             last_sync_deviates_from_pv: true,
         };
     }
 
     pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<Arc<AtomicBool>>) {
+        self.tt.generation = self.tt.generation.wrapping_add(1);
         if self.multithreaded {
             panic!("multithreaded search");
             //PRAGMA FOR LOOP HERE

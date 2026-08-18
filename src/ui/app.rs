@@ -364,7 +364,7 @@ pub fn update(state: &mut AppState, msg: Message) {
     }
 }
 
-pub fn view(state: &AppState) -> Element<Message> {
+pub fn view(state: &AppState) -> Element<'_, Message> {
     let main_content = state.render_main_container();
     return main_content.into();
 }
