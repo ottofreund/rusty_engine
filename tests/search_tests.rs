@@ -12,8 +12,14 @@ use rusty_engine::{
     },
     utils::fen_tool::DEFAULT_FEN,
 };
+use std::sync::{
+    atomic::{AtomicBool, Ordering::Relaxed},
+    Arc,
+};
 
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
+const STOP_CHECK_INTERVAL_NODES: u64 = 8192;
+const CANCEL_TEST_DEPTH: usize = 6;
 
 fn search_static_depth(engine: &TestEngine, fen: &str, depth: usize, quiescence: bool) -> Searcher {
     let pos = engine.position(fen);
@@ -250,6 +256,108 @@ fn timed_search_gracefully_handles_abort_and_uses_incomplete_search_when_possibl
 
     assert_legal_pv(&engine, &start, &root_pv(&searcher));
     assert_legal_pv(&engine, &start, &completed);
+}
+
+#[test]
+fn static_depth_observes_preset_kill_switch_at_poll_interval() {
+    let engine = TestEngine::new();
+    let start = engine.position(DEFAULT_FEN);
+    let mut killed = Searcher::from(&start, MULTITHREADED);
+    killed.search_config.search_mode = SearchMode::StaticDepth(CANCEL_TEST_DEPTH);
+    killed.search_config.quiescence = false;
+    killed.search_config.log_diagnostics = false;
+    killed.search_config.log_uci_diagnostics = false;
+    let kill_switch = Arc::new(AtomicBool::new(true));
+
+    killed.start_search(
+        &engine.move_gen,
+        &engine.zobrist,
+        Some(kill_switch.clone()),
+    );
+
+    let interrupted_depth = killed.search_data[0].pv_ply_indices[1];
+    assert!((1..=CANCEL_TEST_DEPTH).contains(&interrupted_depth));
+
+    let mut completed = Searcher::from(&start, MULTITHREADED);
+    completed.search_config.search_mode = SearchMode::StaticDepth(interrupted_depth - 1);
+    completed.search_config.quiescence = false;
+    completed.search_config.log_diagnostics = false;
+    completed.search_config.log_uci_diagnostics = false;
+    completed.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let killed_data = &killed.search_data[0];
+    let completed_nodes = completed.search_data[0].cumul_positions_searched;
+    assert_eq!(
+        killed_data
+            .cumul_positions_searched
+            .checked_sub(completed_nodes),
+        Some(STOP_CHECK_INTERVAL_NODES)
+    );
+    assert!(kill_switch.load(Relaxed));
+    assert_eq!(killed_data.positions_searched, 0);
+    assert_eq!(killed_data.ab_cutoffs, 0);
+    assert_eq!(killed_data.stand_pat_cutoffs, 0);
+    assert_eq!(killed_data.sel_depth, 0);
+    assert_eq!(killed_data.board_hash_history, vec![start.board.zhash]);
+    assert!(
+        killed.positions[0]
+            .board
+            .eq(&start.board, &engine.move_gen)
+    );
+
+    let pv = root_pv(&killed);
+    assert!(!pv.is_empty());
+    assert_legal_pv(&engine, &start, &pv);
+}
+
+#[test]
+fn static_depth_inactive_kill_switch_matches_no_switch() {
+    let engine = TestEngine::new();
+    let start = engine.position(DEFAULT_FEN);
+    let mut without_switch = Searcher::from(&start, MULTITHREADED);
+    without_switch.search_config.search_mode = SearchMode::StaticDepth(5);
+    without_switch.search_config.quiescence = false;
+    without_switch.search_config.log_uci_diagnostics = false;
+
+    let mut with_switch = Searcher::from(&start, MULTITHREADED);
+    with_switch.search_config.search_mode = SearchMode::StaticDepth(5);
+    with_switch.search_config.quiescence = false;
+    with_switch.search_config.log_uci_diagnostics = false;
+    let kill_switch = Arc::new(AtomicBool::new(false));
+
+    without_switch.start_search(&engine.move_gen, &engine.zobrist, None);
+    with_switch.start_search(
+        &engine.move_gen,
+        &engine.zobrist,
+        Some(kill_switch.clone()),
+    );
+
+    let without_data = &without_switch.search_data[0];
+    let with_data = &with_switch.search_data[0];
+    assert!(without_data.cumul_positions_searched > STOP_CHECK_INTERVAL_NODES);
+    assert!(!kill_switch.load(Relaxed));
+    assert_eq!(root_pv(&with_switch), root_pv(&without_switch));
+    assert_eq!(
+        with_switch.collect_best_move(),
+        without_switch.collect_best_move()
+    );
+    assert_eq!(
+        with_switch.collect_ponder_move(),
+        without_switch.collect_ponder_move()
+    );
+    assert_eq!(
+        with_data.cumul_positions_searched,
+        without_data.cumul_positions_searched
+    );
+    assert_eq!(with_data.pv, without_data.pv);
+    assert_eq!(with_data.pv_ply_indices, without_data.pv_ply_indices);
+    assert_eq!(with_data.history_table, without_data.history_table);
+    assert_eq!(
+        with_data.board_hash_history,
+        without_data.board_hash_history
+    );
+    assert_eq!(with_data.positions_searched, 0);
+    assert_eq!(without_data.positions_searched, 0);
 }
 
 #[test]

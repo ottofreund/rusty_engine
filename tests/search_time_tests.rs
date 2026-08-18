@@ -16,6 +16,8 @@ use std::{
 
 const EXTERNAL_TIME_LIMIT_MS: u64 = 250;
 const TIMING_TEST_ATTEMPTS: usize = 3;
+const TACTICAL_FEN: &str =
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ";
 static TIMING_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn timed_searcher(
@@ -65,11 +67,7 @@ fn static_timed_search_returns_within_external_time_limit() {
     let engine = TestEngine::new();
     let cases = [
         ("starting position", DEFAULT_FEN, false),
-        (
-            "tactical position with quiescence",
-            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ",
-            true,
-        ),
+        ("tactical position with quiescence", TACTICAL_FEN, true),
     ];
     let time_limit = Duration::from_millis(EXTERNAL_TIME_LIMIT_MS);
     let search_budget = static_search_budget(EXTERNAL_TIME_LIMIT_MS);
@@ -103,6 +101,50 @@ fn static_timed_search_returns_within_external_time_limit() {
     }
 }
 
+fn kill_switch_response_time(
+    engine: &TestEngine,
+    fen: &str,
+    search_mode: SearchMode,
+    quiescence: bool,
+) -> (Duration, u64) {
+    let mut searcher = timed_searcher(engine, fen, search_mode, quiescence);
+    let kill_switch = Arc::new(AtomicBool::new(false));
+    let kill_switch_setter = kill_switch.clone();
+    let setter_ready = Arc::new(Barrier::new(2));
+    let setter_barrier = setter_ready.clone();
+    let setter = thread::spawn(move || {
+        setter_barrier.wait();
+        thread::sleep(Duration::from_millis(100));
+        let kill_requested_at = Instant::now();
+        kill_switch_setter.store(true, Relaxed);
+        kill_requested_at
+    });
+
+    setter_ready.wait();
+    searcher.start_search(
+        &engine.move_gen,
+        &engine.zobrist,
+        Some(kill_switch.clone()),
+    );
+    let stopped_at = Instant::now();
+    let kill_requested_at = setter.join().expect("kill-switch setter panicked");
+    let response_time = stopped_at
+        .checked_duration_since(kill_requested_at)
+        .expect("search stopped before the kill request");
+
+    assert!(kill_switch.load(Relaxed));
+    assert!(searcher.collect_best_move().is_some());
+    assert_eq!(searcher.search_data[0].positions_searched, 0);
+    assert_eq!(searcher.search_data[0].ab_cutoffs, 0);
+    assert_eq!(searcher.search_data[0].stand_pat_cutoffs, 0);
+    assert_eq!(searcher.search_data[0].sel_depth, 0);
+
+    (
+        response_time,
+        searcher.search_data[0].cumul_positions_searched,
+    )
+}
+
 #[test]
 fn static_timed_search_observes_kill_switch_within_response_limit() {
     let _timing_guard = TIMING_TEST_LOCK
@@ -112,34 +154,30 @@ fn static_timed_search_observes_kill_switch_within_response_limit() {
     let time_limit = Duration::from_millis(EXTERNAL_TIME_LIMIT_MS);
     let response_limit = time_limit
         .checked_sub(static_search_budget(EXTERNAL_TIME_LIMIT_MS))
-        .expect("static timed search must reserve a response margin");
+        .expect("search must reserve a response margin");
 
     assert_search_stops_within("mid-search kill switch", response_limit, || {
-        let mut searcher =
-            timed_searcher(&engine, DEFAULT_FEN, SearchMode::StaticTime(2000), false);
-        let kill_switch = Arc::new(AtomicBool::new(false));
-        let kill_switch_setter = kill_switch.clone();
-        let setter_ready = Arc::new(Barrier::new(2));
-        let setter_barrier = setter_ready.clone();
-        let setter = thread::spawn(move || {
-            setter_barrier.wait();
-            thread::sleep(Duration::from_millis(100));
-            let kill_requested_at = Instant::now();
-            kill_switch_setter.store(true, Relaxed);
-            kill_requested_at
-        });
+        kill_switch_response_time(&engine, DEFAULT_FEN, SearchMode::StaticTime(2000), false)
+    });
+}
 
-        setter_ready.wait();
-        searcher.start_search(&engine.move_gen, &engine.zobrist, Some(kill_switch));
-        let stopped_at = Instant::now();
-        let kill_requested_at = setter.join().expect("kill-switch setter panicked");
-        let response_time = stopped_at
-            .checked_duration_since(kill_requested_at)
-            .expect("static timed search stopped before the kill request");
+#[test]
+fn static_depth_search_observes_kill_switch_within_response_limit() {
+    let _timing_guard = TIMING_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let engine = TestEngine::new();
+    let time_limit = Duration::from_millis(EXTERNAL_TIME_LIMIT_MS);
+    let response_limit = time_limit
+        .checked_sub(static_search_budget(EXTERNAL_TIME_LIMIT_MS))
+        .expect("search must reserve a response margin");
 
-        (
-            response_time,
-            searcher.search_data[0].cumul_positions_searched,
+    assert_search_stops_within("fixed-depth kill switch", response_limit, || {
+        kill_switch_response_time(
+            &engine,
+            TACTICAL_FEN,
+            SearchMode::StaticDepth(6),
+            true,
         )
     });
 }

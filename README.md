@@ -18,11 +18,11 @@ UCI interface.
 - Opening/endgame piece-square evaluation and fixed-depth or timed
   iterative-deepening negamax search with alpha-beta pruning
 - Move ordering and consecutive-search reuse based on the principal variation,
-  plus cooperative cancellation for timed searches
+  plus cooperative cancellation for timed and fixed-depth searches
 - An `iced` board for manual play and FEN loading, with its image assets embedded
   in the binary
-- A partial UCI listener for position import, clock-based or fixed-time search,
-  `stop`, and `bestmove`
+- A partial UCI listener for position import, clock-based, fixed-time, or
+  fixed-depth search, `stop`, and `bestmove`
 
 ## Quick Start
 
@@ -40,8 +40,9 @@ are not implemented yet.
 
 The codebase also contains a partial stdin/stdout UCI listener, although it is
 not wired to the default executable. It handles `uci`, `isready`, `position`
-with a starting position or FEN and optional moves, timed `go`, `stop`, and
-`quit`. Options, new-game reset behavior, and pondering remain unfinished.
+with a starting position or FEN and optional moves, timed or fixed-depth `go`,
+`stop`, and `quit`. Options, new-game reset behavior, and pondering remain
+unfinished.
 
 ## Architecture
 
