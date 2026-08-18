@@ -10,6 +10,7 @@ use crate::{
 
 pub const MAX_SEARCH_DEPTH: usize = 50;
 const THREAD_COUNT: usize = 4;
+const STOP_CHECK_INTERVAL: u64 = 8192;
 const ALPHA_INIT: i32 = -1_000_000_000;
 const BETA_INIT: i32 = 1_000_000_000;
 const EVAL_INIT: i32 = -1_000_000_000;
@@ -19,6 +20,34 @@ const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
 const NON_CAPTURE_BONUS: i32 = 10_000;
 const GOOD_CAPTURE_BONUS: i32 = 100_000;
+
+struct SearchControl<'a> {
+    time_limit: Option<(Instant, u64)>,
+    kill_switch: Option<&'a AtomicBool>,
+}
+
+impl<'a> SearchControl<'a> {
+    fn new(target_time: Option<u64>, kill_switch: Option<&'a AtomicBool>) -> Self {
+        Self {
+            time_limit: target_time.map(|target_time| (Instant::now(), target_time)),
+            kill_switch,
+        }
+    }
+
+    fn should_stop(&self, positions_searched: u64) -> bool {
+        positions_searched != 0
+            && positions_searched % STOP_CHECK_INTERVAL == 0
+            && (self
+                .time_limit
+                .as_ref()
+                .is_some_and(|(start, target_time)| {
+                    start.elapsed().as_millis() as u64 > *target_time
+                })
+                || self
+                    .kill_switch
+                    .is_some_and(|kill_switch| kill_switch.load(Relaxed)))
+    }
+}
 
 pub struct Searcher {
     pub positions: Vec<Position>,
@@ -123,29 +152,37 @@ impl Searcher {
 
     fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<&AtomicBool>) {
         self.search_data[idx].age_history();
-        match self.search_config.search_mode {
+        let (target_depth, target_time) = match self.search_config.search_mode {
             SearchMode::StaticDepth(d) => {
-                self.search_static_d(d, idx, move_gen, zobrist);
+                assert!(
+                    d <= MAX_SEARCH_DEPTH,
+                    "static search depth {d} exceeds MAX_SEARCH_DEPTH {MAX_SEARCH_DEPTH}"
+                );
+                (d, None)
             }
-            SearchMode::StaticTime(t) => {
-                self.search_static_time(t, idx, move_gen, zobrist, kill_switch);
-            }
-        }
-        return;
+            SearchMode::StaticTime(t) => (MAX_SEARCH_DEPTH, Some(t)),
+        };
+        self.search(
+            target_depth,
+            target_time,
+            idx,
+            move_gen,
+            zobrist,
+            kill_switch,
+        );
     }
  
     ///alpha-beta pruned negamax algorithm with iterative deepening
-    fn search_static_d(
+    fn search(
         &mut self,
-        target_d: usize,
+        target_depth: usize,
+        target_time: Option<u64>, //milliseconds
         idx: usize,
         move_gen: &MoveGen,
         zobrist: &Zobrist,
+        kill_switch: Option<&AtomicBool>,
     ) {
-        assert!(
-            target_d <= MAX_SEARCH_DEPTH,
-            "static search depth {target_d} exceeds MAX_SEARCH_DEPTH {MAX_SEARCH_DEPTH}"
-        );
+        let control = SearchControl::new(target_time, kill_switch);
 
         fn inner(
             d: usize,
@@ -161,190 +198,9 @@ impl Searcher {
             search_data: &mut SearchData,
             move_gen: &MoveGen,
             zobrist: &Zobrist,
+            control: &SearchControl<'_>,
         ) -> i32 {
-            if d < target_d {
-                let row_start = search_data.pv_ply_indices[d];
-                search_data.pv[row_start] = NULL_MOVE;
-            }
-
-            search_data.positions_searched += 1;
-            search_data.sel_depth = max(search_data.sel_depth, d);
-            let mut eval: i32 = EVAL_INIT;
-            let (s, e) = pos.search_move_bounds();
-            if s == e {
-                if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + d as i32; //sooner mate is better
-                } else if in_quiescence {
-                    return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game()); //might miss stalemate but not worth it to check for performance reasons
-                } else {
-                    return 0; //stalemate
-                }
-            } else if search_data.in_three_fold(pos) || pos.board.is_fifty_move_draw() {
-                return 0;
-            } else if d >= target_d {
-                if use_quiescence {
-                    if pos.board.nof_checkers == 0 {
-                        eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
-                        if eval >= beta {
-                            search_data.stand_pat_cutoffs += 1;
-                            return eval;
-                        }
-                        alpha = max(alpha, eval);
-                    }
-                } else {
-                    return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
-                }
-            }
-
-            if d == target_d - 1 && use_quiescence {
-                in_quiescence = true;
-            }
-
-            let mut only_bad_captures_left: Option<bool> = None;
-
-            for i in s..e {
-                let pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { // i == s because pv always gets picked first after which not available
-                    prev_pv[d]
-                } else {
-                    NULL_MOVE
-                };
-                let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], pv_mv, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
-
-                follows_prev_pv = follows_prev_pv && mov == pv_mv;
-
-                pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
-                search_data.board_hash_history.push(pos.board.zhash);
-                let mov_eval: i32 = -inner(
-                    d + 1,
-                    target_d,
-                    -beta,
-                    -alpha,
-                    in_quiescence,
-                    use_quiescence,
-                    follows_prev_pv,
-                    prev_pv,
-                    pos,
-                    evaluator,
-                    search_data,
-                    move_gen,
-                    zobrist,
-                );
-                search_data.board_hash_history.pop();
-                pos.unmake_move(mov, zobrist);
-
-                if mov_eval > eval {
-                    eval = mov_eval;
-                    if d < target_d {
-                        let cur_ply_s_idx: usize = search_data.pv_ply_indices[d];
-                        let child_ply_s_idx: usize = cur_ply_s_idx + (target_d - d);
-                        let child_ply_e_idx: usize =
-                            child_ply_s_idx + (target_d - (d + 1));
-                        search_data.pv.copy_within(
-                            child_ply_s_idx..child_ply_e_idx,
-                            cur_ply_s_idx + 1,
-                        );
-                        search_data.pv[cur_ply_s_idx] = mov;
-                    }
-                }
-
-                alpha = max(alpha, mov_eval);
-
-                if alpha >= beta {
-                    search_data.ab_cutoffs += 1;
-                    if d < target_d {
-                        Searcher::update_quiet_history_after_cutoff(
-                            search_data,
-                            pos.board.turn,
-                            mov,
-                            &pos.move_arr[s..i],
-                            target_d - d,
-                        );
-                    }
-                    return alpha;
-                }
-            }
-            return eval;
-        }
-        //iterative deepening:
-        let synced_pv_depth: usize = self.count_pv_moves(idx);
-        let mut completed_pv_len: usize = synced_pv_depth;
-        let pos: &mut Position = &mut self.positions[idx];
-        let search_data: &mut SearchData = &mut self.search_data[idx];
-        for d in (synced_pv_depth + 1)..=target_d {
-            let mut prev_pv = vec![NULL_MOVE; d];
-            prev_pv[..completed_pv_len]
-                .copy_from_slice(&search_data.pv[..completed_pv_len]);
-            search_data.pv_ply_indices = get_triang_pv_ply_idx_table(d);
-            let eval: i32 = inner(
-                0,
-                d,
-                ALPHA_INIT,
-                BETA_INIT,
-                false,
-                self.search_config.quiescence,
-                true,
-                &prev_pv,
-                pos,
-                &self.evaluator,
-                search_data,
-                move_gen,
-                zobrist,
-            );
-            search_data.cumul_positions_searched += search_data.positions_searched;
-
-            completed_pv_len = search_data.pv[..d]
-                .iter()
-                .position(|mov| *mov == NULL_MOVE)
-                .unwrap_or(d);
-
-            if self.search_config.log_uci_diagnostics {
-                println!(
-                    "info depth {d} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}", 
-                    search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
-                );
-            }
-            search_data.reset_temp_performance_data();
-        }
-
-        return;
-    }
-
-    fn search_static_time(
-        &mut self,
-        t: u64, //milliseconds
-        idx: usize,
-        move_gen: &MoveGen,
-        zobrist: &Zobrist,
-        kill_switch: Option<&AtomicBool>
-    ) {
-        let start: Instant = Instant::now();
-        fn inner(
-            d: usize,
-            target_d: usize,
-            start_t: Instant,
-            target_t: u64,
-            mut alpha: i32,
-            beta: i32,
-            mut in_quiescence: bool,
-            use_quiescence: bool,
-            mut follows_prev_pv: bool,
-            prev_pv: &[u32],
-            pos: &mut Position,
-            evaluator: &Evaluator,
-            search_data: &mut SearchData,
-            move_gen: &MoveGen,
-            zobrist: &Zobrist,
-            kill_switch: Option<&AtomicBool>
-        ) -> i32 {
-            if search_data.positions_searched != 0
-                && ((search_data.positions_searched % 8192 == 0
-                     && start_t.elapsed().as_millis() as u64 > target_t
-                    ) || (
-                     kill_switch.is_some() 
-                     && kill_switch.unwrap().load(Relaxed))
-                    )
-            {
+            if control.should_stop(search_data.positions_searched) {
                 return EVAL_QUIT;
             }
 
@@ -401,8 +257,6 @@ impl Searcher {
                 let child_eval: i32 = inner(
                     d + 1,
                     target_d,
-                    start_t,
-                    target_t,
                     -beta,
                     -alpha,
                     in_quiescence,
@@ -414,7 +268,7 @@ impl Searcher {
                     search_data,
                     move_gen,
                     zobrist,
-                    kill_switch
+                    control,
                 );
                 search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
@@ -457,9 +311,11 @@ impl Searcher {
         //iterative deepening:
         let synced_pv_depth: usize = self.count_pv_moves(idx);
         let mut completed_pv_len: usize = synced_pv_depth;
+        let use_quiescence = self.search_config.quiescence;
+        let log_uci_diagnostics = self.search_config.log_uci_diagnostics;
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
-        for d in (synced_pv_depth + 1)..=MAX_SEARCH_DEPTH {
+        for d in (synced_pv_depth + 1)..=target_depth {
             let mut prev_pv = vec![NULL_MOVE; d];
             prev_pv[..completed_pv_len]
                 .copy_from_slice(&search_data.pv[..completed_pv_len]);
@@ -467,12 +323,10 @@ impl Searcher {
             let eval: i32 = inner(
                 0,
                 d,
-                start,
-                t,
                 ALPHA_INIT,
                 BETA_INIT,
                 false,
-                self.search_config.quiescence,
+                use_quiescence,
                 true,
                 &prev_pv,
                 pos,
@@ -480,12 +334,12 @@ impl Searcher {
                 search_data,
                 move_gen,
                 zobrist,
-                kill_switch
+                &control,
             );
             search_data.cumul_positions_searched += search_data.positions_searched;
             if eval == EVAL_QUIT {
                 search_data.reset_temp_performance_data();
-                if search_data.pv[0] == NULL_MOVE { //didn't finish any root move in time
+                if search_data.pv[0] == NULL_MOVE { //didn't finish any root move before stopping
                     search_data.pv[..d].copy_from_slice(&prev_pv);
                 }
                 break;
@@ -496,7 +350,7 @@ impl Searcher {
                 .position(|mov| *mov == NULL_MOVE)
                 .unwrap_or(d);
 
-            if self.search_config.log_uci_diagnostics {
+            if log_uci_diagnostics {
                 println!(
                     "info depth {d} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}", 
                     search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
@@ -504,8 +358,6 @@ impl Searcher {
             }
             search_data.reset_temp_performance_data();
         }
-
-        return;
     }
 
     pub fn collect_best_move(&self) -> Option<u32> {

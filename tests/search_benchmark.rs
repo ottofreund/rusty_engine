@@ -6,12 +6,16 @@ use rusty_engine::{
     search::{search_config::SearchMode, searcher::Searcher},
     utils::fen_tool::DEFAULT_FEN,
 };
-use std::time::{Duration, Instant};
+use std::{
+    sync::{atomic::AtomicBool, Arc},
+    time::{Duration, Instant},
+};
 
-use crate::common::{BENCH_MULTITHREADED, MULTITHREADED};
+use crate::common::BENCH_MULTITHREADED;
 
 const DEPTH: usize = 6;
 const CONSECUTIVE_SEARCH_REPS: usize = 2;
+const SWITCH_OVERHEAD_BENCH_REPS: usize = 4;
 const STATIC_TIME_MS: u64 = 3000;
 const NON_QUIESCENCE_SEARCH_TIME_MS: u64 = 250;
 const SEARCH_CASES: [(&str, usize); 5] = [
@@ -63,12 +67,71 @@ fn static_depth_search_benchmark() {
 
 #[test]
 #[ignore = "benchmark"]
+fn static_depth_kill_switch_overhead_benchmark() {
+    let engine = TestEngine::new();
+    let mut without_switch_nodes = 0;
+    let mut without_switch_time = Duration::ZERO;
+    let mut with_switch_nodes = 0;
+    let mut with_switch_time = Duration::ZERO;
+
+    for (case_idx, (fen, depth)) in SEARCH_CASES.into_iter().enumerate() {
+        for rep in 0..SWITCH_OVERHEAD_BENCH_REPS {
+            let (without_switch, with_switch) = if (case_idx + rep) % 2 == 0 {
+                (
+                    fixed_depth_search_once(&engine, fen, depth, None),
+                    fixed_depth_search_once(
+                        &engine,
+                        fen,
+                        depth,
+                        Some(Arc::new(AtomicBool::new(false))),
+                    ),
+                )
+            } else {
+                let with_switch = fixed_depth_search_once(
+                    &engine,
+                    fen,
+                    depth,
+                    Some(Arc::new(AtomicBool::new(false))),
+                );
+                let without_switch = fixed_depth_search_once(&engine, fen, depth, None);
+                (without_switch, with_switch)
+            };
+
+            assert_eq!(without_switch.0, with_switch.0);
+            without_switch_nodes += without_switch.0;
+            without_switch_time += without_switch.1;
+            with_switch_nodes += with_switch.0;
+            with_switch_time += with_switch.1;
+        }
+    }
+
+    assert_eq!(without_switch_nodes, with_switch_nodes);
+    let without_switch_nps =
+        without_switch_nodes as f64 / without_switch_time.as_secs_f64();
+    let with_switch_nps = with_switch_nodes as f64 / with_switch_time.as_secs_f64();
+    let elapsed_overhead =
+        (with_switch_time.as_secs_f64() / without_switch_time.as_secs_f64() - 1.0) * 100.0;
+
+    println!(
+        "\n\nstatic depth without switch: {:.0} NPS ({} nodes in {:.3}s)\nstatic depth with inactive switch: {:.0} NPS ({} nodes in {:.3}s)\nelapsed-time difference: {:+.2}%\n",
+        without_switch_nps,
+        without_switch_nodes,
+        without_switch_time.as_secs_f64(),
+        with_switch_nps,
+        with_switch_nodes,
+        with_switch_time.as_secs_f64(),
+        elapsed_overhead,
+    );
+}
+
+#[test]
+#[ignore = "benchmark"]
 fn consecutive_search_benchmark() {
     let engine = TestEngine::new();
     let mut total_positions = 0;
     let mut total_time = Duration::ZERO;
 
-    for (fen, depth) in SEARCH_CASES {
+    for (fen, _depth) in SEARCH_CASES {
         println!(
             "benchmarking {} consecutive searches at depth {} from {}",
             CONSECUTIVE_SEARCH_REPS, 5, fen
@@ -152,6 +215,35 @@ fn non_quiescence_search_benchmark() {
     );
 
     assert!(nodes > 0);
+}
+
+// Runs one fresh fixed-depth search without including switch construction in the timing.
+fn fixed_depth_search_once(
+    engine: &TestEngine,
+    fen: &str,
+    depth: usize,
+    kill_switch: Option<Arc<AtomicBool>>,
+) -> (u64, Duration) {
+    let pos = engine.position(fen);
+    let mut searcher = Searcher::from(&pos, BENCH_MULTITHREADED);
+    searcher.search_config.search_mode = SearchMode::StaticDepth(depth);
+    searcher.search_config.log_diagnostics = false;
+    searcher.search_config.log_uci_diagnostics = false;
+
+    let time_took = benchmark(|| {
+        searcher.start_search(&engine.move_gen, &engine.zobrist, kill_switch);
+    });
+
+    let total_positions = if searcher.multithreaded {
+        searcher
+            .search_data
+            .iter()
+            .map(|data| data.cumul_positions_searched)
+            .sum()
+    } else {
+        searcher.search_data[0].cumul_positions_searched
+    };
+    (total_positions, time_took)
 }
 
 // Returns (searched nodes, time taken).
