@@ -94,7 +94,7 @@ impl MoveGen {
         );
 
         for mov in pseudo_move_arr[0..pseudolegals_generated].iter() {
-            if self.pseudolegal_is_legal(*mov, board, mover) {
+            if self.pseudolegal_is_legal(*mov, board) {
                 //add taken piece idx to move (if eating) now, since it is necessary
                 let m: u32;
                 if _move::is_en_passant(*mov) {
@@ -121,16 +121,16 @@ impl MoveGen {
     }
 
     ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares
-    pub fn pseudolegal_is_legal(&self, mov: u32, board: &Board, mover: u32) -> bool {
+    pub fn pseudolegal_is_legal(&self, mov: u32, board: &Board) -> bool {
         let init: u32 = _move::get_init(mov);
         let target: u32 = _move::get_target(mov);
         let moved_piece: u32 = _move::get_moved_piece(mov);
         let opponent_attacked: u64;
         let mover_king_piece_idx: u32;
-        let king_sqr_idx: usize = board.get_king_sqr_idx(mover) as usize;
+        let king_sqr_idx: usize = board.get_king_sqr_idx(board.turn) as usize;
         let mover_pinned: u64;
         let mover_pinned_restrictions: u64;
-        if mover == WHITE {
+        if board.turn == WHITE {
             opponent_attacked = board.black_attacks;
             mover_king_piece_idx = 5;
             mover_pinned = board.white_pinned;
@@ -149,7 +149,7 @@ impl MoveGen {
                     bitboard::contains_square(board.check_block_sqrs, target);
                 //May also resolve check by eating the checking pawn by en passant
                 let ep_offset: i32;
-                if mover == WHITE {
+                if board.turn == WHITE {
                     ep_offset = -8
                 } else {
                     ep_offset = 8
@@ -183,14 +183,14 @@ impl MoveGen {
         if _move::is_en_passant(mov) {
             //check edge case where both pawns leave rank exposing pin on king, can be horizontal or diagonal pin
             let ep_offset: i32;
-            if mover == WHITE {
+            if board.turn == WHITE {
                 ep_offset = -8
             } else {
                 ep_offset = 8
             }
             let opponent_horizontal_sliding: u64;
             let opponent_diagonal_sliding: u64;
-            if mover == WHITE {
+            if board.turn == WHITE {
                 opponent_horizontal_sliding = board.pieces[B_ROOK_U] | board.pieces[B_QUEEN_U];
                 opponent_diagonal_sliding =
                     board.pieces[B_BISHOP_U] | board.pieces[B_QUEEN_U];
@@ -596,7 +596,6 @@ impl MoveGen {
         }
         return res;
     }
-
 }
 
 ///Compute and add attacking bitboard for all pieces at (x, y)

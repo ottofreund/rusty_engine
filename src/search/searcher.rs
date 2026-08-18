@@ -1,10 +1,10 @@
-use std::{cmp::max, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}, time::Instant};
+use std::{cmp::{max, min}, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}, time::Instant};
 
 use crate::{
     repr::{
         _move::{self, *}, board::Board, move_gen::MoveGen, position::Position,
     }, search::{
-        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::TranspositionTable,
+        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
     }, utils::zobrist::Zobrist,
 };
 
@@ -188,7 +188,7 @@ impl Searcher {
             d: usize,
             target_d: usize,
             mut alpha: i32,
-            beta: i32,
+            mut beta: i32,
             mut in_quiescence: bool,
             use_quiescence: bool,
             mut follows_prev_pv: bool,
@@ -199,12 +199,13 @@ impl Searcher {
             move_gen: &MoveGen,
             zobrist: &Zobrist,
             control: &SearchControl<'_>,
+            tt: &mut TranspositionTable,
         ) -> i32 {
             if control.should_stop(search_data.positions_searched) {
                 return EVAL_QUIT;
             }
 
-            if d < target_d {
+            if d < target_d { //initialize triangular pv row for this ply
                 let row_start = search_data.pv_ply_indices[d];
                 search_data.pv[row_start] = NULL_MOVE;
             }
@@ -213,7 +214,38 @@ impl Searcher {
             search_data.sel_depth = max(search_data.sel_depth, d);
 
             let mut eval: i32 = EVAL_INIT;
+            let is_three_fold: bool = search_data.in_three_fold(pos);
             let (s, e) = pos.search_move_bounds();
+            let tte: Option<TTEntry> = tt.probe(pos.board.zhash);
+            let key_collision: bool = tte.is_some_and(|entry| {
+                !pos.move_arr[s..e].contains(&entry.best_move) || (entry.best_move == NULL_MOVE && entry.depth > 0) //for quiescence case where stand-pat is best and NULL_MOVE is stored
+            });
+            //TT cutoff?
+            if let Some(tt_entry) = tte {
+                if  tt_entry.depth >= (target_d.saturating_sub(d)) as u8 
+                    && !key_collision 
+                    && !is_three_fold
+                    && pos.board.half_move_clock < 96 //near 50 move draw, don't trust TT
+                {
+                    match tt_entry._type {
+                        TTEntryType::Exact => {
+                            return tt_entry.score;
+                        }
+                        TTEntryType::LowerBound => {
+                            alpha = max(alpha, tt_entry.score);
+                        }
+                        TTEntryType::UpperBound => {
+                            beta = min(beta, tt_entry.score);
+                        }
+                    }
+                    if alpha >= beta {
+                        return tt_entry.score;
+                    }
+                }
+            }
+            let old_alpha: i32 = alpha;
+            let old_beta: i32 = beta;
+            //terminal node?
             if s == e {
                 if pos.board.nof_checkers > 0 {
                     return -MATE_EVAL + d as i32; //sooner mate is better
@@ -222,7 +254,7 @@ impl Searcher {
                 } else {
                     return 0; //stalemate
                 }
-            } else if search_data.in_three_fold(pos) || pos.board.is_fifty_move_draw() {
+            } else if is_three_fold || pos.board.is_fifty_move_draw() {
                 return 0;
             } else if d >= target_d {
                 if use_quiescence {
@@ -239,12 +271,13 @@ impl Searcher {
                 }
             }
 
-            if d == target_d - 1 && use_quiescence {
+            if d == target_d - 1 && use_quiescence { // target_d - 1 because here we generate moves for target_d
                 in_quiescence = true;
             }
 
+            let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
-
+            //TODO use low depth TT hit to order moves, maybe just give history bonus
             for i in s..e {
                 let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv[d] } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
                 let mov: u32 =
@@ -269,6 +302,7 @@ impl Searcher {
                     move_gen,
                     zobrist,
                     control,
+                    tt
                 );
                 search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
@@ -281,6 +315,7 @@ impl Searcher {
                 if new_eval > eval {
                     //child ply's pv appended to this ply's pv
                     eval = new_eval;
+                    best_move = mov;
                     if d < target_d {
                         let cur_ply_s_idx: usize = search_data.pv_ply_indices[d];
                         let child_ply_s_idx: usize = cur_ply_s_idx + (target_d - d);
@@ -303,9 +338,25 @@ impl Searcher {
                             target_d - d,
                         );
                     }
-                    return alpha;
+                    break; //i.e. return alpha
                 }
             }
+            //add TT entry
+            let tte: TTEntry = TTEntry {
+                key: pos.board.zhash,
+                best_move,
+                depth: (target_d.saturating_sub(d)) as u8,
+                score: eval,
+                generation: tt.generation,
+                _type: if eval <= old_alpha {
+                    TTEntryType::UpperBound
+                } else if eval >= old_beta {
+                    TTEntryType::LowerBound
+                } else {
+                    TTEntryType::Exact
+                },
+            };
+            tt.store(tte);
             return eval;
         }
         //iterative deepening:
@@ -335,6 +386,7 @@ impl Searcher {
                 move_gen,
                 zobrist,
                 &control,
+                &mut self.tt
             );
             search_data.cumul_positions_searched += search_data.positions_searched;
             if eval == EVAL_QUIT {

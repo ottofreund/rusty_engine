@@ -2,16 +2,16 @@
 
 const CLUSTER_SIZE: usize = 3;
 const REPLACE_V_AGE_COEFFICIENT: u16 = 4;
-pub const DEFAULT_TT_SIZE: u32 = 16 * 1024 * 1024; // 16 MiB
+pub const DEFAULT_TT_SIZE: usize = 16 * 1024 * 1024; // == 16 MiB
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TTEntryType {
     Exact = 0,
     LowerBound = 1,
     UpperBound = 2,
 }
 
-const NULL_DEPTH_SENTINEL: u8 = 0;
+const NULL_DEPTH_SENTINEL: u8 = 255;
 const NULL_ENTRY: TTEntry = TTEntry {
     key: 0,
     best_move: 0,
@@ -20,6 +20,7 @@ const NULL_ENTRY: TTEntry = TTEntry {
     _type: TTEntryType::Exact,
     generation: 0,
 };
+const NULL_ENTRY_VALUE: i16 = -10_000;
 
 #[derive(Clone, Copy)]
 pub struct TTEntry {
@@ -65,32 +66,52 @@ impl TranspositionTable {
     }
 
     /// If hit, returns (true, entry) else returns (false, entry_to_replace)
-    pub fn probe(&mut self, key: u64) -> (bool, &mut TTEntry) {
+    pub fn probe(&self, key: u64) -> Option<TTEntry> {
         let cluster_index: usize = self.get_cluster_idx(key);
-        let cluster: &mut TTCluster = &mut self.clusters[cluster_index];
+        let cluster: &TTCluster = &self.clusters[cluster_index];
 
         for i in 0..CLUSTER_SIZE {
             if cluster.entries[i].key == key && cluster.entries[i].is_occupied() {
-                return (true, &mut cluster.entries[i]);
+                return Some(cluster.entries[i]);
             }
         }
-        
-        //no hit, find least valuable entry to replace
+        //no hit
+        return None;
+    }
+
+    pub fn store(&mut self, tte: TTEntry) {
+        let cluster_index: usize = self.get_cluster_idx(tte.key);
+        let cluster: &mut TTCluster = &mut self.clusters[cluster_index];
+
+        //find least valuable / existing same key entry to replace 
         let mut replace_i: usize = 0;
-        let mut replace_v = Self::replacement_value(&cluster.entries[0]);
-        for i in 1..CLUSTER_SIZE {
-            let cur_replace_v = Self::replacement_value(&cluster.entries[i]);
-            if replace_v > cur_replace_v {
+        let mut replace_entry_v = i16::MAX;
+        for i in 0..CLUSTER_SIZE {
+            if cluster.entries[i].key == tte.key && tte.is_occupied() {
+                let existing_d: u8 = cluster.entries[i].depth;
+                if tte.depth > existing_d || (tte.depth == existing_d && tte._type == TTEntryType::Exact) { //replace existing same key entry if geq depth
+                    cluster.entries[i] = tte;
+                }
+                return;
+            }
+            let cur_entry_v = Self::entry_value(self.generation, &cluster.entries[i]);
+            if replace_entry_v > cur_entry_v {
                 replace_i = i;
-                replace_v = cur_replace_v;
+                replace_entry_v = cur_entry_v;
             }
         }
-        return (false, &mut cluster.entries[replace_i]);
+        cluster.entries[replace_i] = tte;
     }
 
     #[inline]
-    fn replacement_value(entry: &TTEntry) -> i16 {
-        return entry.depth as i16 - REPLACE_V_AGE_COEFFICIENT as i16 * entry.generation as i16 - if entry.is_occupied() { 0 } else { 1000 };
+    fn entry_value(cur_gen: u8, entry: &TTEntry) -> i16 {
+        if !entry.is_occupied() {
+            return NULL_ENTRY_VALUE;
+        } else {
+            let age: i16 = cur_gen.wrapping_sub(entry.generation) as i16;
+            return entry.depth as i16 - REPLACE_V_AGE_COEFFICIENT as i16 * age;
+        }
+        
     }
 
     #[inline]
@@ -102,7 +123,7 @@ impl TranspositionTable {
 
 impl Default for TranspositionTable {
     fn default() -> Self {
-        let nof_clusters: usize = (DEFAULT_TT_SIZE as usize * 1024 * 1024) / std::mem::size_of::<TTCluster>();
+        let nof_clusters: usize = DEFAULT_TT_SIZE / std::mem::size_of::<TTCluster>();
         let clusters: Box<[TTCluster]> = vec![TTCluster {
             entries: [NULL_ENTRY ; CLUSTER_SIZE],
         }; nof_clusters]
