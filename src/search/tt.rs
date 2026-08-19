@@ -1,6 +1,8 @@
 //* Stockfish inspired implementation *//
 
-const CLUSTER_SIZE: usize = 3;
+use crate::search::eval::MATE_BOUND;
+
+const CLUSTER_SIZE: usize = 4;
 const REPLACE_V_AGE_COEFFICIENT: u16 = 4;
 pub const DEFAULT_TT_SIZE: usize = 16 * 1024 * 1024; // == 16 MiB
 
@@ -11,13 +13,12 @@ pub enum TTEntryType {
     UpperBound = 2,
 }
 
-const NULL_DEPTH_SENTINEL: u8 = 255;
+const NULL_SENTINEL: u8 = u8::MAX;
 const NULL_ENTRY: TTEntry = TTEntry {
     key: 0,
     best_move: 0,
-    depth: NULL_DEPTH_SENTINEL,
+    depth_and_bound_type: NULL_SENTINEL,
     score: 0,
-    _type: TTEntryType::Exact,
     generation: 0,
 };
 const NULL_ENTRY_VALUE: i16 = -10_000;
@@ -26,25 +27,56 @@ const NULL_ENTRY_VALUE: i16 = -10_000;
 pub struct TTEntry {
     pub key: u64,
     pub best_move: u32,
-    pub depth: u8,
-    pub score: i32,
-    pub _type: TTEntryType,
+    pub depth_and_bound_type: u8, //6 LSB are depth, 2 MSB are bound type
+    pub score: i16,
     pub generation: u8,
 }
 impl TTEntry {
 
+    pub fn new_packed(key: u64, best_move: u32, depth: u8, bound_type: TTEntryType, score: i16, generation: u8) -> Self {
+        let depth_and_bound_type: u8 = (depth & 0b111111) | ((bound_type as u8) << 6);
+        return Self {
+            key,
+            best_move,
+            depth_and_bound_type,
+            score,
+            generation,
+        }
+    }
+
     #[inline]
     pub fn is_occupied(&self) -> bool {
-        self.depth != NULL_DEPTH_SENTINEL
+        self.depth_and_bound_type != NULL_SENTINEL
+    }
+
+    #[inline]
+    pub fn depth(&self) -> u8 {
+        self.depth_and_bound_type & 0b111111
+    }
+
+    #[inline]
+    pub fn bound_type(&self) -> TTEntryType {
+        match (self.depth_and_bound_type >> 6) & 0b11 {
+            0 => TTEntryType::Exact,
+            1 => TTEntryType::LowerBound,
+            2 => TTEntryType::UpperBound,
+            _ => unreachable!(),
+        }
     }
 
 }
 
 
+#[repr(align(64))]
 #[derive(Clone, Copy)]
 pub struct TTCluster {
     pub entries: [TTEntry; CLUSTER_SIZE],
 }
+
+//compile time checks s.t. fits into cache line and aligns nicely
+const _: () = assert!(size_of::<TTEntry>() == 16);
+const _: () = assert!(size_of::<TTCluster>() == 64);
+const _: () = assert!(align_of::<TTCluster>() == 64);
 
 pub struct TranspositionTable {
     pub clusters: Box<[TTCluster]>,
@@ -87,9 +119,10 @@ impl TranspositionTable {
         let mut replace_i: usize = 0;
         let mut replace_entry_v = i16::MAX;
         for i in 0..CLUSTER_SIZE {
-            if cluster.entries[i].key == tte.key && tte.is_occupied() {
-                let existing_d: u8 = cluster.entries[i].depth;
-                if tte.depth > existing_d || (tte.depth == existing_d && tte._type == TTEntryType::Exact) { //replace existing same key entry if geq depth
+            if cluster.entries[i].key == tte.key && cluster.entries[i].is_occupied() {
+                let existing_d: u8 = cluster.entries[i].depth();
+                let tte_depth: u8 = tte.depth();
+                if tte_depth > existing_d || (tte_depth == existing_d && tte.bound_type() == TTEntryType::Exact) { //replace existing same key entry if geq depth
                     cluster.entries[i] = tte;
                 }
                 return;
@@ -109,7 +142,7 @@ impl TranspositionTable {
             return NULL_ENTRY_VALUE;
         } else {
             let age: i16 = cur_gen.wrapping_sub(entry.generation) as i16;
-            return entry.depth as i16 - REPLACE_V_AGE_COEFFICIENT as i16 * age;
+            return entry.depth() as i16 - REPLACE_V_AGE_COEFFICIENT as i16 * age;
         }
         
     }
@@ -117,6 +150,27 @@ impl TranspositionTable {
     #[inline]
     fn get_cluster_idx(&self, key: u64) -> usize {
         return (((key as u128) * (self.nof_clusters as u128)) >> 64) as usize;
+    }
+
+    // Important that mate scores are stored relative to node stored from and not search root
+    pub fn score_to_tt(score: i16, ply: i16) -> i16 {
+        if score >= MATE_BOUND {
+            return score + ply;
+        } else if score <= -MATE_BOUND {
+            return score - ply;
+        } else {
+            return score;
+        }
+    }
+
+    pub fn score_from_tt(score: i16, ply: i16) -> i16 {
+        if score >= MATE_BOUND {
+            return score - ply;
+        } else if score <= -MATE_BOUND {
+            return score + ply;
+        } else {
+            return score;
+        }
     }
 
 }

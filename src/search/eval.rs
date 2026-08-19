@@ -3,8 +3,8 @@ use crate::{
     search::table_loader::parse_table_values,
 };
 
-pub const MATE_EVAL: i32 = 1_000_000;
-pub const PRUNE_EVAL: i32 = 2_000_000;
+pub const MATE_EVAL: i16 = 25_000;
+pub const MATE_BOUND: i16 = MATE_EVAL - 1000;
 const TABLE_SOURCES: [&str; 8] = [
     include_str!("../../assets/piece_square_tables/pawn_e.txt"),
     include_str!("../../assets/piece_square_tables/knight.txt"),
@@ -16,11 +16,11 @@ const TABLE_SOURCES: [&str; 8] = [
     include_str!("../../assets/piece_square_tables/king_l.txt"),
 ];
 
-pub const PIECE_MATERIAL_VALUE: [i32; 12] = [100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000];
+pub const PIECE_MATERIAL_VALUE: [i16; 12] = [100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000];
 
 //pst: piece square table
 pub struct Evaluator {
-    pst: [Vec<i32>; 8], // [6] == pawn late game, [7] == king late game
+    pst: [Vec<i16>; 8], // [6] == pawn late game, [7] == king late game
 }
 
 impl Default for Evaluator {
@@ -35,15 +35,15 @@ impl Default for Evaluator {
 impl Evaluator {
     /// simple eval based on piece square value tables
     /// mover is only required for negamax algorithm's sake
-    pub fn eval(&self, pieces: [u64; 12], mover: u32, is_late_game: bool) -> i32 {
-        let mut v: i32 = 0;
+    pub fn eval(&self, pieces: [u64; 12], mover: u32, is_late_game: bool) -> i16 {
+        let mut v: i16 = 0;
         let piece_types_per_color: usize = NOF_PIECE_TYPES as usize;
         for p in W_PAWN_U..=B_KING_U {
             let mut p_bb: u64 = pieces[p];
             if p_bb == 0 {
                 continue;
             }
-            let v_table: &Vec<i32> = self.get_table(p % piece_types_per_color, is_late_game);
+            let v_table: &Vec<i16> = self.get_table(p % piece_types_per_color, is_late_game);
             if p < piece_types_per_color {
                 while p_bb > 0 {
                     v += PIECE_MATERIAL_VALUE[p];
@@ -65,7 +65,7 @@ impl Evaluator {
     }
 
     //piece without color so 0..6
-    fn get_table(&self, piece: usize, is_late_game: bool) -> &Vec<i32> {
+    fn get_table(&self, piece: usize, is_late_game: bool) -> &Vec<i16> {
         if is_late_game {
             let p_u32: u32 = piece as u32;
             if p_u32 == W_PAWN {

@@ -76,12 +76,12 @@ impl SeeWorker {
                     || (side == BLACK && action_sqr >> 3 == 0));
             // Material-only SEE assumes promotion to the most valuable piece.
             let taker_value: i32 = if promotes {
-                PIECE_MATERIAL_VALUE[W_QUEEN_U]
+                PIECE_MATERIAL_VALUE[W_QUEEN_U] as i32
             } else {
-                PIECE_MATERIAL_VALUE[piece_type]
+                PIECE_MATERIAL_VALUE[piece_type] as i32
             };
             let promotion_gain: i32 = if promotes {
-                PIECE_MATERIAL_VALUE[W_QUEEN_U] - PIECE_MATERIAL_VALUE[W_PAWN_U]
+                PIECE_MATERIAL_VALUE[W_QUEEN_U] as i32 - PIECE_MATERIAL_VALUE[W_PAWN_U] as i32
             } else {
                 0
             };
@@ -107,7 +107,7 @@ impl SeeWorker {
 
         let res: i32 = see(0,
             board.turn,
-            PIECE_MATERIAL_VALUE[_move::eaten_piece(initiating_move).unwrap() as usize % NOF_PIECE_TYPES_U],
+            PIECE_MATERIAL_VALUE[_move::eaten_piece(initiating_move).unwrap() as usize % NOF_PIECE_TYPES_U] as i32,
             action_sqr,
             board.total_occupation(),
             Some(initiating_move),

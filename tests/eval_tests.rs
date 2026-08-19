@@ -1,19 +1,14 @@
 use std::path::PathBuf;
 
 use rusty_engine::{
-    repr::types::{BLACK, B_KING_U, B_KNIGHT_U, B_PAWN_U, WHITE, W_KING_U, W_PAWN_U},
-    search::{eval::Evaluator, table_loader::read_table_value_file},
+    repr::types::{B_KING_U, B_KNIGHT_U, B_PAWN_U, BLACK, W_KING_U, W_PAWN_U, WHITE}, search::{eval::{Evaluator, PIECE_MATERIAL_VALUE}, table_loader::read_table_value_file},
 };
-
-const PAWN_MATERIAL_VALUE: i32 = 100;
-const KNIGHT_MATERIAL_VALUE: i32 = 320;
-const KING_MATERIAL_VALUE: i32 = 20_000;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn load_table(file_name: &str) -> Vec<i32> {
+fn load_table(file_name: &str) -> Vec<i16> {
     let path = repo_root()
         .join("assets")
         .join("piece_square_tables")
@@ -36,8 +31,8 @@ fn eval_uses_piece_square_values_for_white_mover() {
 
     let pawn_table = load_table("pawn_e.txt");
     let king_table = load_table("king_e.txt");
-    let expected = 2 * PAWN_MATERIAL_VALUE
-        + KING_MATERIAL_VALUE
+    let expected: i16 = 2 * PIECE_MATERIAL_VALUE[W_PAWN_U]
+        + PIECE_MATERIAL_VALUE[W_KING_U]
         + pawn_table[8]
         + pawn_table[12]
         + king_table[4];
@@ -56,7 +51,7 @@ fn eval_for_black_mover_is_negated_and_mirrored() {
     pieces[B_KNIGHT_U] = 1u64 << knight_square;
 
     let knight_table = load_table("knight.txt");
-    let expected = KNIGHT_MATERIAL_VALUE + knight_table[knight_square ^ 56];
+    let expected = PIECE_MATERIAL_VALUE[B_KNIGHT_U] + knight_table[knight_square ^ 56];
 
     let eval = evaluator.eval(pieces, BLACK, false);
     assert_eq!(eval, expected);
@@ -78,7 +73,7 @@ fn eval_uses_late_game_tables_for_pawn_and_king() {
 
     let open_eval = evaluator.eval(pieces, WHITE, false);
     let end_eval = evaluator.eval(pieces, WHITE, true);
-    let material = PAWN_MATERIAL_VALUE + KING_MATERIAL_VALUE;
+    let material = PIECE_MATERIAL_VALUE[W_PAWN_U] + PIECE_MATERIAL_VALUE[W_KING_U];
     let expected_open = material + pawn_open[17] + king_open[20];
     let expected_end = material + pawn_end[17] + king_end[20];
 
@@ -102,9 +97,9 @@ fn eval_with_both_sides_pieces_is_consistent_for_each_mover() {
     let pawn_table = load_table("pawn_e.txt");
     let king_table = load_table("king_e.txt");
 
-    let white_sum = PAWN_MATERIAL_VALUE + pawn_table[18] + KING_MATERIAL_VALUE + king_table[4];
+    let white_sum = PIECE_MATERIAL_VALUE[W_PAWN_U] + pawn_table[18] + PIECE_MATERIAL_VALUE[W_KING_U] + king_table[4];
     let black_sum =
-        PAWN_MATERIAL_VALUE + pawn_table[43 ^ 56] + KING_MATERIAL_VALUE + king_table[60 ^ 56];
+        PIECE_MATERIAL_VALUE[B_PAWN_U] + pawn_table[43 ^ 56] + PIECE_MATERIAL_VALUE[B_KING_U] + king_table[60 ^ 56];
     let expected_white = white_sum - black_sum;
     let expected_black = -expected_white;
 

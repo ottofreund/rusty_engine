@@ -62,6 +62,18 @@ fn half_move_clock_updates_and_unmakes() {
     assert_eq!(pos.board.half_move_clock, 0);
 }
 
+#[test]
+fn material_validation_preserves_synthetic_positions_but_rejects_score_overflow() {
+    let maximum_promoted_material = "k7/QQQQQQQQ/QRRBBNNK/8/8/8/8/8 w - - 0 1".to_owned();
+    assert!(fen_tool::is_valid_fen(&maximum_promoted_material));
+
+    let synthetic_extra_pawn = "rnbqkbnr/pppppppp/8/8/4Pp2/8/PPPP2PP/RNBQKBNR b KQkq e3 0 1".to_owned();
+    assert!(fen_tool::is_valid_fen(&synthetic_extra_pawn));
+
+    let impossible_queen_count = "QQQQQQQk/QQQQQQQQ/QQQQQQQQ/QQQQQQQQ/QQQQQQQQ/QQQQQQQQ/QQQQQQQQ/QQQQQQQK w - - 0 1".to_owned();
+    assert!(!fen_tool::is_valid_fen(&impossible_queen_count));
+}
+
 fn legal_move_matching(pos: &rusty_engine::repr::position::Position, from: u32, to: u32) -> u32 {
     pos.legal_search_moves()
         .iter()
