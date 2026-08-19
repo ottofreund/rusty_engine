@@ -12,6 +12,11 @@ fn parse_go(line: &str) -> Option<GoCommand> {
 }
 
 #[test]
+fn parses_display_command() {
+    assert!(matches!(parse_command("d"), Some(ArbiterCommand::Display)));
+}
+
+#[test]
 fn parses_static_depth() {
     let command = parse_go("go depth 7").expect("valid go command");
 

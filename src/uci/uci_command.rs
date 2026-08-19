@@ -4,6 +4,7 @@ use crate::{
 
 pub enum ArbiterCommand {
     UCI,
+    Display,
     IsReady,
     SetOption(_Option),
     UCINewGame,

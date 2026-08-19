@@ -21,6 +21,7 @@ use crate::{
 
 pub async fn listen(cpu_game: CpuGame) {
     let stdin = std::io::stdin();
+    let mut display_board = cpu_game.position.board.clone();
     let mut active_search_thread: Option<std::thread::JoinHandle<Box<CpuGame>>> = None;
     let mut cpu_game: Option<Box<CpuGame>> = Some(Box::new(cpu_game));
     let search_kill_switch: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
@@ -36,6 +37,9 @@ pub async fn listen(cpu_game: CpuGame) {
                         println!("id name Rusty");
                         //println!("option name Ponder type check default true");
                         println!("uciok");
+                    }
+                    ArbiterCommand::Display => {
+                        println!("{}", display_board.to_string());
                     }
                     ArbiterCommand::IsReady => {
                         println!("readyok");
@@ -117,6 +121,7 @@ pub async fn listen(cpu_game: CpuGame) {
                         if last_pos_command.lock().await.preceeds(&pc) {
                             match cpu_g.sync_new_move(pc.moves.last().unwrap().as_str()) {
                                 Ok(()) => {  
+                                    display_board = cpu_g.position.board.clone();
                                     *last_pos_command.lock().await = pc.clone();
                                 }
                                 Err(err) => {
@@ -126,6 +131,7 @@ pub async fn listen(cpu_game: CpuGame) {
                         } else {
                             match cpu_g.import_position(pc.fen.as_str(), pc.moves.clone()) {
                                 Ok(()) => {
+                                    display_board = cpu_g.position.board.clone();
                                     *last_pos_command.lock().await = pc.clone();
                                 }
                                 Err(err) => {
@@ -166,6 +172,7 @@ pub(super) fn parse_command(line: &str) -> Option<ArbiterCommand> {
     }
     match parts[0] {
         "uci" => Some(ArbiterCommand::UCI),
+        "d" => Some(ArbiterCommand::Display),
         "isready" => Some(ArbiterCommand::IsReady),
         "position" if !is_invalid_pos_command(&parts) => {
             let moves_idx: Option<usize> = parts.iter().position(|&x| x == "moves");
