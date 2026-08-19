@@ -15,6 +15,7 @@ const ALPHA_INIT: i16 = -i16::MAX;
 const BETA_INIT: i16 = i16::MAX;
 const EVAL_INIT: i16 = -i16::MAX;
 const EVAL_QUIT: i16 = 31111;
+const EVAL_HISTORY_DEPENDENT_DRAW: i16 = 32222; //distuinguishable s.t. can avoid adding TT entry based on history dependent results
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
@@ -216,45 +217,46 @@ impl Searcher {
             let mut eval: i16 = EVAL_INIT;
             let is_three_fold: bool = search_data.in_three_fold(pos);
             let (s, e) = pos.search_move_bounds();
-            let tte: Option<TTEntry> = tt.probe(pos.board.zhash).map(|entry| {
-                TTEntry {
-                    score: TranspositionTable::score_from_tt(entry.score, d as i16),
-                    ..entry
-                }
-            });
-            let key_collision: bool = tte.is_some_and(|entry| {
-                (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
-            });
-            //TT cutoff?
-            if let Some(tt_entry) = tte {
-                if  tt_entry.depth() >= (target_d.saturating_sub(d)) as u8 
-                    && !key_collision 
-                    && !is_three_fold
-                    && pos.board.half_move_clock < 96 //near 50 move draw, don't trust TT
-                {
-                    match tt_entry.bound_type() {
-                        TTEntryType::Exact => {
-                            if d < target_d {
-                                let row_start = search_data.pv_ply_indices[d];
-                                let row_end = search_data.pv_ply_indices[d + 1];
+            
+            if !is_three_fold && pos.board.half_move_clock <  96 { //near 50 move draw, don't trust TT
+                let tte: Option<TTEntry> = tt.probe(pos.board.zhash).map(|entry| {
+                    TTEntry {
+                        score: TranspositionTable::score_from_tt(entry.score, d as i16),
+                        ..entry
+                    }
+                });
+                //TT cutoff?
+                if let Some(tt_entry) = tte {
+                    if  tt_entry.depth() >= (target_d.saturating_sub(d)) as u8 
+                        && !((tt_entry.best_move == NULL_MOVE && tt_entry.depth() > 0) || !pos.move_arr[s..e].contains(&tt_entry.best_move)) // !key_collision
+                    {
+                        match tt_entry.bound_type() {
+                            TTEntryType::Exact => {
+                                if d < target_d {
+                                    let row_start = search_data.pv_ply_indices[d];
+                                    let row_end = search_data.pv_ply_indices[d + 1];
 
-                                search_data.pv[row_start..row_end].fill(NULL_MOVE);
-                                search_data.pv[row_start] = tt_entry.best_move;
+                                    search_data.pv[row_start..row_end].fill(NULL_MOVE);
+                                    search_data.pv[row_start] = tt_entry.best_move;
+                                }
+                                return tt_entry.score;
                             }
+                            TTEntryType::LowerBound => {
+                                alpha = max(alpha, tt_entry.score);
+                            }
+                            TTEntryType::UpperBound => {
+                                beta = min(beta, tt_entry.score);
+                            }
+                        }
+                        if alpha >= beta {
                             return tt_entry.score;
                         }
-                        TTEntryType::LowerBound => {
-                            alpha = max(alpha, tt_entry.score);
-                        }
-                        TTEntryType::UpperBound => {
-                            beta = min(beta, tt_entry.score);
-                        }
-                    }
-                    if alpha >= beta {
-                        return tt_entry.score;
                     }
                 }
             }
+
+            
+            
             let old_alpha: i16 = alpha;
             let old_beta: i16 = beta;
             //terminal node?
@@ -267,7 +269,7 @@ impl Searcher {
                     return 0; //stalemate
                 }
             } else if is_three_fold || pos.board.is_fifty_move_draw() {
-                return 0;
+                return EVAL_HISTORY_DEPENDENT_DRAW;
             } else if d >= target_d {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
@@ -289,6 +291,7 @@ impl Searcher {
 
             let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
+            let mut chose_history_dependent_draw: bool = false;
             //TODO use low depth TT hit to order moves, maybe just give history bonus
             for i in s..e {
                 let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv[d] } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
@@ -322,9 +325,13 @@ impl Searcher {
                 if child_eval == EVAL_QUIT {
                     return EVAL_QUIT;
                 }
-
-                let new_eval: i16 = -child_eval; //candidate for this node
+                let new_eval: i16 = if child_eval == EVAL_HISTORY_DEPENDENT_DRAW { 0 } else { -child_eval };
                 if new_eval > eval {
+                    if child_eval == EVAL_HISTORY_DEPENDENT_DRAW {
+                        chose_history_dependent_draw = true;
+                    } else {
+                        chose_history_dependent_draw = false;
+                    }
                     //child ply's pv appended to this ply's pv
                     eval = new_eval;
                     best_move = mov;
@@ -353,22 +360,24 @@ impl Searcher {
                     break; //i.e. return alpha
                 }
             }
-            //add TT entry
-            let tte: TTEntry = TTEntry::new_packed(
-                pos.board.zhash,
-                best_move,
-                (target_d.saturating_sub(d)) as u8,
-                if eval <= old_alpha {
-                    TTEntryType::UpperBound
-                } else if eval >= old_beta {
-                    TTEntryType::LowerBound
-                } else {
-                    TTEntryType::Exact
-                },
-                TranspositionTable::score_to_tt(eval, d as i16),
-                tt.generation
-            );
-            tt.store(tte);
+            if !chose_history_dependent_draw {
+                //add TT entry
+                let tte: TTEntry = TTEntry::new_packed(
+                    pos.board.zhash,
+                    best_move,
+                    (target_d.saturating_sub(d)) as u8,
+                    if eval <= old_alpha {
+                        TTEntryType::UpperBound
+                    } else if eval >= old_beta {
+                        TTEntryType::LowerBound
+                    } else {
+                        TTEntryType::Exact
+                    },
+                    TranspositionTable::score_to_tt(eval, d as i16),
+                    tt.generation
+                );
+                tt.store(tte);
+            }  
             return eval;
         }
         //iterative deepening:
