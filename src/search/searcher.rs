@@ -294,11 +294,13 @@ impl Searcher {
             let mut only_bad_captures_left: Option<bool> = None;
             //TODO use low depth TT hit to order moves, maybe just give history bonus
             for i in s..e {
-                let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv[d] } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
+                let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
+                let prev_pv_mv_for_ordering: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv_mv } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
+                
                 let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], prev_pv_mv, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], prev_pv_mv_for_ordering, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
 
-                follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
+                follows_prev_pv = follows_prev_pv && (mov == prev_pv_mv || prev_pv_mv == NULL_MOVE);
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
