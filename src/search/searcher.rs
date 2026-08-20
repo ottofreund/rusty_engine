@@ -216,45 +216,48 @@ impl Searcher {
             let mut eval: i16 = EVAL_INIT;
             let is_three_fold: bool = search_data.in_three_fold(pos);
             let (s, e) = pos.search_move_bounds();
-            let tte: Option<TTEntry> = tt.probe(pos.board.zhash).map(|entry| {
-                TTEntry {
-                    score: TranspositionTable::score_from_tt(entry.score, d as i16),
-                    ..entry
-                }
-            });
-            let key_collision: bool = tte.is_some_and(|entry| {
-                (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
-            });
-            //TT cutoff?
-            if let Some(tt_entry) = tte {
-                if  tt_entry.depth() >= (target_d.saturating_sub(d)) as u8 
-                    && !key_collision 
-                    && !is_three_fold
-                    && pos.board.half_move_clock < 96 //near 50 move draw, don't trust TT
-                {
-                    match tt_entry.bound_type() {
-                        TTEntryType::Exact => {
-                            if d < target_d {
-                                let row_start = search_data.pv_ply_indices[d];
-                                let row_end = search_data.pv_ply_indices[d + 1];
+            
+            if !follows_prev_pv && !is_three_fold && pos.board.half_move_clock < 96 { //don't trust tt if near 50 move draw or in prev PV
+                let tte: Option<TTEntry> = tt.probe(pos.board.zhash).map(|entry| {
+                    TTEntry {
+                        score: TranspositionTable::score_from_tt(entry.score, d as i16),
+                        ..entry
+                    }
+                });
+                let key_collision: bool = tte.is_some_and(|entry| {
+                    (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
+                });
+                //TT cutoff?
+                if let Some(tt_entry) = tte {
+                    if  tt_entry.depth() >= (target_d.saturating_sub(d)) as u8 
+                        && !key_collision 
+                    {
+                        match tt_entry.bound_type() {
+                            TTEntryType::Exact => {
+                                if d < target_d {
+                                    let row_start = search_data.pv_ply_indices[d];
+                                    let row_end = search_data.pv_ply_indices[d + 1];
 
-                                search_data.pv[row_start..row_end].fill(NULL_MOVE);
-                                search_data.pv[row_start] = tt_entry.best_move;
+                                    search_data.pv[row_start..row_end].fill(NULL_MOVE);
+                                    search_data.pv[row_start] = tt_entry.best_move;
+                                }
+                                return tt_entry.score;
                             }
+                            TTEntryType::LowerBound => {
+                                alpha = max(alpha, tt_entry.score);
+                            }
+                            TTEntryType::UpperBound => {
+                                beta = min(beta, tt_entry.score);
+                            }
+                        }
+                        if alpha >= beta {
                             return tt_entry.score;
                         }
-                        TTEntryType::LowerBound => {
-                            alpha = max(alpha, tt_entry.score);
-                        }
-                        TTEntryType::UpperBound => {
-                            beta = min(beta, tt_entry.score);
-                        }
-                    }
-                    if alpha >= beta {
-                        return tt_entry.score;
                     }
                 }
             }
+
+            
             let old_alpha: i16 = alpha;
             let old_beta: i16 = beta;
             //terminal node?
