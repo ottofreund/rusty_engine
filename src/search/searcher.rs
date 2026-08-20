@@ -269,7 +269,7 @@ impl Searcher {
                     return 0; //stalemate
                 }
             } else if is_three_fold || pos.board.is_fifty_move_draw() {
-                return EVAL_HISTORY_DEPENDENT_DRAW;
+                if d == 0 { return 0 } else { return EVAL_HISTORY_DEPENDENT_DRAW }
             } else if d >= target_d {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
@@ -292,7 +292,7 @@ impl Searcher {
             let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
             let mut chose_history_dependent_draw: bool = false;
-            //TODO use low depth TT hit to order moves, maybe just give history bonus
+            //TODO use low depth TT hit to order moves, maybe also give history bonus
             for i in s..e {
                 let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv[d] } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
                 let mov: u32 =
@@ -378,7 +378,11 @@ impl Searcher {
                 );
                 tt.store(tte);
             }  
-            return eval;
+            if chose_history_dependent_draw && d != 0 {
+                return EVAL_HISTORY_DEPENDENT_DRAW
+            } else {
+                return eval;
+            }
         }
         //iterative deepening:
         let synced_pv_depth: usize = self.count_pv_moves(idx);
