@@ -25,27 +25,12 @@ pub fn is_valid_fen(fen: &String) -> bool {
     if rows.clone().count() != 8 {
         return false;
     }
-    let mut white_king: bool = false;
-    let mut black_king: bool = false;
     for row in rows.clone() {
         if !is_legal_piece_row(row) {
             return false;
         }
-        if row.contains('K') {
-            if white_king {
-                return false;
-            }
-            white_king = true;
-        }
-        if row.contains('k') {
-            if black_king {
-                return false;
-            }
-            black_king = true;
-        }
     }
-    //both sides must have king
-    if !white_king || !black_king {
+    if !has_score_safe_material(pieces) {
         return false;
     }
     //second section is mover
@@ -120,6 +105,56 @@ fn is_legal_piece_row(row: &str) -> bool {
         return false;
     }
     return true;
+}
+
+/// Ensures piece placement cannot overflow the evaluator's i16 accumulator.
+///
+/// FEN input is allowed to describe synthetic positions used by tests, so this deliberately
+/// does not require every material configuration to be reachable from the initial position.
+fn has_score_safe_material(piece_placement: &str) -> bool {
+    const PAWN: usize = 0;
+    const KNIGHT: usize = 1;
+    const BISHOP: usize = 2;
+    const ROOK: usize = 3;
+    const QUEEN: usize = 4;
+    const KING: usize = 5;
+    const MATERIAL_VALUES: [usize; 6] = [100, 320, 330, 500, 900, 20_000];
+    const MAX_PIECE_SQUARE_VALUE: usize = 50;
+
+    let mut white = [0usize; 6];
+    let mut black = [0usize; 6];
+
+    for piece in piece_placement.chars() {
+        let (counts, piece_idx) = match piece {
+            'P' => (&mut white, PAWN),
+            'N' => (&mut white, KNIGHT),
+            'B' => (&mut white, BISHOP),
+            'R' => (&mut white, ROOK),
+            'Q' => (&mut white, QUEEN),
+            'K' => (&mut white, KING),
+            'p' => (&mut black, PAWN),
+            'n' => (&mut black, KNIGHT),
+            'b' => (&mut black, BISHOP),
+            'r' => (&mut black, ROOK),
+            'q' => (&mut black, QUEEN),
+            'k' => (&mut black, KING),
+            _ => continue,
+        };
+        counts[piece_idx] += 1;
+    }
+
+    [white, black].iter().all(|counts| {
+        if counts[KING] != 1 {
+            return false;
+        }
+
+        counts
+            .iter()
+            .zip(MATERIAL_VALUES)
+            .map(|(count, material)| count * (material + MAX_PIECE_SQUARE_VALUE))
+            .sum::<usize>()
+            <= i16::MAX as usize
+    })
 }
 
 

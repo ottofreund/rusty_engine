@@ -327,7 +327,7 @@ impl Board {
 
             return eps[0..generated]
                 .iter()
-                .filter(|ep| move_gen.pseudolegal_is_legal(**ep, self, self.turn))
+                .filter(|ep| move_gen.pseudolegal_is_legal(**ep, self))
                 .count()
                 == 0;
         } else {

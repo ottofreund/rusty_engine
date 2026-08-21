@@ -1,20 +1,20 @@
-use std::{cmp::max, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}, time::Instant};
+use std::{cmp::{max, min}, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}, time::Instant};
 
 use crate::{
     repr::{
         _move::{self, *}, board::Board, move_gen::MoveGen, position::Position,
     }, search::{
-        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table},
+        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
     }, utils::zobrist::Zobrist,
 };
 
 pub const MAX_SEARCH_DEPTH: usize = 50;
 const THREAD_COUNT: usize = 4;
 const STOP_CHECK_INTERVAL: u64 = 8192;
-const ALPHA_INIT: i32 = -1_000_000_000;
-const BETA_INIT: i32 = 1_000_000_000;
-const EVAL_INIT: i32 = -1_000_000_000;
-const EVAL_QUIT: i32 = 555_555_555;
+const ALPHA_INIT: i16 = -i16::MAX;
+const BETA_INIT: i16 = i16::MAX;
+const EVAL_INIT: i16 = -i16::MAX;
+const EVAL_QUIT: i16 = 31111;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
@@ -55,6 +55,7 @@ pub struct Searcher {
     pub multithreaded: bool,
     pub search_config: SearchConfig,
     pub evaluator: Evaluator,
+    pub tt: TranspositionTable,
     last_sync_deviates_from_pv: bool,
 }
 
@@ -131,11 +132,13 @@ impl Searcher {
             multithreaded: multithreaded,
             search_config,
             evaluator: Evaluator::default(),
+            tt: TranspositionTable::default(),
             last_sync_deviates_from_pv: true,
         };
     }
 
     pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<Arc<AtomicBool>>) {
+        self.tt.generation = self.tt.generation.wrapping_add(1);
         if self.multithreaded {
             panic!("multithreaded search");
             //PRAGMA FOR LOOP HERE
@@ -184,11 +187,11 @@ impl Searcher {
         fn inner(
             d: usize,
             target_d: usize,
-            mut alpha: i32,
-            beta: i32,
+            mut alpha: i16,
+            mut beta: i16,
             mut in_quiescence: bool,
             use_quiescence: bool,
-            mut follows_prev_pv: bool,
+            follows_prev_pv: bool,
             prev_pv: &[u32],
             pos: &mut Position,
             evaluator: &Evaluator,
@@ -196,12 +199,13 @@ impl Searcher {
             move_gen: &MoveGen,
             zobrist: &Zobrist,
             control: &SearchControl<'_>,
-        ) -> i32 {
+            tt: &mut TranspositionTable,
+        ) -> i16 {
             if control.should_stop(search_data.positions_searched) {
                 return EVAL_QUIT;
             }
 
-            if d < target_d {
+            if d < target_d { //initialize triangular pv row for this ply
                 let row_start = search_data.pv_ply_indices[d];
                 search_data.pv[row_start] = NULL_MOVE;
             }
@@ -209,17 +213,63 @@ impl Searcher {
             search_data.positions_searched += 1;
             search_data.sel_depth = max(search_data.sel_depth, d);
 
-            let mut eval: i32 = EVAL_INIT;
+            let mut eval: i16 = EVAL_INIT;
+            let is_three_fold: bool = search_data.in_three_fold(pos);
             let (s, e) = pos.search_move_bounds();
+            
+            let tte: Option<TTEntry> = tt.probe(pos.board.zhash).map(|entry| {
+                TTEntry {
+                    score: TranspositionTable::score_from_tt(entry.score, d as i16),
+                    ..entry
+                }
+            });
+            let key_collision: bool = tte.is_some_and(|entry| {
+                (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
+            });
+            //TT cutoff?
+            if let Some(tt_entry) = tte {
+                if  !follows_prev_pv 
+                    && !is_three_fold 
+                    && pos.board.half_move_clock < 96
+                    && tt_entry.depth() >= (target_d.saturating_sub(d)) as u8
+                    && !key_collision
+                { //don't trust tt if near 50 move draw or in prev PV
+                    match tt_entry.bound_type() {
+                        TTEntryType::Exact => {
+                            if d < target_d {
+                                let row_start = search_data.pv_ply_indices[d];
+                                let row_end = search_data.pv_ply_indices[d + 1];
+
+                                search_data.pv[row_start..row_end].fill(NULL_MOVE);
+                                search_data.pv[row_start] = tt_entry.best_move;
+                            }
+                            return tt_entry.score;
+                        }
+                        TTEntryType::LowerBound => {
+                            alpha = max(alpha, tt_entry.score);
+                        }
+                        TTEntryType::UpperBound => {
+                            beta = min(beta, tt_entry.score);
+                        }
+                    }
+                    if alpha >= beta {
+                        return tt_entry.score;
+                    }
+                }
+            }
+            
+            let old_alpha: i16 = alpha;
+            let old_beta: i16 = beta;
+            //terminal node?
             if s == e {
                 if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + d as i32; //sooner mate is better
+                    return -MATE_EVAL + d as i16; //sooner mate is better
                 } else if in_quiescence {
                     return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game()); //might miss stalemate but not worth it to check for performance reasons
                 } else {
                     return 0; //stalemate
                 }
-            } else if search_data.in_three_fold(pos) || pos.board.is_fifty_move_draw() {
+            } else if is_three_fold || pos.board.is_fifty_move_draw() {
                 return 0;
             } else if d >= target_d {
                 if use_quiescence {
@@ -236,29 +286,61 @@ impl Searcher {
                 }
             }
 
-            if d == target_d - 1 && use_quiescence {
+            if d == target_d - 1 && use_quiescence { // target_d - 1 because here we generate moves for target_d
                 in_quiescence = true;
             }
 
+            let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
 
-            for i in s..e {
-                let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv[d] } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
-                let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], prev_pv_mv, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+            let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
+            let mut primary_selection: u32;
+            let mut secondary_selection: u32;
+            if tte.is_some() && !key_collision {
+                if prev_pv_mv != NULL_MOVE {
+                    if tte.unwrap().depth() as usize > target_d.saturating_sub(d + 1) {
+                        primary_selection = tte.unwrap().best_move;
+                        secondary_selection = prev_pv_mv;
+                    } else {
+                        primary_selection = prev_pv_mv;
+                        secondary_selection = tte.unwrap().best_move;
+                    }
+                } else {
+                    primary_selection = tte.unwrap().best_move;
+                    secondary_selection = NULL_MOVE;
+                }
+            } else {
+                primary_selection = prev_pv_mv; //can be NULL_MOVE
+                secondary_selection = NULL_MOVE;
+            }
 
-                follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
+            if primary_selection == secondary_selection {
+                secondary_selection = NULL_MOVE;
+            }
+            //TODO use low depth TT hit to order moves, maybe also give history bonus
+            //TODO i == s condition
+            for i in s..e {
+                let mov: u32 =
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+
+                if mov == primary_selection {
+                    primary_selection = NULL_MOVE;
+                } else if mov == secondary_selection {
+                    secondary_selection = NULL_MOVE;
+                }
+
+                let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
-                let child_eval: i32 = inner(
+                let child_eval: i16 = inner(
                     d + 1,
                     target_d,
                     -beta,
                     -alpha,
                     in_quiescence,
                     use_quiescence,
-                    follows_prev_pv,
+                    child_follows_prev_pv,
                     prev_pv,
                     pos,
                     evaluator,
@@ -266,6 +348,7 @@ impl Searcher {
                     move_gen,
                     zobrist,
                     control,
+                    tt
                 );
                 search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
@@ -274,10 +357,11 @@ impl Searcher {
                     return EVAL_QUIT;
                 }
 
-                let new_eval: i32 = -child_eval; //candidate for this node
+                let new_eval: i16 = -child_eval; //candidate for this node
                 if new_eval > eval {
                     //child ply's pv appended to this ply's pv
                     eval = new_eval;
+                    best_move = mov;
                     if d < target_d {
                         let cur_ply_s_idx: usize = search_data.pv_ply_indices[d];
                         let child_ply_s_idx: usize = cur_ply_s_idx + (target_d - d);
@@ -300,9 +384,25 @@ impl Searcher {
                             target_d - d,
                         );
                     }
-                    return alpha;
+                    break; //i.e. return alpha
                 }
             }
+            //add TT entry
+            let tte: TTEntry = TTEntry::new_packed(
+                pos.board.zhash,
+                best_move,
+                (target_d.saturating_sub(d)) as u8,
+                if eval <= old_alpha {
+                    TTEntryType::UpperBound
+                } else if eval >= old_beta {
+                    TTEntryType::LowerBound
+                } else {
+                    TTEntryType::Exact
+                },
+                TranspositionTable::score_to_tt(eval, d as i16),
+                tt.generation
+            );
+            tt.store(tte);
             return eval;
         }
         //iterative deepening:
@@ -317,7 +417,7 @@ impl Searcher {
             prev_pv[..completed_pv_len]
                 .copy_from_slice(&search_data.pv[..completed_pv_len]);
             search_data.pv_ply_indices = get_triang_pv_ply_idx_table(d);
-            let eval: i32 = inner(
+            let eval: i16 = inner(
                 0,
                 d,
                 ALPHA_INIT,
@@ -332,6 +432,7 @@ impl Searcher {
                 move_gen,
                 zobrist,
                 &control,
+                &mut self.tt
             );
             search_data.cumul_positions_searched += search_data.positions_searched;
             if eval == EVAL_QUIT {
@@ -434,21 +535,23 @@ impl Searcher {
         }
     }
 
-    //k == 1, so "selection pick", in place
-    //only_bad_captures_left is on all calls after first bad capture is returned
+    ///k == 1, so "selection pick", in place <br>
+    ///primary selection and secondary selection are for possible prev pv move and tt move, order depending on tt move depth
     fn partial_selection_sort(
         move_arr_s: &mut [u32],
-        pv_mv: u32,
+        primary_selection: u32,
+        secondary_selection: u32,
         only_bad_captures_left: &mut Option<bool>,
         move_gen: &MoveGen,
         search_data: &mut SearchData,
         board: &Board
     ) -> u32 {
         let mut best_i: usize = usize::MAX;
-        if pv_mv != NULL_MOVE {
-            let idx = move_arr_s.iter().position(|m| *m == pv_mv).expect("pv move was some but not generated");
-            best_i = idx;
-        } else { //no pv move available
+        if primary_selection != NULL_MOVE {
+            best_i = move_arr_s.iter().position(|m| *m == primary_selection).expect("primary selection was some but not generated");
+        } else if secondary_selection != NULL_MOVE {
+            best_i = move_arr_s.iter().position(|m| *m == secondary_selection).expect("secondary selection was some but not generated");
+        } else { //no priority move available
             //non-dominating is non-captures if !*only_bad_captures_left, else if *only_bad_captures_left then only bad captures.
             //If only_bad_captures_left == None, then non-dominating are both non-captures and bad captures
             let mut best_v: i32 = i32::MIN;
@@ -462,13 +565,13 @@ impl Searcher {
                     if _move::is_negative_see(mov) {
                         if let Some(only_bad_left) = only_bad_captures_left {
                             if *only_bad_left {
-                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
                             } //else quiets left so ignore bad capture
                         } else { //quiets may remain but we don't know yet
-                            cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                            cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
                         }
                     } else if _move::is_positive_see(mov) {
-                        cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                        cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
                         found_dominating = true;
                     } else { //unevaluated capture
                         let is_good_capture: bool =
@@ -476,16 +579,16 @@ impl Searcher {
 
                         if is_good_capture {
                             move_arr_s[i] = _move::with_positive_see(mov);
-                            cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                            cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
                             found_dominating = true;
                         } else {
                             move_arr_s[i] = _move::with_negative_see(mov);
                             if let Some(only_bad_left) = only_bad_captures_left {
                                 if *only_bad_left {
-                                    cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                                    cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
                                 } //else quiets left so ignore bad capture
                             } else { //quiets may remain but we don't know yet
-                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize];
+                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
                             }
                         }
                     }
