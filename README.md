@@ -2,8 +2,8 @@
 
 Rusty Engine is a work-in-progress chess engine written in Rust. It combines a
 bitboard-based chess core, perft-tested legal move generation, iterative-deepening
-alpha-beta search, an [`iced`](https://iced.rs/) desktop GUI, and an experimental
-UCI interface.
+alpha-beta search, a UCI command-line interface, and an [`iced`](https://iced.rs/)
+desktop GUI.
 
 ![Rusty Engine board](.github/board_demo_img.png)
 
@@ -15,14 +15,19 @@ UCI interface.
   king-count, castling-right, and en-passant consistency checks
 - Incremental Zobrist hashing with threefold repetition and fifty-move-rule
   handling in both games and search
-- Opening/endgame piece-square evaluation and fixed-depth or timed
-  iterative-deepening negamax search with alpha-beta pruning
-- Move ordering and consecutive-search reuse based on the principal variation,
-  plus cooperative cancellation for timed and fixed-depth searches
-- An `iced` board for manual play and FEN loading, with its image assets embedded
-  in the binary
-- A partial UCI listener for position import, clock-based, fixed-time, or
-  fixed-depth search, `stop`, and `bestmove`
+- Material and opening/endgame piece-square evaluation
+- Fixed-depth or timed iterative-deepening negamax search with alpha-beta pruning
+  and quiescence search
+- Principal-variation reuse, a history heuristic, static exchange evaluation,
+  and transposition-table move ordering and cutoffs
+- A 16 MiB, cache-line-aligned, clustered transposition table with depth-,
+  bound-, and generation-aware replacement
+- Cooperative cancellation and UCI search diagnostics, including depth,
+  selective depth, score, node counts, cutoff counts, and principal variation
+- A UCI front end for position import, clock-based, fixed-time, or fixed-depth
+  search, `stop`, `bestmove`/`ponder`, and board display with `d`
+- An `iced` board for player-versus-engine games and FEN loading, with its image
+  and evaluation assets embedded in the binary
 
 ## Quick Start
 
@@ -34,22 +39,35 @@ cd rusty_engine
 cargo run --release
 ```
 
-The default executable opens the desktop GUI. It supports manual play, FEN
-loading, and manually triggered searches; automatic engine moves in GUI games
-are not implemented yet.
+The default executable starts the stdin/stdout UCI interface. For example, after
+launching it, enter:
 
-The codebase also contains a partial stdin/stdout UCI listener, although it is
-not wired to the default executable. It handles `uci`, `isready`, `position`
-with a starting position or FEN and optional moves, timed or fixed-depth `go`,
-`stop`, and `quit`. Options, new-game reset behavior, and pondering remain
-unfinished.
+```text
+uci
+isready
+position startpos moves e2e4 e7e5
+go depth 6
+quit
+```
+
+Supported search modes are `go depth <plies>`, `go movetime <milliseconds>`, or
+clock-based `go` commands using `wtime`, `btime`, `winc`, and `binc`. Positions
+may use `startpos` or a FEN followed by optional UCI moves. The non-standard `d`
+command prints the current board.
+
+The desktop GUI is still available, but there is not yet a runtime front-end
+selector. Set `uci_mode` to `false` in `src/main.rs` and run the command above to
+launch it. The GUI supports player-side selection, player-versus-engine play,
+promotion selection, FEN loading, legal-move highlighting, and game-over
+dialogs.
 
 ## Architecture
 
 - **`repr`** contains `Board`, `Position`, compact moves, and the legal move
   generator.
-- **`search`** contains the evaluator, search configuration, repetition history,
-  iterative deepening, move ordering, and cancellation logic.
+- **`search`** contains evaluation, iterative deepening and quiescence search,
+  search configuration and state, static exchange evaluation, move ordering,
+  cancellation logic, and the transposition table.
 - **`game`** provides `Game` for on-board state and `CpuGame` for importing and
   synchronizing UCI positions.
 - **`utils`**, **`ui`**, and **`uci`** provide FEN/Zobrist utilities and the two
@@ -61,9 +79,10 @@ unfinished.
 cargo test -- --test-threads=1
 ```
 
-The suite covers move encoding, FEN handling, move generation and perft,
-evaluation, incremental Zobrist hashing, threefold repetition, and special-move
-make/unmake round trips. Perft tests visit millions of positions and can take
+The suite covers move encoding, FEN handling, UCI parsing, move generation and
+perft, evaluation, static exchange evaluation, search and cancellation,
+transposition-table behavior, incremental Zobrist hashing, threefold repetition,
+and special-move make/unmake round trips. Perft and timing tests can take
 noticeably longer than the other tests.
 
 Ignored fixed-depth, consecutive-search, and timed-search benchmarks can be run
@@ -75,6 +94,7 @@ cargo test --release --test search_benchmark -- --ignored --show-output
 
 ## Remaining Work
 
-Planned work includes automatic engine play in the GUI, fuller UCI support,
-principal-variation search with null windows, quiescence search, a transposition
-table, and multithreaded search.
+Planned work includes fuller UCI option, new-game, and pondering support;
+principal-variation search with null windows; multithreaded search; additional
+search pruning and extensions; richer evaluation; and draw detection for
+insufficient material.
