@@ -191,7 +191,7 @@ impl Searcher {
             mut beta: i16,
             mut in_quiescence: bool,
             use_quiescence: bool,
-            mut follows_prev_pv: bool,
+            follows_prev_pv: bool,
             prev_pv: &[u32],
             pos: &mut Position,
             evaluator: &Evaluator,
@@ -217,46 +217,46 @@ impl Searcher {
             let is_three_fold: bool = search_data.in_three_fold(pos);
             let (s, e) = pos.search_move_bounds();
             
-            if !follows_prev_pv && !is_three_fold && pos.board.half_move_clock < 96 { //don't trust tt if near 50 move draw or in prev PV
-                let tte: Option<TTEntry> = tt.probe(pos.board.zhash).map(|entry| {
-                    TTEntry {
-                        score: TranspositionTable::score_from_tt(entry.score, d as i16),
-                        ..entry
-                    }
-                });
-                let key_collision: bool = tte.is_some_and(|entry| {
-                    (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
-                });
-                //TT cutoff?
-                if let Some(tt_entry) = tte {
-                    if  tt_entry.depth() >= (target_d.saturating_sub(d)) as u8 
-                        && !key_collision 
-                    {
-                        match tt_entry.bound_type() {
-                            TTEntryType::Exact => {
-                                if d < target_d {
-                                    let row_start = search_data.pv_ply_indices[d];
-                                    let row_end = search_data.pv_ply_indices[d + 1];
+            let tte: Option<TTEntry> = tt.probe(pos.board.zhash).map(|entry| {
+                TTEntry {
+                    score: TranspositionTable::score_from_tt(entry.score, d as i16),
+                    ..entry
+                }
+            });
+            let key_collision: bool = tte.is_some_and(|entry| {
+                (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
+            });
+            //TT cutoff?
+            if let Some(tt_entry) = tte {
+                if  !follows_prev_pv 
+                    && !is_three_fold 
+                    && pos.board.half_move_clock < 96
+                    && tt_entry.depth() >= (target_d.saturating_sub(d)) as u8
+                    && !key_collision
+                { //don't trust tt if near 50 move draw or in prev PV
+                    match tt_entry.bound_type() {
+                        TTEntryType::Exact => {
+                            if d < target_d {
+                                let row_start = search_data.pv_ply_indices[d];
+                                let row_end = search_data.pv_ply_indices[d + 1];
 
-                                    search_data.pv[row_start..row_end].fill(NULL_MOVE);
-                                    search_data.pv[row_start] = tt_entry.best_move;
-                                }
-                                return tt_entry.score;
+                                search_data.pv[row_start..row_end].fill(NULL_MOVE);
+                                search_data.pv[row_start] = tt_entry.best_move;
                             }
-                            TTEntryType::LowerBound => {
-                                alpha = max(alpha, tt_entry.score);
-                            }
-                            TTEntryType::UpperBound => {
-                                beta = min(beta, tt_entry.score);
-                            }
-                        }
-                        if alpha >= beta {
                             return tt_entry.score;
                         }
+                        TTEntryType::LowerBound => {
+                            alpha = max(alpha, tt_entry.score);
+                        }
+                        TTEntryType::UpperBound => {
+                            beta = min(beta, tt_entry.score);
+                        }
+                    }
+                    if alpha >= beta {
+                        return tt_entry.score;
                     }
                 }
             }
-
             
             let old_alpha: i16 = alpha;
             let old_beta: i16 = beta;
@@ -292,15 +292,44 @@ impl Searcher {
 
             let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
-            //TODO use low depth TT hit to order moves, maybe just give history bonus
-            for i in s..e {
-                let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
-                let prev_pv_mv_for_ordering: u32 = if follows_prev_pv && d < prev_pv.len() && i == s { prev_pv_mv } else { NULL_MOVE }; // i == s because pv always gets picked first after which not available
-                
-                let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], prev_pv_mv_for_ordering, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
 
-                follows_prev_pv = follows_prev_pv && (mov == prev_pv_mv || prev_pv_mv == NULL_MOVE);
+            let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
+            let mut primary_selection: u32;
+            let mut secondary_selection: u32;
+            if tte.is_some() && !key_collision {
+                if prev_pv_mv != NULL_MOVE {
+                    if tte.unwrap().depth() as usize > target_d.saturating_sub(d + 1) {
+                        primary_selection = tte.unwrap().best_move;
+                        secondary_selection = prev_pv_mv;
+                    } else {
+                        primary_selection = prev_pv_mv;
+                        secondary_selection = tte.unwrap().best_move;
+                    }
+                } else {
+                    primary_selection = tte.unwrap().best_move;
+                    secondary_selection = NULL_MOVE;
+                }
+            } else {
+                primary_selection = prev_pv_mv; //can be NULL_MOVE
+                secondary_selection = NULL_MOVE;
+            }
+
+            if primary_selection == secondary_selection {
+                secondary_selection = NULL_MOVE;
+            }
+            //TODO use low depth TT hit to order moves, maybe also give history bonus
+            //TODO i == s condition
+            for i in s..e {
+                let mov: u32 =
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+
+                if mov == primary_selection {
+                    primary_selection = NULL_MOVE;
+                } else if mov == secondary_selection {
+                    secondary_selection = NULL_MOVE;
+                }
+
+                let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
@@ -311,7 +340,7 @@ impl Searcher {
                     -alpha,
                     in_quiescence,
                     use_quiescence,
-                    follows_prev_pv,
+                    child_follows_prev_pv,
                     prev_pv,
                     pos,
                     evaluator,
@@ -506,21 +535,23 @@ impl Searcher {
         }
     }
 
-    //k == 1, so "selection pick", in place
-    //only_bad_captures_left is on all calls after first bad capture is returned
+    ///k == 1, so "selection pick", in place <br>
+    ///primary selection and secondary selection are for possible prev pv move and tt move, order depending on tt move depth
     fn partial_selection_sort(
         move_arr_s: &mut [u32],
-        pv_mv: u32,
+        primary_selection: u32,
+        secondary_selection: u32,
         only_bad_captures_left: &mut Option<bool>,
         move_gen: &MoveGen,
         search_data: &mut SearchData,
         board: &Board
     ) -> u32 {
         let mut best_i: usize = usize::MAX;
-        if pv_mv != NULL_MOVE {
-            let idx = move_arr_s.iter().position(|m| *m == pv_mv).expect("pv move was some but not generated");
-            best_i = idx;
-        } else { //no pv move available
+        if primary_selection != NULL_MOVE {
+            best_i = move_arr_s.iter().position(|m| *m == primary_selection).expect("primary selection was some but not generated");
+        } else if secondary_selection != NULL_MOVE {
+            best_i = move_arr_s.iter().position(|m| *m == secondary_selection).expect("secondary selection was some but not generated");
+        } else { //no priority move available
             //non-dominating is non-captures if !*only_bad_captures_left, else if *only_bad_captures_left then only bad captures.
             //If only_bad_captures_left == None, then non-dominating are both non-captures and bad captures
             let mut best_v: i32 = i32::MIN;
