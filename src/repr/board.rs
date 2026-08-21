@@ -4,6 +4,7 @@ use crate::{
         move_gen::{add_en_passant, MoveGen},
         types::{opposite_turn, B_KING, B_KING_U, B_PAWN_U, WHITE, W_KING, W_KING_U, W_PAWN_U},
     },
+    search::eval::{MAX_LATE_GAME_PHASE, PHASE_MULTIPLIERS},
     utils::zobrist::Zobrist,
 };
 
@@ -46,6 +47,8 @@ pub struct Board {
     pub white_pinned_restrictions: [u64; 64],
     pub black_pinned_restrictions: [u64; 64],
     pub meta_attacks: u64, //when checked by scanner, this contains the squares behind the king
+    pub late_game_phase: usize,
+    phase_material: usize,
     pub major_minor_count: u32,
     pub zhash: u64,
     pub half_move_clock: u32,
@@ -212,6 +215,33 @@ impl Board {
         return;
     }
 
+    /// Only called during initialization
+    fn phase_material_from_pieces(pieces: &[u64; 12]) -> usize {
+        pieces
+            .iter()
+            .zip(PHASE_MULTIPLIERS)
+            .map(|(piece_bb, multiplier)| piece_bb.count_ones() as usize * multiplier as usize)
+            .sum()
+    }
+
+    /// Incremental update to phase
+    pub(crate) fn update_late_game_phase(
+        &mut self,
+        removed_piece: Option<usize>,
+        added_piece: Option<usize>,
+    ) {
+        let removed_phase = removed_piece.map_or(0, |piece| PHASE_MULTIPLIERS[piece] as usize);
+        let added_phase = added_piece.map_or(0, |piece| PHASE_MULTIPLIERS[piece] as usize);
+
+        if removed_phase == added_phase {
+            return;
+        }
+
+        self.phase_material -= removed_phase;
+        self.phase_material += added_phase;
+        self.late_game_phase = MAX_LATE_GAME_PHASE.saturating_sub(self.phase_material);
+    }
+
     pub fn default_board(move_gen: &MoveGen, zobrist: &Zobrist) -> Self {
         let pieces: [u64; 12] = [
             65280,
@@ -267,6 +297,8 @@ impl Board {
         zobrist: &Zobrist,
         half_move_clock: u32,
     ) -> Self {
+        let phase_material = Self::phase_material_from_pieces(&pieces);
+        let late_game_phase = MAX_LATE_GAME_PHASE.saturating_sub(phase_material);
         let mut res: Board = Self {
             pieces,
             white_occupation,
@@ -286,6 +318,8 @@ impl Board {
             nof_checkers: 0,
             check_block_sqrs: 0,
             meta_attacks: 0,
+            late_game_phase,
+            phase_material,
             major_minor_count,
             zhash: 0,
             half_move_clock,
@@ -356,7 +390,6 @@ impl Board {
             && self.bl() == other.bl()
             && self.repetition_ep(move_gen) == other.repetition_ep(move_gen); //only if en passant capture is actually possible
     }
-
 }
 
 impl std::fmt::Display for Board {

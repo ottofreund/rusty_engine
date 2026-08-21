@@ -265,7 +265,11 @@ impl Searcher {
                 if pos.board.nof_checkers > 0 {
                     return -MATE_EVAL + d as i16; //sooner mate is better
                 } else if in_quiescence {
-                    return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game()); //might miss stalemate but not worth it to check for performance reasons
+                    return evaluator.eval(
+                        pos.board.pieces,
+                        pos.board.turn,
+                        pos.board.late_game_phase,
+                    ); //might miss stalemate but not worth it to check for performance reasons
                 } else {
                     return 0; //stalemate
                 }
@@ -274,7 +278,11 @@ impl Searcher {
             } else if d >= target_d {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
-                        eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
+                        eval = evaluator.eval(
+                            pos.board.pieces,
+                            pos.board.turn,
+                            pos.board.late_game_phase,
+                        );
                         if eval >= beta {
                             search_data.stand_pat_cutoffs += 1;
                             return eval;
@@ -282,7 +290,11 @@ impl Searcher {
                         alpha = max(alpha, eval);
                     }
                 } else {
-                    return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
+                    return evaluator.eval(
+                        pos.board.pieces,
+                        pos.board.turn,
+                        pos.board.late_game_phase,
+                    );
                 }
             }
 
