@@ -21,6 +21,39 @@ const EATING_MULTIPLIER: i32 = 7;
 const NON_CAPTURE_BONUS: i32 = 10_000;
 const GOOD_CAPTURE_BONUS: i32 = 100_000;
 
+const REPETITION_DEPENDENT_BIT: u32 = 1 << 16;
+
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+struct SearchResult(u32);
+
+impl SearchResult {
+    #[inline]
+    fn independent(eval: i16) -> Self {
+        Self(eval as u16 as u32)
+    }
+
+    #[inline]
+    fn repetition_draw() -> Self {
+        Self(REPETITION_DEPENDENT_BIT)
+    }
+
+    #[inline]
+    fn with_repetition_dependency(eval: i16, repetition_dependent: bool) -> Self {
+        Self(eval as u16 as u32 | u32::from(repetition_dependent) * REPETITION_DEPENDENT_BIT)
+    }
+
+    #[inline]
+    fn eval(self) -> i16 {
+        self.0 as u16 as i16
+    }
+
+    #[inline]
+    fn repetition_dependent(self) -> bool {
+        self.0 & REPETITION_DEPENDENT_BIT != 0
+    }
+}
+
 struct SearchControl<'a> {
     time_limit: Option<(Instant, u64)>,
     kill_switch: Option<&'a AtomicBool>,
@@ -200,9 +233,9 @@ impl Searcher {
             zobrist: &Zobrist,
             control: &SearchControl<'_>,
             tt: &mut TranspositionTable,
-        ) -> i16 {
+        ) -> SearchResult {
             if control.should_stop(search_data.positions_searched) {
-                return EVAL_QUIT;
+                return SearchResult::independent(EVAL_QUIT);
             }
 
             if d < target_d { //initialize triangular pv row for this ply
@@ -243,7 +276,7 @@ impl Searcher {
                                 search_data.pv[row_start..row_end].fill(NULL_MOVE);
                                 search_data.pv[row_start] = tt_entry.best_move;
                             }
-                            return tt_entry.score;
+                            return SearchResult::independent(tt_entry.score);
                         }
                         TTEntryType::LowerBound => {
                             alpha = max(alpha, tt_entry.score);
@@ -253,7 +286,7 @@ impl Searcher {
                         }
                     }
                     if alpha >= beta {
-                        return tt_entry.score;
+                        return SearchResult::independent(tt_entry.score);
                     }
                 }
             }
@@ -263,26 +296,28 @@ impl Searcher {
             //terminal node?
             if s == e {
                 if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + d as i16; //sooner mate is better
+                    return SearchResult::independent(-MATE_EVAL + d as i16); //sooner mate is better
                 } else if in_quiescence {
-                    return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game()); //might miss stalemate but not worth it to check for performance reasons
+                    return SearchResult::independent(evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game())); //might miss stalemate but not worth it to check for performance reasons
                 } else {
-                    return 0; //stalemate
+                    return SearchResult::independent(0); //stalemate
                 }
-            } else if is_three_fold || pos.board.is_fifty_move_draw() {
-                return 0;
+            } else if is_three_fold {
+                return SearchResult::repetition_draw();
+            } else if pos.board.is_fifty_move_draw() {
+                return SearchResult::independent(0);
             } else if d >= target_d {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
                         eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
                         if eval >= beta {
                             search_data.stand_pat_cutoffs += 1;
-                            return eval;
+                            return SearchResult::independent(eval);
                         }
                         alpha = max(alpha, eval);
                     }
                 } else {
-                    return evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game());
+                    return SearchResult::independent(evaluator.eval(pos.board.pieces, pos.board.turn, pos.is_late_game()));
                 }
             }
 
@@ -292,6 +327,7 @@ impl Searcher {
 
             let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
+            let mut repetition_dependent = false;
 
             let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
             let mut primary_selection: u32;
@@ -333,7 +369,7 @@ impl Searcher {
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
-                let child_eval: i16 = inner(
+                let child_result = inner(
                     d + 1,
                     target_d,
                     -beta,
@@ -353,11 +389,14 @@ impl Searcher {
                 search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
 
-                if child_eval == EVAL_QUIT {
-                    return EVAL_QUIT;
+                if child_result.eval() == EVAL_QUIT {
+                    return child_result;
                 }
 
-                let new_eval: i16 = -child_eval; //candidate for this node
+                // Even a non-best repetition result can change an exact or upper-bound
+                // node value when this position is searched with different history.
+                repetition_dependent |= child_result.repetition_dependent();
+                let new_eval: i16 = -child_result.eval(); //candidate for this node
                 if new_eval > eval {
                     //child ply's pv appended to this ply's pv
                     eval = new_eval;
@@ -387,23 +426,24 @@ impl Searcher {
                     break; //i.e. return alpha
                 }
             }
-            //add TT entry
-            let tte: TTEntry = TTEntry::new_packed(
-                pos.board.zhash,
-                best_move,
-                (target_d.saturating_sub(d)) as u8,
-                if eval <= old_alpha {
-                    TTEntryType::UpperBound
-                } else if eval >= old_beta {
-                    TTEntryType::LowerBound
-                } else {
-                    TTEntryType::Exact
-                },
-                TranspositionTable::score_to_tt(eval, d as i16),
-                tt.generation
-            );
-            tt.store(tte);
-            return eval;
+            if !repetition_dependent {
+                let tte: TTEntry = TTEntry::new_packed(
+                    pos.board.zhash,
+                    best_move,
+                    (target_d.saturating_sub(d)) as u8,
+                    if eval <= old_alpha {
+                        TTEntryType::UpperBound
+                    } else if eval >= old_beta {
+                        TTEntryType::LowerBound
+                    } else {
+                        TTEntryType::Exact
+                    },
+                    TranspositionTable::score_to_tt(eval, d as i16),
+                    tt.generation
+                );
+                tt.store(tte);
+            }
+            return SearchResult::with_repetition_dependency(eval, repetition_dependent);
         }
         //iterative deepening:
         let synced_pv_depth: usize = self.count_pv_moves(idx);
@@ -417,7 +457,7 @@ impl Searcher {
             prev_pv[..completed_pv_len]
                 .copy_from_slice(&search_data.pv[..completed_pv_len]);
             search_data.pv_ply_indices = get_triang_pv_ply_idx_table(d);
-            let eval: i16 = inner(
+            let result = inner(
                 0,
                 d,
                 ALPHA_INIT,
@@ -434,6 +474,7 @@ impl Searcher {
                 &control,
                 &mut self.tt
             );
+            let eval = result.eval();
             search_data.cumul_positions_searched += search_data.positions_searched;
             if eval == EVAL_QUIT {
                 search_data.reset_temp_performance_data();
