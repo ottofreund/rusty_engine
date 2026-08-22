@@ -4,7 +4,7 @@ use crate::{
     repr::{
         _move::{self, *}, board::Board, move_gen::MoveGen, position::Position,
     }, search::{
-        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
+        eval::{Evaluator, MATE_BOUND, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
     }, utils::zobrist::Zobrist,
 };
 
@@ -329,8 +329,7 @@ impl Searcher {
             if primary_selection == secondary_selection {
                 secondary_selection = NULL_MOVE;
             }
-            //TODO use low depth TT hit to order moves, maybe also give history bonus
-            //TODO i == s condition
+            //TODO try to give history bonus on quiet TT hit
             for i in s..e {
                 let mov: u32 =
                     Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
@@ -398,6 +397,11 @@ impl Searcher {
                     }
                     break; //i.e. return alpha
                 }
+
+                if new_eval >= MATE_BOUND {
+                    break;
+                }
+
             }
             //add TT entry
             let tte: TTEntry = TTEntry::new_packed(
