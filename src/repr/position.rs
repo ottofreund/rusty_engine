@@ -317,6 +317,8 @@ impl Position {
         if is_promotion {
             self.board.major_minor_count += 1;
         }
+        self.board
+            .update_late_game_phase(eaten_piece, promotion_piece);
 
         self.board.nof_checkers = 0;
         self.board.check_block_sqrs = 0;
@@ -533,6 +535,8 @@ impl Position {
         if is_promotion {
             self.board.major_minor_count -= 1;
         }
+        self.board
+            .update_late_game_phase(promotion_piece, eaten_piece);
 
         self.board.turn = self.board.turn ^ 1;
         /*
