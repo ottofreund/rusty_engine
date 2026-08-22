@@ -329,8 +329,7 @@ impl Searcher {
             if primary_selection == secondary_selection {
                 secondary_selection = NULL_MOVE;
             }
-            //TODO use low depth TT hit to order moves, maybe also give history bonus
-            //TODO i == s condition
+            //TODO try to give history bonus on quiet TT hit
             for i in s..e {
                 let mov: u32 =
                     Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
@@ -345,31 +344,76 @@ impl Searcher {
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.board.zhash);
-                let child_eval: i16 = inner(
-                    d + 1,
-                    target_d,
-                    -beta,
-                    -alpha,
-                    in_quiescence,
-                    use_quiescence,
-                    child_follows_prev_pv,
-                    prev_pv,
-                    pos,
-                    evaluator,
-                    search_data,
-                    move_gen,
-                    zobrist,
-                    control,
-                    tt
-                );
+                let mut new_eval: i16;
+                if i == s { //full window search
+                    new_eval = -inner(
+                        d + 1,
+                        target_d,
+                        -beta,
+                        -alpha,
+                        in_quiescence,
+                        use_quiescence,
+                        child_follows_prev_pv,
+                        prev_pv,
+                        pos,
+                        evaluator,
+                        search_data,
+                        move_gen,
+                        zobrist,
+                        control,
+                        tt
+                    );
+                } else { //null window search
+                    new_eval = -inner(
+                        d + 1,
+                        target_d,
+                        -alpha - 1,
+                        -alpha,
+                        in_quiescence,
+                        use_quiescence,
+                        child_follows_prev_pv,
+                        prev_pv,
+                        pos,
+                        evaluator,
+                        search_data,
+                        move_gen,
+                        zobrist,
+                        control,
+                        tt
+                    );
+                    if new_eval > alpha && new_eval < beta { //re-search with full window
+                        if new_eval.abs() == EVAL_QUIT {
+                            search_data.board_hash_history.pop();
+                            pos.unmake_move(mov, zobrist);
+                            return EVAL_QUIT;
+                        }
+                        new_eval = -inner(
+                            d + 1,
+                            target_d,
+                            -beta,
+                            -alpha,
+                            in_quiescence,
+                            use_quiescence,
+                            child_follows_prev_pv,
+                            prev_pv,
+                            pos,
+                            evaluator,
+                            search_data,
+                            move_gen,
+                            zobrist,
+                            control,
+                            tt
+                        );
+                    }
+                }
+                
                 search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
 
-                if child_eval == EVAL_QUIT {
+                if new_eval.abs() == EVAL_QUIT {
                     return EVAL_QUIT;
                 }
 
-                let new_eval: i16 = -child_eval; //candidate for this node
                 if new_eval > eval {
                     //child ply's pv appended to this ply's pv
                     eval = new_eval;
