@@ -213,6 +213,8 @@ impl Searcher {
             search_data.positions_searched += 1;
             search_data.sel_depth = max(search_data.sel_depth, d);
 
+            let old_alpha: i16 = alpha;
+            let old_beta: i16 = beta;
             let mut eval: i16 = EVAL_INIT;
             let is_three_fold: bool = search_data.in_three_fold(pos);
             let (s, e) = pos.search_move_bounds();
@@ -257,9 +259,7 @@ impl Searcher {
                     }
                 }
             }
-            
-            let old_alpha: i16 = alpha;
-            let old_beta: i16 = beta;
+        
             //terminal node?
             if s == e {
                 if pos.board.nof_checkers > 0 {
@@ -304,26 +304,30 @@ impl Searcher {
 
             let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
-
+            //TODO test using prev pv as killer move even it doesn't follow prev pv
             let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
             let mut primary_selection: u32;
             let mut secondary_selection: u32;
-            if tte.is_some() && !key_collision {
+            if d == 0 {
                 if prev_pv_mv != NULL_MOVE {
-                    if tte.unwrap().depth() as usize > target_d.saturating_sub(d + 1) {
-                        primary_selection = tte.unwrap().best_move;
-                        secondary_selection = prev_pv_mv;
-                    } else {
-                        primary_selection = prev_pv_mv;
-                        secondary_selection = tte.unwrap().best_move;
-                    }
+                    primary_selection = prev_pv_mv;
+                    secondary_selection = match tte {
+                        Some(tte) if !key_collision => tte.best_move,
+                        _ => NULL_MOVE,
+                    };
                 } else {
-                    primary_selection = tte.unwrap().best_move;
+                    primary_selection = match tte {
+                        Some(tte) if !key_collision => tte.best_move,
+                        _ => NULL_MOVE,
+                    };
                     secondary_selection = NULL_MOVE;
                 }
             } else {
-                primary_selection = prev_pv_mv; //can be NULL_MOVE
-                secondary_selection = NULL_MOVE;
+                primary_selection = match tte {
+                    Some(tte) if !key_collision => tte.best_move,
+                    _ => NULL_MOVE,
+                };
+                secondary_selection = prev_pv_mv; //can be NULL_MOVE
             }
 
             if primary_selection == secondary_selection {
@@ -381,12 +385,7 @@ impl Searcher {
                         control,
                         tt
                     );
-                    if new_eval > alpha && new_eval < beta { //re-search with full window
-                        if new_eval.abs() == EVAL_QUIT {
-                            search_data.board_hash_history.pop();
-                            pos.unmake_move(mov, zobrist);
-                            return EVAL_QUIT;
-                        }
+                    if new_eval > alpha && new_eval < beta && new_eval.abs() != EVAL_QUIT { //re-search with full window
                         new_eval = -inner(
                             d + 1,
                             target_d,
