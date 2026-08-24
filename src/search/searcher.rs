@@ -347,7 +347,7 @@ impl Searcher {
                 let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
-                search_data.board_hash_history.push(pos.board.zhash);
+                search_data.board_hash_history.push(pos.zhash);
                 let mut new_eval: i16;
                 if i == s { //full window search
                     new_eval = -inner(
