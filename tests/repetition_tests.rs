@@ -38,14 +38,12 @@ fn on_board_detects_natural_threefold_repetition() {
 }
 
 #[test]
-fn on_board_threefold_uses_board_state_instead_of_zobrist_hash() {
+fn on_board_threefold_uses_board_state_history() {
     let mut game = Game::default();
     import_position(&mut game, KINGS_ONLY_FEN);
 
-    let mut first_repetition = board(&game, KINGS_ONLY_FEN);
-    let mut second_repetition = first_repetition.clone();
-    first_repetition.zhash ^= 0xBAD5_EED;
-    second_repetition.zhash ^= 0xFACE_FEED;
+    let first_repetition = board(&game, KINGS_ONLY_FEN);
+    let second_repetition = first_repetition.clone();
     game.board_history = vec![first_repetition, second_repetition];
 
     play_king_cycle(&mut game);
@@ -128,7 +126,7 @@ fn search_repetition_history_resets_after_unrepeatable_move() {
     let search_data = &game.searcher.search_data[0];
     assert_eq!(
         search_data.board_hash_history,
-        vec![game.position.board.zhash],
+        vec![game.position.zhash],
         "expected pawn move to reset search repetition history"
     );
     assert_not_search_threefold(&game);
@@ -141,7 +139,7 @@ fn import_position(game: &mut Game, fen: &str) {
 }
 
 fn board(game: &Game, fen: &str) -> Board {
-    fen_tool::fen_to_board(fen.to_owned(), &game.move_gen, &game.zobrist).expect("valid FEN board")
+    fen_tool::fen_to_board(fen.to_owned(), &game.move_gen).expect("valid FEN board")
 }
 
 fn play_king_cycle(game: &mut Game) {

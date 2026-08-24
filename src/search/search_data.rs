@@ -30,7 +30,7 @@ pub struct SearchData {
 impl SearchData {
     pub fn new(pos: &Position) -> Self {
         let mut board_hash_history: Vec<u64> = Vec::with_capacity(32);
-        board_hash_history.push(pos.board.zhash);
+        board_hash_history.push(pos.zhash);
         return Self {
             pv: [NULL_MOVE; TRIANG_PV_TABLE_SIZE],
             pv_ply_indices: get_triang_pv_ply_idx_table(1),
@@ -63,7 +63,7 @@ impl SearchData {
         }
         let e: usize = self.board_hash_history.len() - 1;
         while i < e {
-            if pos.board.zhash == self.board_hash_history[i] {
+            if pos.zhash == self.board_hash_history[i] {
                 count += 1;
             }
             i += 2;

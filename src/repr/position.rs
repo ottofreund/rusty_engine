@@ -25,16 +25,18 @@ pub struct Position {
     pub board_state_info_stack: Vec<BoardStateInfo>, //previous board states, allows efficient unmaking of moves
     pub played_moves_stack: Vec<u32>,
     pub last_target: u32,
+    pub zhash: u64,
+    pub has_ep_take: bool,
     pub move_generation_temp_arr: Vec<u32>,
 }
 
 impl Position {
     pub fn default(move_gen: &MoveGen, zobrist: &Zobrist) -> Position {
-        let board: Board = Board::default_board(move_gen, zobrist);
+        let board: Board = Board::default_board(move_gen);
         let turn: u32 = board.turn;
         let mut move_arr: [u32; MOVE_ARR_SIZE] = [NULL_MOVE; MOVE_ARR_SIZE];
         let mut move_generation_temp_arr: Vec<u32> = vec![NULL_MOVE; MAX_PSEUDO_MOVES_IN_POS];
-        let generated: usize = move_gen.generate_legal(
+        let (generated, has_ep_take) = move_gen.generate_legal(
             &board,
             turn,
             &mut move_arr,
@@ -48,6 +50,7 @@ impl Position {
         let board_state_info_stack: Vec<BoardStateInfo> = vec![];
         let played_moves_stack: Vec<u32> = Vec::new();
         let last_target: u32 = NULL_MOVE;
+        let zhash: u64 = zobrist.init_hash(&board, has_ep_take);
         return Self {
             board,
             board_state_info_stack,
@@ -55,19 +58,21 @@ impl Position {
             move_arr,
             move_arr_idx,
             last_target,
+            zhash,
+            has_ep_take: false,
             move_generation_temp_arr,
         };
     }
 
     pub fn from(fen: &str, move_gen: &MoveGen, zobrist: &Zobrist) -> Result<Self, &'static str> {
         let board: Board;
-        match fen_to_board(fen.to_string(), move_gen, zobrist) {
+        match fen_to_board(fen.to_string(), move_gen) {
             Ok(b) => board = b,
             Err(_) => return Err("Fen error"),
         }
         let mut move_arr: [u32; MOVE_ARR_SIZE] = [NULL_MOVE; MOVE_ARR_SIZE];
         let mut move_generation_temp_arr: Vec<u32> = vec![NULL_MOVE; MAX_PSEUDO_MOVES_IN_POS];
-        let generated: usize = move_gen.generate_legal(
+        let (generated, has_ep_take) = move_gen.generate_legal(
             &board,
             board.turn,
             &mut move_arr,
@@ -82,6 +87,7 @@ impl Position {
         let board_state_info_stack: Vec<BoardStateInfo> = vec![];
         let played_moves_stack: Vec<u32> = Vec::new();
         let last_target: u32 = NULL_MOVE;
+        let zhash: u64 = zobrist.init_hash(&board, has_ep_take);
         return Ok(Self {
             board,
             board_state_info_stack,
@@ -89,6 +95,8 @@ impl Position {
             move_arr,
             move_arr_idx,
             last_target,
+            zhash,
+            has_ep_take,
             move_generation_temp_arr,
         });
     }
@@ -161,6 +169,7 @@ impl Position {
 
         let cur_board_state_info: BoardStateInfo = BoardStateInfo {
             ep_sqr: self.board.ep_square,
+            has_ep_take: self.has_ep_take,
             nof_checkers: self.board.nof_checkers,
             check_block_sqrs: self.board.check_block_sqrs,
             mover_pinned: if is_white_turn {
@@ -265,7 +274,7 @@ impl Position {
          * 2. Update rest of board state
          *
          */
-        let lost_ep: Option<u32> = self.board.ep_square;
+        let lost_ep_take: Option<u32> = if self.has_ep_take { self.board.ep_square } else { None };
         if is_double_push {
             //update board ep_square
             if is_white_turn {
@@ -292,27 +301,6 @@ impl Position {
         let lost_wl: bool = had_wl && !self.board.wl();
         let lost_bs: bool = had_bs && !self.board.bs();
         let lost_bl: bool = had_bl && !self.board.bl();
-
-        self.board.zhash = zobrist.updated_hash_forward(
-            self.board.zhash,
-            from as usize,
-            to as usize,
-            moved_piece,
-            is_white_turn,
-            is_promotion,
-            promotion_piece,
-            is_eating,
-            eaten_piece,
-            is_castle,
-            is_short_castle,
-            is_double_push,
-            is_en_passant,
-            lost_ws,
-            lost_wl,
-            lost_bs,
-            lost_bl,
-            lost_ep,
-        );
 
         if is_promotion {
             self.board.major_minor_count += 1;
@@ -353,7 +341,7 @@ impl Position {
             self.move_arr_idx.clear();
             self.move_arr_idx.push(0); // 0 ply ends at 0 (exclusive)
         }
-        let generated: usize = move_gen.generate_legal(
+        let (generated, ep_take_available) = move_gen.generate_legal(
             &self.board,
             turn,
             &mut self.move_arr,
@@ -363,9 +351,32 @@ impl Position {
             in_perft_debug,
             in_quiescence && self.board.nof_checkers == 0,
         );
+        self.has_ep_take = ep_take_available;
         self.move_arr_idx.push(move_arr_s_idx + generated);
         self.played_moves_stack.push(mov);
         self.last_target = to;
+
+        self.zhash = zobrist.updated_hash_forward(
+            self.zhash,
+            from as usize,
+            to as usize,
+            moved_piece,
+            is_white_turn,
+            is_promotion,
+            promotion_piece,
+            is_eating,
+            eaten_piece,
+            is_castle,
+            is_short_castle,
+            ep_take_available,
+            is_en_passant,
+            lost_ws,
+            lost_wl,
+            lost_bs,
+            lost_bl,
+            lost_ep_take,
+        );
+
         return;
     }
 
@@ -386,7 +397,6 @@ impl Position {
         };
         let is_eating: bool = _move::is_eating(mov);
         let is_en_passant: bool = _move::is_en_passant(mov);
-        let is_double_push: bool = _move::is_double_push(mov);
         let eaten_piece: Option<usize> = if is_eating && !is_en_passant {
             Some(_move::eaten_piece(mov).expect("Was eating but no eating piece found") as usize)
         } else {
@@ -480,6 +490,7 @@ impl Position {
          * 2. Update rest of board state
          *
          */
+        let lost_ep_take: Option<u32> = if self.has_ep_take { self.board.ep_square } else { None };
         let board_state_info: BoardStateInfo = self
             .board_state_info_stack
             .pop()
@@ -488,7 +499,7 @@ impl Position {
         self.board.ep_square = board_state_info.ep_sqr;
         self.board.half_move_clock = board_state_info.half_move_clock;
 
-        let gained_ep: Option<u32> = self.board.ep_square;
+        let gained_ep_take: Option<u32> = if board_state_info.has_ep_take { self.board.ep_square } else { None };
         let had_ws: bool = self.board.ws();
         let had_wl: bool = self.board.wl();
         let had_bs: bool = self.board.bs();
@@ -498,26 +509,6 @@ impl Position {
         let gained_wl: bool = !had_wl && self.board.wl();
         let gained_bs: bool = !had_bs && self.board.bs();
         let gained_bl: bool = !had_bl && self.board.bl();
-        self.board.zhash = zobrist.updated_hash_backward(
-            self.board.zhash,
-            from as usize,
-            to as usize,
-            moved_piece,
-            unmaking_white_move,
-            is_promotion,
-            promotion_piece,
-            is_eating,
-            eaten_piece,
-            is_castle,
-            is_short_castle,
-            is_double_push,
-            is_en_passant,
-            gained_ws,
-            gained_wl,
-            gained_bs,
-            gained_bl,
-            gained_ep,
-        );
 
         self.board.nof_checkers = board_state_info.nof_checkers;
         self.board.check_block_sqrs = board_state_info.check_block_sqrs;
@@ -551,6 +542,28 @@ impl Position {
         } else {
             self.last_target = _move::get_target(self.played_moves_stack.last().copied().unwrap());
         }
+        self.has_ep_take = board_state_info.has_ep_take;
+        self.zhash = zobrist.updated_hash_backward(
+            self.zhash,
+            from as usize,
+            to as usize,
+            moved_piece,
+            unmaking_white_move,
+            is_promotion,
+            promotion_piece,
+            is_eating,
+            eaten_piece,
+            is_castle,
+            is_short_castle,
+            is_en_passant,
+            gained_ws,
+            gained_wl,
+            gained_bs,
+            gained_bl,
+            gained_ep_take,
+            lost_ep_take
+        );
+
         return;
     }
 

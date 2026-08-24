@@ -11,6 +11,10 @@ const CASTLING_FEN: &str = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
 const NO_CASTLING_FEN: &str = "r3k2r/8/8/8/8/8/8/R3K2R w - - 0 1";
 const EN_PASSANT_FEN: &str = "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1";
 const NO_EN_PASSANT_FEN: &str = "4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1";
+const UNCAPTURABLE_EN_PASSANT_FEN: &str = "4k3/8/8/3p4/8/8/8/4K3 w - d6 0 1";
+const NO_CAPTURING_PAWN_FEN: &str = "4k3/8/8/3p4/8/8/8/4K3 w - - 0 1";
+const PINNED_EN_PASSANT_FEN: &str = "k3r3/8/8/3pP3/8/8/8/4K3 w - d6 0 1";
+const NO_PINNED_EN_PASSANT_FEN: &str = "k3r3/8/8/3pP3/8/8/8/4K3 w - - 0 1";
 const CAPTURE_FEN: &str = "4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1";
 const PROMOTION_FEN: &str = "4k3/P7/8/8/8/8/8/4K3 w - - 0 1";
 
@@ -36,19 +40,29 @@ fn side_to_move_castling_and_en_passant_are_part_of_hash() {
     let engine = TestEngine::new();
 
     assert_ne!(
-        engine.position(DEFAULT_FEN).board.zhash,
-        engine.position(DEFAULT_BLACK_TO_MOVE_FEN).board.zhash,
+        engine.position(DEFAULT_FEN).zhash,
+        engine.position(DEFAULT_BLACK_TO_MOVE_FEN).zhash,
         "side to move should affect hash"
     );
     assert_ne!(
-        engine.position(CASTLING_FEN).board.zhash,
-        engine.position(NO_CASTLING_FEN).board.zhash,
+        engine.position(CASTLING_FEN).zhash,
+        engine.position(NO_CASTLING_FEN).zhash,
         "castling rights should affect hash"
     );
     assert_ne!(
-        engine.position(EN_PASSANT_FEN).board.zhash,
-        engine.position(NO_EN_PASSANT_FEN).board.zhash,
-        "en passant file should affect hash"
+        engine.position(EN_PASSANT_FEN).zhash,
+        engine.position(NO_EN_PASSANT_FEN).zhash,
+        "a legal en passant capture should affect hash"
+    );
+    assert_eq!(
+        engine.position(UNCAPTURABLE_EN_PASSANT_FEN).zhash,
+        engine.position(NO_CAPTURING_PAWN_FEN).zhash,
+        "an en passant square without a capturing pawn should not affect hash"
+    );
+    assert_eq!(
+        engine.position(PINNED_EN_PASSANT_FEN).zhash,
+        engine.position(NO_PINNED_EN_PASSANT_FEN).zhash,
+        "an illegal en passant capture by a pinned pawn should not affect hash"
     );
 }
 
@@ -67,7 +81,7 @@ fn incremental_hash_matches_recompute_through_move_sequence() {
         let mov = legal_move_matching(&pos, |mov| {
             _move::get_init(mov) == from && _move::get_target(mov) == to
         });
-        history.push((mov, pos.board.zhash, fen_tool::board_to_fen(&pos.board)));
+        history.push((mov, pos.zhash, fen_tool::board_to_fen(&pos.board)));
 
         engine.make_search_move(&mut pos, mov);
         assert_hash_matches_recompute(&engine, &pos);
@@ -76,7 +90,7 @@ fn incremental_hash_matches_recompute_through_move_sequence() {
     while let Some((mov, expected_hash, expected_fen)) = history.pop() {
         engine.unmake_move(&mut pos, mov);
         assert_hash_matches_recompute(&engine, &pos);
-        assert_eq!(pos.board.zhash, expected_hash);
+        assert_eq!(pos.zhash, expected_hash);
         assert_eq!(fen_tool::board_to_fen(&pos.board), expected_fen);
     }
 }
@@ -130,14 +144,14 @@ where
 {
     let engine = TestEngine::new();
     let mut pos = engine.position(fen);
-    let before_hash = pos.board.zhash;
+    let before_hash = pos.zhash;
     let before_fen = fen_tool::board_to_fen(&pos.board);
     let mov = select_move(&pos);
 
     engine.make_search_move(&mut pos, mov);
     assert_hash_matches_recompute(&engine, &pos);
     assert_ne!(
-        pos.board.zhash,
+        pos.zhash,
         before_hash,
         "hash should change after {}",
         _move::to_string(mov, false)
@@ -145,12 +159,12 @@ where
 
     engine.unmake_move(&mut pos, mov);
     assert_hash_matches_recompute(&engine, &pos);
-    assert_eq!(pos.board.zhash, before_hash);
+    assert_eq!(pos.zhash, before_hash);
     assert_eq!(fen_tool::board_to_fen(&pos.board), before_fen);
 }
 
 fn assert_hash_matches_recompute(engine: &TestEngine, pos: &Position) {
-    assert_eq!(pos.board.zhash, engine.recomputed_hash(&pos.board));
+    assert_eq!(pos.zhash, engine.recomputed_hash(pos));
 }
 
 fn legal_move_matching<F>(pos: &Position, matches: F) -> u32

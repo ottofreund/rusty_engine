@@ -69,8 +69,8 @@ impl MoveGen {
     }
 
     ///Called once upon arriving to a new position. <br>
-    ///Not called when reverting move, since just fetched from stack.
-    ///Returns how many moves generated
+    ///Not called when reverting move, since just fetched from stack. <br>
+    ///Returns (how many moves generated, en passant take available) <br>
     ///"noisy" means captures + promotions
     pub fn generate_legal(
         &self,
@@ -82,8 +82,9 @@ impl MoveGen {
         in_search: bool,
         in_perft_debug: bool,
         noisy_only: bool,
-    ) -> usize {
+    ) -> (usize, bool) {
         let mut generated: usize = 0;
+        let mut ep_take_available: bool = false;
         let pseudolegals_generated: usize = self.generate_pseudolegal(
             board,
             pseudo_move_arr,
@@ -98,6 +99,7 @@ impl MoveGen {
                 //add taken piece idx to move (if eating) now, since it is necessary
                 let m: u32;
                 if _move::is_en_passant(*mov) {
+                    ep_take_available = true;
                     if mover == WHITE {
                         m = _move::with_eaten_piece(*mov, 6);
                     } else {
@@ -117,7 +119,7 @@ impl MoveGen {
                 generated += 1;
             }
         }
-        return generated;
+        return (generated, ep_take_available);
     }
 
     ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares

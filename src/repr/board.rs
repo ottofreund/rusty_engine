@@ -1,11 +1,7 @@
 use crate::{
     repr::{
-        _move::NULL_MOVE,
-        move_gen::{add_en_passant, MoveGen},
-        types::{opposite_turn, B_KING, B_KING_U, B_PAWN_U, WHITE, W_KING, W_KING_U, W_PAWN_U},
-    },
-    search::eval::{MAX_LATE_GAME_PHASE, PHASE_MULTIPLIERS},
-    utils::zobrist::Zobrist,
+        _move::NULL_MOVE, move_gen::{MoveGen, add_en_passant}, types::{B_KING, B_KING_U, B_PAWN_U, W_KING, W_KING_U, W_PAWN_U, WHITE, opposite_turn},
+    }, search::eval::{MAX_LATE_GAME_PHASE, PHASE_MULTIPLIERS},
 };
 
 pub const FILES: [u64; 8] = [
@@ -37,7 +33,7 @@ pub struct Board {
     pub black_occupation: u64,
     pub white_attacks: u64, //includes own squares (protected)
     pub black_attacks: u64,
-    pub ep_square: Option<u32>,
+    pub ep_square: Option<u32>, //doesn't guarantee en passant take exists
     pub turn: u32,
     pub nof_checkers: u32,
     pub check_block_sqrs: u64,
@@ -50,7 +46,6 @@ pub struct Board {
     pub late_game_phase: usize,
     phase_material: usize,
     pub major_minor_count: u32,
-    pub zhash: u64,
     pub half_move_clock: u32,
     ws: u32, //white short castling right distance
     wl: u32, //semaphore-like usage or "castling distance"
@@ -242,7 +237,7 @@ impl Board {
         self.late_game_phase = MAX_LATE_GAME_PHASE.saturating_sub(self.phase_material);
     }
 
-    pub fn default_board(move_gen: &MoveGen, zobrist: &Zobrist) -> Self {
+    pub fn default_board(move_gen: &MoveGen) -> Self {
         let pieces: [u64; 12] = [
             65280,
             66,
@@ -276,7 +271,6 @@ impl Board {
             ep_square,
             major_minor_count,
             move_gen,
-            zobrist,
             half_move_clock,
         );
     }
@@ -294,7 +288,6 @@ impl Board {
         ep_square: Option<u32>,
         major_minor_count: u32,
         move_gen: &MoveGen,
-        zobrist: &Zobrist,
         half_move_clock: u32,
     ) -> Self {
         let phase_material = Self::phase_material_from_pieces(&pieces);
@@ -321,7 +314,6 @@ impl Board {
             late_game_phase,
             phase_material,
             major_minor_count,
-            zhash: 0,
             half_move_clock,
         }; //set computable to some defaults and compute now to get correct vals
         let non_mover_attacks: u64 = move_gen.compute_attacked(&mut res, opposite_turn(turn));
@@ -331,8 +323,6 @@ impl Board {
             res.white_attacks = non_mover_attacks
         }
         move_gen.compute_pinned(&mut res, turn);
-        let zhash: u64 = zobrist.init_hash(&res);
-        res.zhash = zhash;
         //now in valid state
         return res;
     }

@@ -29,15 +29,15 @@ impl TestEngine {
     }
 
     pub fn board(&self, fen: &str) -> Board {
-        fen_tool::fen_to_board(fen.to_owned(), &self.move_gen, &self.zobrist).expect("valid FEN")
+        fen_tool::fen_to_board(fen.to_owned(), &self.move_gen).expect("valid FEN")
     }
 
     pub fn default_board(&self) -> Board {
-        Board::default_board(&self.move_gen, &self.zobrist)
+        Board::default_board(&self.move_gen)
     }
 
-    pub fn recomputed_hash(&self, board: &Board) -> u64 {
-        self.zobrist.init_hash(board)
+    pub fn recomputed_hash(&self, pos: &Position) -> u64 {
+        self.zobrist.init_hash(&pos.board, pos.has_ep_take)
     }
 
     pub fn make_search_move(&self, pos: &mut Position, mov: u32) {

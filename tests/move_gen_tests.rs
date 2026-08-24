@@ -1,6 +1,6 @@
 mod common;
 
-use common::{TestEngine};
+use common::TestEngine;
 use rusty_engine::repr::move_gen::*;
 use rusty_engine::repr::*;
 
@@ -8,7 +8,7 @@ fn generate_legal(engine: &TestEngine, fen: &str, noisy_only: bool) -> Vec<u32> 
     let board = engine.board(fen);
     let mut legal_moves = [_move::NULL_MOVE; position::MOVE_ARR_SIZE];
     let mut pseudolegal_moves = [_move::NULL_MOVE; types::MAX_PSEUDO_MOVES_IN_POS];
-    let generated = engine.move_gen.generate_legal(
+    let (generated, _) = engine.move_gen.generate_legal(
         &board,
         board.turn,
         &mut legal_moves,
