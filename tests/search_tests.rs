@@ -298,7 +298,7 @@ fn static_depth_observes_preset_kill_switch_at_poll_interval() {
     assert_eq!(killed_data.ab_cutoffs, 0);
     assert_eq!(killed_data.stand_pat_cutoffs, 0);
     assert_eq!(killed_data.sel_depth, 0);
-    assert_eq!(killed_data.board_hash_history, vec![start.board.zhash]);
+    assert_eq!(killed_data.board_hash_history, vec![start.zhash]);
     assert!(
         killed.positions[0]
             .board

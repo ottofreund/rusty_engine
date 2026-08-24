@@ -4,7 +4,6 @@ use crate::repr::move_gen::MoveGen;
 use crate::repr::types::{
     BLACK, B_KING_U, B_PAWN_U, B_ROOK_U, WHITE, W_KING_U, W_PAWN_U, W_ROOK_U,
 };
-use crate::utils::zobrist::Zobrist;
 
 const VALID_PIECE_CHARS: [char; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
 const VALID_MOVER_CHARS: [char; 2] = ['w', 'b'];
@@ -256,7 +255,6 @@ fn parse_pieces(
 pub fn fen_to_board(
     fen: String,
     move_gen: &MoveGen,
-    zobrist: &Zobrist,
 ) -> Result<Board, &'static str> {
     if !is_valid_fen(&fen) {
         return Err("Fen error");
@@ -314,7 +312,6 @@ pub fn fen_to_board(
         ep_square,
         major_minor_count,
         move_gen,
-        zobrist,
         half_move_clock,
     );
     if !castling_pieces_on_right_squares(castling_string, &board) {

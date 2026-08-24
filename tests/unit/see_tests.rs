@@ -1,10 +1,9 @@
 use super::*;
-use crate::utils::{fen_tool, zobrist::Zobrist};
+use crate::utils::fen_tool;
 
 #[test]
 fn promoting_recaptures_use_promoted_value_and_gain() {
     let move_gen = MoveGen::init();
-    let zobrist = Zobrist::default();
     let cases = [
         (
             "3Q3k/4P3/8/8/8/8/K7/3r4 b - - 0 1",
@@ -23,7 +22,7 @@ fn promoting_recaptures_use_promoted_value_and_gain() {
     ];
 
     for (fen, initiating_move) in cases {
-        let board = fen_tool::fen_to_board(fen.to_owned(), &move_gen, &zobrist)
+        let board = fen_tool::fen_to_board(fen.to_owned(), &move_gen)
             .expect("valid promotion-recapture position");
 
         assert!(!SeeWorker::default().see_positive(initiating_move, &board, &move_gen,));

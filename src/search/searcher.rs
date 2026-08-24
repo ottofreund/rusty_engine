@@ -105,7 +105,7 @@ impl Searcher {
             }
             self.search_data[i]
                 .board_hash_history
-                .push(new_pos.board.zhash);
+                .push(new_pos.zhash);
 
             if self.last_sync_deviates_from_pv || self.search_data[i].pv_ply_indices.len() < 2 {
                 self.search_data[i].pv.fill(NULL_MOVE);
@@ -219,7 +219,7 @@ impl Searcher {
             let is_three_fold: bool = search_data.in_three_fold(pos);
             let (s, e) = pos.search_move_bounds();
             
-            let tte: Option<TTEntry> = tt.probe(pos.board.zhash).map(|entry| {
+            let tte: Option<TTEntry> = tt.probe(pos.zhash).map(|entry| {
                 TTEntry {
                     score: TranspositionTable::score_from_tt(entry.score, d as i16),
                     ..entry
@@ -444,7 +444,7 @@ impl Searcher {
             }
             //add TT entry
             let tte: TTEntry = TTEntry::new_packed(
-                pos.board.zhash,
+                pos.zhash,
                 best_move,
                 (target_d.saturating_sub(d)) as u8,
                 if eval <= old_alpha {

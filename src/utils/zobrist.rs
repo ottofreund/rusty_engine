@@ -20,7 +20,7 @@ pub struct Zobrist {
 }
 
 impl Zobrist {
-    pub fn init_hash(&self, board: &Board) -> u64 {
+    pub fn init_hash(&self, board: &Board, has_ep_take: bool) -> u64 {
         let mut h: u64 = 0;
 
         for p in 0..board.pieces.len() {
@@ -46,8 +46,8 @@ impl Zobrist {
         if board.bl() {
             h ^= self.bl_rand;
         }
-        if let Some(ep_square) = board.ep_square {
-            h ^= self.en_passant_file_rands[ep_square as usize % 8];
+        if has_ep_take {
+            h ^= self.en_passant_file_rands[board.ep_square.expect("has_ep_take is true but ep_square is None") as usize % 8];
         }
 
         return h;
@@ -68,13 +68,13 @@ impl Zobrist {
         eaten_piece: Option<usize>,
         is_castle: bool,
         is_short_castle: bool,
-        is_double_push: bool,
+        allows_ep_take: bool,
         is_en_passant: bool,
         lost_ws: bool,
         lost_wl: bool,
         lost_bs: bool,
         lost_bl: bool,
-        lost_ep: Option<u32>,
+        lost_ep_take: Option<u32>,
     ) -> u64 {
         let mut new: u64 = cur;
 
@@ -135,7 +135,7 @@ impl Zobrist {
         }
 
         if is_en_passant {
-            //clear ep_square
+            //clear ep_square piece
             let opponent_pawn_idx: usize;
             let offset: usize;
             if is_white_turn {
@@ -146,15 +146,15 @@ impl Zobrist {
                 offset = 3 * ROW_LEN;
             }
             let eating_sqr: usize =
-                lost_ep.expect("Was ep but lost_ep was None") as usize % 8 + offset; //file idx + row offset
+                lost_ep_take.expect("Was ep but lost_ep_take was None") as usize % 8 + offset; //file idx + row offset
             new ^= self.piece_rands[opponent_pawn_idx * NOF_SQUARES + eating_sqr];
         }
 
-        if is_double_push {
+        if allows_ep_take {
             new ^= self.en_passant_file_rands[to % 8];
         }
 
-        if let Some(ep_square) = lost_ep {
+        if let Some(ep_square) = lost_ep_take {
             new ^= self.en_passant_file_rands[ep_square as usize % 8];
         }
 
@@ -177,13 +177,13 @@ impl Zobrist {
         eaten_piece: Option<usize>,
         is_castle: bool,
         is_short_castle: bool,
-        is_double_push: bool,
         is_en_passant: bool,
         gained_ws: bool,
         gained_wl: bool,
         gained_bs: bool,
         gained_bl: bool,
-        gained_ep: Option<u32>,
+        gained_ep_take: Option<u32>,
+        lost_ep_take: Option<u32>
     ) -> u64 {
         let mut new: u64 = cur;
 
@@ -259,16 +259,16 @@ impl Zobrist {
             }
 
             let eating_sqr: usize =
-                gained_ep.expect("Was ep but gained_ep was None") as usize % 8 + offset;
+                gained_ep_take.expect("Unmaking ep but gained_ep was None") as usize % 8 + offset;
 
             new ^= self.piece_rands[opponent_pawn_idx * NOF_SQUARES + eating_sqr];
         }
 
-        if is_double_push {
-            new ^= self.en_passant_file_rands[to % 8];
+        if let Some(ep_square) = gained_ep_take {
+            new ^= self.en_passant_file_rands[ep_square as usize % 8];
         }
 
-        if let Some(ep_square) = gained_ep {
+        if let Some(ep_square) = lost_ep_take {
             new ^= self.en_passant_file_rands[ep_square as usize % 8];
         }
 

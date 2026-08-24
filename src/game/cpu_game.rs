@@ -23,7 +23,7 @@ impl CpuGame {
                     return Err(format!("Invalid FEN: {}", err));
                 }
             };
-        let mut board_hash_history: Vec<u64> = vec![new_pos.board.zhash];
+        let mut board_hash_history: Vec<u64> = vec![new_pos.zhash];
 
         for m in moves.iter() {
             let (from, to, promotion): (u32, u32, Option<u32>) =
@@ -48,7 +48,7 @@ impl CpuGame {
                 board_hash_history.clear();
             }
             new_pos.make_move(mov, false, false, false, &self.move_gen, &self.zobrist);
-            board_hash_history.push(new_pos.board.zhash);
+            board_hash_history.push(new_pos.zhash);
         }
 
         self.searcher.import_position(&new_pos, Some(board_hash_history));
