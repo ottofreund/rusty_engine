@@ -19,6 +19,44 @@ use crate::{
     utils::fen_tool::is_valid_fen,
 };
 
+#[derive(Debug, PartialEq, Eq)]
+enum PositionUpdateMethod {
+    Synced,
+    Imported,
+}
+
+fn update_position(
+    cpu_game: &mut CpuGame,
+    previous: &PositionCommand,
+    next: &PositionCommand,
+) -> std::result::Result<PositionUpdateMethod, String> {
+    let (preceeds, offset) = previous.preceeds(next);
+    let mut sync_error = None;
+
+    if preceeds {
+        for mov in &next.moves[next.moves.len() - offset..] {
+            if let Err(err) = cpu_game.sync_new_move(mov) {
+                sync_error = Some(err);
+                break;
+            }
+        }
+
+        if sync_error.is_none() {
+            return Ok(PositionUpdateMethod::Synced);
+        }
+    }
+
+    cpu_game
+        .import_position(next.fen.as_str(), next.moves.clone())
+        .map_err(|import_error| match sync_error {
+            Some(sync_error) => format!(
+                "incremental sync failed ({sync_error}); full import failed ({import_error})"
+            ),
+            None => import_error,
+        })?;
+    Ok(PositionUpdateMethod::Imported)
+}
+
 pub async fn listen(cpu_game: CpuGame) {
     let stdin = std::io::stdin();
     let mut display_board = cpu_game.position.board.clone();
@@ -117,26 +155,14 @@ pub async fn listen(cpu_game: CpuGame) {
                         }
 
                         let cpu_g: &mut CpuGame = cpu_game.as_mut().unwrap();
-
-                        if last_pos_command.lock().await.preceeds(&pc) {
-                            match cpu_g.sync_new_move(pc.moves.last().unwrap().as_str()) {
-                                Ok(()) => {  
-                                    display_board = cpu_g.position.board.clone();
-                                    *last_pos_command.lock().await = pc.clone();
-                                }
-                                Err(err) => {
-                                    println!("info string Error syncing new move: {}", err);
-                                }
+                        let previous = last_pos_command.lock().await.clone();
+                        match update_position(cpu_g, &previous, &pc) {
+                            Ok(_) => {
+                                display_board = cpu_g.position.board.clone();
+                                *last_pos_command.lock().await = pc.clone();
                             }
-                        } else {
-                            match cpu_g.import_position(pc.fen.as_str(), pc.moves.clone()) {
-                                Ok(()) => {
-                                    display_board = cpu_g.position.board.clone();
-                                    *last_pos_command.lock().await = pc.clone();
-                                }
-                                Err(err) => {
-                                    println!("info string Error importing position: {}", err);
-                                }
+                            Err(err) => {
+                                println!("info string Error updating position: {}", err);
                             }
                         }
                     }
@@ -261,3 +287,7 @@ fn is_invalid_pos_command(parts: &Vec<&str>) -> bool {
 
     return false;
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/uci_position_update_tests.rs"]
+mod position_update_tests;

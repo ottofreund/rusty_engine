@@ -120,19 +120,20 @@ impl PositionCommand {
         };
     }
 
-    pub fn preceeds(&self, other: &PositionCommand) -> bool {
+    /// Returns (does_preceeds, how_many_moves)
+    pub fn preceeds(&self, other: &PositionCommand) -> (bool, usize) {
         if self.fen != other.fen {
-            return false;
+            return (false, 0);
         }
-        if self.moves.len() + 1 != other.moves.len() {
-            return false;
+        if self.moves.len() >= other.moves.len() {
+            return (false, 0);
         }
         for (i, m) in self.moves.iter().enumerate() {
             if m != &other.moves[i] {
-                return false;
+                return (false, 0);
             }
         }
-        return true;
+        return (true, other.moves.len() - self.moves.len());
     }
 
 }
