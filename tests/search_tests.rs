@@ -18,6 +18,7 @@ use std::sync::{
 };
 
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
+const QUIET_FIFTY_MOVE_FEN: &str = "7r/5k2/8/8/8/8/2K5/R7 w - - 99 1";
 const STOP_CHECK_INTERVAL_NODES: u64 = 8192;
 const CANCEL_TEST_DEPTH: usize = 6;
 
@@ -75,6 +76,30 @@ fn static_depth_quiescence_rejects_poisoned_capture() {
         with_quiescence.search_data[0].cumul_positions_searched
             > without_quiescence.search_data[0].cumul_positions_searched
     );
+}
+
+#[test]
+fn quiescence_scores_quiet_fifty_move_children_as_draws() {
+    let engine = TestEngine::new();
+    let start = engine.position(QUIET_FIFTY_MOVE_FEN);
+
+    assert!(!start.legal_moves().is_empty());
+    for &mov in start.legal_moves() {
+        assert!(!_move::is_eating(mov));
+        assert!(!_move::is_promotion(mov));
+
+        let mut child = start.clone();
+        engine.make_search_move(&mut child, mov);
+        assert!(child.board.is_fifty_move_draw());
+    }
+
+    let searcher = search_static_depth(&engine, QUIET_FIFTY_MOVE_FEN, 1, true);
+    let root_entry = searcher
+        .tt
+        .probe(start.zhash)
+        .expect("completed root search should be stored in the TT");
+
+    assert_eq!(root_entry.score, 0);
 }
 
 #[test]

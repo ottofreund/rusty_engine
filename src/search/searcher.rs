@@ -265,11 +265,15 @@ impl Searcher {
                 if pos.board.nof_checkers > 0 {
                     return -MATE_EVAL + d as i16; //sooner mate is better
                 } else if in_quiescence {
-                    return evaluator.eval(
-                        pos.board.pieces,
-                        pos.board.turn,
-                        pos.board.late_game_phase,
-                    ); //might miss stalemate but not worth it to check for performance reasons
+                    if is_three_fold || pos.board.is_fifty_move_draw() {
+                        return 0;
+                    } else {
+                        return evaluator.eval(
+                            pos.board.pieces,
+                            pos.board.turn,
+                            pos.board.late_game_phase,
+                        ); //might miss stalemate but not worth it to check for performance reasons
+                    }
                 } else {
                     return 0; //stalemate
                 }
