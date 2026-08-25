@@ -1,6 +1,9 @@
-const DEFAULT_STATIC_TIME: u64 = 5000;
-
+#[cfg(debug_assertions)]
 const SEARCH_RESPONSE_MARGIN: u64 = 50; //ms
+#[cfg(not(debug_assertions))]
+const SEARCH_RESPONSE_MARGIN: u64 = 15; //ms
+
+const DEFAULT_STATIC_TIME: u64 = 5000;
 
 ///Config defining HOW we search. <br>
 ///Might be mutated in between searches to dynamically adjust behaviour.
