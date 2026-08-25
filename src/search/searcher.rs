@@ -223,8 +223,9 @@ impl Searcher {
                     ..entry
                 }
             });
-            let key_collision: bool = tte.is_some_and(|entry| {
-                (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
+            let is_stand_pat_entry: bool = tte.is_some_and(|entry| entry.best_move == NULL_MOVE && entry.depth() == 0);
+            let no_key_collision: bool = tte.is_some_and(|entry| {
+                is_stand_pat_entry || pos.move_arr[s..e].contains(&entry.best_move)
             });
             //TT cutoff?
             if let Some(tt_entry) = tte {
@@ -232,7 +233,7 @@ impl Searcher {
                     && !is_three_fold 
                     && pos.board.half_move_clock < 96
                     && tt_entry.depth() >= (target_d.saturating_sub(d)) as u8
-                    && !key_collision
+                    && no_key_collision
                 { //don't trust tt if near 50 move draw or in prev PV
                     match tt_entry.bound_type() {
                         TTEntryType::Exact => {
@@ -312,7 +313,7 @@ impl Searcher {
             let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
             let mut primary_selection: u32;
             let mut secondary_selection: u32;
-            if tte.is_some() && !key_collision {
+            if tte.is_some() && !is_stand_pat_entry && no_key_collision {
                 if prev_pv_mv != NULL_MOVE {
                     if tte.unwrap().depth() as usize > target_d.saturating_sub(d + 1) {
                         primary_selection = tte.unwrap().best_move;

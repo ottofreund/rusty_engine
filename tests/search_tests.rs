@@ -9,6 +9,7 @@ use rusty_engine::{
         search_config::SearchMode,
         search_data::{get_triang_pv_ply_idx_table, TRIANG_PV_TABLE_SIZE},
         searcher::{Searcher, MAX_SEARCH_DEPTH},
+        tt::{TTEntry, TTEntryType},
     },
     utils::fen_tool::DEFAULT_FEN,
 };
@@ -19,6 +20,7 @@ use std::sync::{
 
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
 const QUIET_FIFTY_MOVE_FEN: &str = "7r/5k2/8/8/8/8/2K5/R7 w - - 99 1";
+const FORCED_PROMOTION_PARENT_FEN: &str = "k7/2P5/2K5/8/8/8/8/8 b - - 0 1";
 const STOP_CHECK_INTERVAL_NODES: u64 = 8192;
 const CANCEL_TEST_DEPTH: usize = 6;
 
@@ -100,6 +102,76 @@ fn quiescence_scores_quiet_fifty_move_children_as_draws() {
         .expect("completed root search should be stored in the TT");
 
     assert_eq!(root_entry.score, 0);
+}
+
+#[test]
+fn quiescence_reuses_depth_zero_null_move_tt_entry() {
+    const STAND_PAT_SCORE: i16 = 1_234;
+
+    let engine = TestEngine::new();
+    let start = engine.position(FORCED_PROMOTION_PARENT_FEN);
+    assert_eq!(start.legal_search_moves().len(), 1);
+
+    let forced_move = start.legal_search_moves()[0];
+    let mut child = start.clone();
+    engine.make_search_move(&mut child, forced_move);
+
+    let mut searcher = Searcher::from(&start, MULTITHREADED);
+    searcher.search_config.search_mode = SearchMode::StaticDepth(1);
+    searcher.search_config.quiescence = true;
+    searcher.search_config.log_uci_diagnostics = false;
+    searcher.tt.store(TTEntry::new_packed(
+        child.zhash,
+        NULL_MOVE,
+        0,
+        TTEntryType::Exact,
+        STAND_PAT_SCORE,
+        searcher.tt.generation,
+    ));
+
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let root_entry = searcher
+        .tt
+        .probe(start.zhash)
+        .expect("completed root search should be stored in the TT");
+    assert_eq!(root_entry.score, -STAND_PAT_SCORE);
+    assert_eq!(searcher.search_data[0].cumul_positions_searched, 2);
+}
+
+#[test]
+fn quiescence_rejects_positive_depth_null_move_tt_entry() {
+    const INVALID_SCORE: i16 = 1_234;
+
+    let engine = TestEngine::new();
+    let start = engine.position(FORCED_PROMOTION_PARENT_FEN);
+    assert_eq!(start.legal_search_moves().len(), 1);
+
+    let forced_move = start.legal_search_moves()[0];
+    let mut child = start.clone();
+    engine.make_search_move(&mut child, forced_move);
+
+    let mut searcher = Searcher::from(&start, MULTITHREADED);
+    searcher.search_config.search_mode = SearchMode::StaticDepth(1);
+    searcher.search_config.quiescence = true;
+    searcher.search_config.log_uci_diagnostics = false;
+    searcher.tt.store(TTEntry::new_packed(
+        child.zhash,
+        NULL_MOVE,
+        1,
+        TTEntryType::Exact,
+        INVALID_SCORE,
+        searcher.tt.generation,
+    ));
+
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let root_entry = searcher
+        .tt
+        .probe(start.zhash)
+        .expect("completed root search should be stored in the TT");
+    assert_ne!(root_entry.score, -INVALID_SCORE);
+    assert!(searcher.search_data[0].cumul_positions_searched > 2);
 }
 
 #[test]
