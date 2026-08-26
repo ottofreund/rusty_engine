@@ -62,6 +62,20 @@ pub struct Searcher {
 //minimax with alpha beta pruning, ran by iterative deepening
 //search heuristics in ordering of moves
 impl Searcher {
+    
+    /// Between games reset
+    pub fn reset(&mut self) {
+        self.tt.clear();
+        if self.multithreaded {
+            for i in 0..THREAD_COUNT {
+                self.search_data[i].reset();
+            }
+        } else {
+            self.search_data[0].reset();
+        }
+        self.last_sync_deviates_from_pv = true;
+    }
+
     pub fn import_position(&mut self, pos: &Position, board_hash_history: Option<Vec<u64>>) {
         if self.multithreaded {
             for i in 0..THREAD_COUNT {
