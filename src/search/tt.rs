@@ -1,6 +1,14 @@
 //* Stockfish inspired implementation *//
 
-use crate::search::eval::MATE_BOUND;
+use crate::{
+    repr::{
+        _move::{self, NULL_MOVE},
+        move_gen::MoveGen,
+        position::Position,
+    },
+    search::eval::MATE_BOUND,
+    utils::zobrist::Zobrist,
+};
 
 const CLUSTER_SIZE: usize = 4;
 const REPLACE_V_AGE_COEFFICIENT: u16 = 4;
@@ -180,6 +188,85 @@ impl TranspositionTable {
         } else {
             return score;
         }
+    }
+
+    /// Replays and validates the searched PV prefix from `root`, then extends
+    /// its first gap through exact, sufficiently deep TT entries.
+    /// Returns the number of moves retained and clears the unused output tail.
+    pub fn reconstruct_pv(
+        &self,
+        root: &Position,
+        ply_pv_slice: &mut [u32],
+        board_hash_history: &[u64],
+        move_gen: &MoveGen,
+        zobrist: &Zobrist,
+    ) -> usize {
+        let mut replay = root.clone();
+        let mut replay_history = Vec::with_capacity(
+            board_hash_history.len() + ply_pv_slice.len() + 1,
+        );
+        replay_history.extend_from_slice(board_hash_history);
+        if replay_history.last().copied() != Some(root.zhash) {
+            replay_history.push(root.zhash);
+        }
+
+        let mut added: usize = 0;
+        let mut following_searched_prefix = true;
+        while added < ply_pv_slice.len() {
+            let is_threefold = replay_history
+                .iter()
+                .rev()
+                .step_by(2)
+                .filter(|hash| **hash == replay.zhash)
+                .take(3)
+                .count()
+                >= 3;
+
+            if is_threefold
+                || replay.board.is_fifty_move_draw()
+                || replay.legal_search_moves().is_empty()
+            {
+                break;
+            }
+
+            let searched_move = ply_pv_slice[added];
+            let mov = if following_searched_prefix && searched_move != NULL_MOVE {
+                searched_move
+            } else {
+                following_searched_prefix = false;
+                if replay.board.half_move_clock >= 96 {
+                    break;
+                }
+
+                let Some(entry) = self.probe(replay.zhash) else {
+                    break;
+                };
+                let remaining_depth = ply_pv_slice.len() - added;
+                if entry.bound_type() != TTEntryType::Exact
+                    || (entry.depth() as usize) < remaining_depth
+                    || entry.best_move == NULL_MOVE
+                {
+                    break;
+                }
+                entry.best_move
+            };
+
+            let is_legal = replay.legal_search_moves().contains(&mov);
+            if !is_legal {
+                break;
+            }
+
+            ply_pv_slice[added] = mov;
+            added += 1;
+            replay.make_move(mov, false, false, false, move_gen, zobrist);
+            if _move::is_unrepeatable(mov) {
+                replay_history.clear();
+            }
+            replay_history.push(replay.zhash);
+        }
+
+        ply_pv_slice[added..].fill(NULL_MOVE);
+        added
     }
 
 }

@@ -54,7 +54,8 @@ impl Zobrist {
     }
 
     ///when making move
-    ///lost_ep <==> if position before making this move had ep sqr, then Some(ep_sqr) else None
+    ///lost_ep_take <==> if position before making this move had has_ep_take, then Some(ep_sqr) else None
+    ///allows_ep_take <==> position after making this move has has_ep_take
     pub fn updated_hash_forward(
         &self,
         cur: u64,

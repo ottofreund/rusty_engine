@@ -473,6 +473,15 @@ impl Searcher {
                 .iter()
                 .position(|mov| *mov == NULL_MOVE)
                 .unwrap_or(d);
+            if completed_pv_len < d {
+                completed_pv_len = self.tt.reconstruct_pv(
+                    pos,
+                    &mut search_data.pv[..d],
+                    &search_data.board_hash_history,
+                    move_gen,
+                    zobrist,
+                );
+            }
 
             if log_uci_diagnostics {
                 println!(

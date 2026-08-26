@@ -9,6 +9,7 @@ use rusty_engine::{
         search_config::SearchMode,
         search_data::{get_triang_pv_ply_idx_table, TRIANG_PV_TABLE_SIZE},
         searcher::{Searcher, MAX_SEARCH_DEPTH},
+        tt::{TTEntry, TTEntryType},
     },
     utils::fen_tool::DEFAULT_FEN,
 };
@@ -52,6 +53,14 @@ fn assert_legal_pv(engine: &TestEngine, start: &Position, pv: &[u32]) {
         );
         engine.make_search_move(&mut replay, *mov);
     }
+}
+
+fn uci_move(pos: &Position, uci: &str) -> u32 {
+    pos.legal_search_moves()
+        .iter()
+        .copied()
+        .find(|mov| _move::to_string(*mov, true) == uci)
+        .unwrap_or_else(|| panic!("{uci} is not legal in the test position"))
 }
 
 #[test]
@@ -237,6 +246,52 @@ fn consecutive_static_search_syncs_exact_pv_tail() {
         assert_eq!(root_pv(&searcher), before[1..]);
         assert_eq!(searcher.collect_best_move(), before.get(1).copied());
     }
+}
+
+#[test]
+fn completed_iteration_reconstructs_canonical_tt_cutoff_tail() {
+    let engine = TestEngine::new();
+    let start = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&start, MULTITHREADED);
+
+    let prior_first = uci_move(&start, "e2e4");
+    let mut prior_child = start.clone();
+    engine.make_search_move(&mut prior_child, prior_first);
+    let prior_reply = uci_move(&prior_child, "e7e5");
+    searcher.search_data[0].pv_ply_indices = get_triang_pv_ply_idx_table(2);
+    searcher.search_data[0].pv[..2].copy_from_slice(&[prior_first, prior_reply]);
+
+    let mut replay = start.clone();
+    let forced_root = uci_move(&replay, "d2d4");
+    engine.make_search_move(&mut replay, forced_root);
+    let forced_reply = uci_move(&replay, "d7d5");
+    searcher.tt.store(TTEntry::new_packed(
+        replay.zhash,
+        forced_reply,
+        2,
+        TTEntryType::Exact,
+        -20_000,
+        searcher.tt.generation,
+    ));
+
+    engine.make_search_move(&mut replay, forced_reply);
+    let forced_tail = uci_move(&replay, "g1f3");
+    searcher.tt.store(TTEntry::new_packed(
+        replay.zhash,
+        forced_tail,
+        1,
+        TTEntryType::Exact,
+        0,
+        searcher.tt.generation,
+    ));
+
+    searcher.search_config.search_mode = SearchMode::StaticDepth(3);
+    searcher.search_config.quiescence = false;
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let pv = root_pv(&searcher);
+    assert_eq!(pv, vec![forced_root, forced_reply, forced_tail]);
+    assert_legal_pv(&engine, &start, &pv);
 }
 
 #[test]
