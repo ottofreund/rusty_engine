@@ -77,6 +77,7 @@ fn static_depth_quiescence_rejects_poisoned_capture() {
     );
 }
 
+
 #[test]
 fn static_depth_quiescence_preserves_nominal_pv_length() {
     let engine = TestEngine::new();
