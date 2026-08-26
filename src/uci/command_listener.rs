@@ -10,13 +10,9 @@ use std::{
 use iced::futures::lock::Mutex;
 
 use crate::{
-    game::cpu_game::CpuGame,
-    repr::{
+    game::{cpu_game::CpuGame}, repr::{
         _move::{self, NULL_MOVE}, types::WHITE,
-    },
-    search::search_config::SearchMode,
-    uci::uci_command::{_Option::Ponder, ArbiterCommand, GoCommand, PositionCommand},
-    utils::fen_tool::is_valid_fen,
+    }, search::search_config::SearchMode, uci::uci_command::{_Option::Ponder, ArbiterCommand, GoCommand, PositionCommand}, utils::fen_tool::is_valid_fen,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -90,7 +86,12 @@ pub async fn listen(cpu_game: CpuGame) {
                         }
                     }
                     ArbiterCommand::UCINewGame => {
-                        //can ignore safely
+                        if let Some(handle) = active_search_thread.take() {
+                            search_kill_switch.store(true, Relaxed);
+                            cpu_game = Some(handle.join().unwrap());
+                        }
+                        let cpu_g: &mut Box<CpuGame> = cpu_game.as_mut().unwrap();
+                        cpu_g.searcher.reset();
                     }
                     ArbiterCommand::Go(gc) if gc.is_valid() => {
                         //TODO add ponder case

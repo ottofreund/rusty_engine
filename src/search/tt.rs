@@ -97,6 +97,15 @@ impl TranspositionTable {
         }
     }
 
+    pub fn clear(&mut self) {
+        for cluster in self.clusters.iter_mut() {
+            for entry in cluster.entries.iter_mut() {
+                *entry = NULL_ENTRY;
+            }
+        }
+        self.generation = 0;
+    }
+
     /// If hit, returns (true, entry) else returns (false, entry_to_replace)
     pub fn probe(&self, key: u64) -> Option<TTEntry> {
         let cluster_index: usize = self.get_cluster_idx(key);
