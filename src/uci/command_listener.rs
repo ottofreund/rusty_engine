@@ -90,7 +90,12 @@ pub async fn listen(cpu_game: CpuGame) {
                         }
                     }
                     ArbiterCommand::UCINewGame => {
-                        //can ignore safely
+                        if let Some(handle) = active_search_thread.take() {
+                            search_kill_switch.store(true, Relaxed);
+                            cpu_game = Some(handle.join().unwrap());
+                        }
+                        let cpu_g: &mut Box<CpuGame> = cpu_game.as_mut().unwrap();
+                        cpu_g.searcher.reset();
                     }
                     ArbiterCommand::Go(gc) if gc.is_valid() => {
                         //TODO add ponder case

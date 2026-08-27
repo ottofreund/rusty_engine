@@ -28,6 +28,17 @@ pub struct SearchData {
 }
 
 impl SearchData {
+
+    /// Between games reset
+    pub fn reset(&mut self) {
+        self.pv.fill(NULL_MOVE);
+        self.pv_ply_indices = get_triang_pv_ply_idx_table(1);
+        self.history_table.fill(0);
+        self.mate_in = None;
+        self.reset_temp_performance_data();
+        self.reset_cumul_performance_data();
+    }
+
     pub fn new(pos: &Position) -> Self {
         let mut board_hash_history: Vec<u64> = Vec::with_capacity(32);
         board_hash_history.push(pos.zhash);
