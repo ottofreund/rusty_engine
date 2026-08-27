@@ -28,6 +28,7 @@ pub struct SearchData {
 }
 
 impl SearchData {
+
     /// Between games reset
     pub fn reset(&mut self) {
         self.pv.fill(NULL_MOVE);
