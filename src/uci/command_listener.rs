@@ -10,13 +10,9 @@ use std::{
 use iced::futures::lock::Mutex;
 
 use crate::{
-    game::cpu_game::CpuGame,
-    repr::{
+    game::{cpu_game::CpuGame}, repr::{
         _move::{self, NULL_MOVE}, types::WHITE,
-    },
-    search::search_config::SearchMode,
-    uci::uci_command::{_Option::Ponder, ArbiterCommand, GoCommand, PositionCommand},
-    utils::fen_tool::is_valid_fen,
+    }, search::search_config::SearchMode, uci::uci_command::{_Option::Ponder, ArbiterCommand, GoCommand, PositionCommand}, utils::fen_tool::is_valid_fen,
 };
 
 #[derive(Debug, PartialEq, Eq)]
