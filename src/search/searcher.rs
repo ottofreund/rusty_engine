@@ -62,7 +62,7 @@ pub struct Searcher {
 //minimax with alpha beta pruning, ran by iterative deepening
 //search heuristics in ordering of moves
 impl Searcher {
-    
+
     /// Between games reset
     pub fn reset(&mut self) {
         self.tt.clear();
