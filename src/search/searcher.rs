@@ -231,7 +231,7 @@ impl Searcher {
             let is_three_fold: bool = search_data.in_three_fold(pos);
             let (s, e) = pos.search_move_bounds();
             
-            let tte: Option<TTEntry> = tt.probe(pos.zhash).map(|entry| {
+            let tte: Option<TTEntry> = tt.probe(Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock)).map(|entry| {
                 TTEntry {
                     score: TranspositionTable::score_from_tt(entry.score, d as i16),
                     ..entry
@@ -415,7 +415,7 @@ impl Searcher {
             }
             //add TT entry
             let tte: TTEntry = TTEntry::new_packed(
-                pos.zhash,
+                Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock),
                 best_move,
                 (target_d.saturating_sub(d)) as u8,
                 if eval <= old_alpha {

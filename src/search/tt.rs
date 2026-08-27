@@ -1,6 +1,6 @@
 //* Stockfish inspired implementation *//
 
-use crate::search::eval::MATE_BOUND;
+use crate::{search::eval::MATE_BOUND};
 
 const CLUSTER_SIZE: usize = 4;
 const REPLACE_V_AGE_COEFFICIENT: u16 = 4;
