@@ -249,7 +249,7 @@ impl Searcher {
                     && pos.board.half_move_clock < 96
                     && tt_entry.depth() >= (target_d.saturating_sub(d)) as u8
                     && !key_collision
-                { //don't trust tt if near 50 move draw or in prev PV
+                { //don't trust tt if near 50 move draw or in PV-node
                     match tt_entry.bound_type() {
                         TTEntryType::Exact => {
                             if d < target_d {
@@ -403,7 +403,7 @@ impl Searcher {
                         tt
                     );
 
-                    if new_eval > alpha && is_pv_node { //re-search with full window
+                    if new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
                         new_eval = -inner(
                             d + 1,
                             target_d,
