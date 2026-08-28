@@ -8,6 +8,7 @@ use crate::repr::types::{BLACK, B_PAWN_U, B_ROOK_U, NOF_PIECE_TYPES, W_PAWN_U, W
 const PIECE_RANDS_LEN: usize = NOF_PIECE_TYPES as usize * 2 * 64;
 const NOF_SQUARES: usize = 64;
 const ROW_LEN: usize = 8;
+const KEY50_SALT_START_CLOCK: u32 = 50;
 
 pub struct Zobrist {
     piece_rands: [u64; PIECE_RANDS_LEN],
@@ -276,6 +277,23 @@ impl Zobrist {
 
         return new;
     }
+
+    #[inline]
+    /// Taken from Stockfish
+    pub fn zkey50_adjusted(key: u64, half_move_clock: u32) -> u64 {
+        if half_move_clock < KEY50_SALT_START_CLOCK {
+            return key;
+        } else {
+            return key ^ Zobrist::make_key((half_move_clock as u64 - KEY50_SALT_START_CLOCK as u64) / 8);
+        }
+    }
+
+    /// Taken from Stockfish
+    #[inline]
+    fn make_key(seed: u64) -> u64 {
+        seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
+    }
+
 }
 
 impl Default for Zobrist {
