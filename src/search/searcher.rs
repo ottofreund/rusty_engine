@@ -206,6 +206,8 @@ impl Searcher {
             mut in_quiescence: bool,
             use_quiescence: bool,
             follows_prev_pv: bool,
+            is_pv_node: bool,
+            is_null_window: bool,
             prev_pv: &[u32],
             pos: &mut Position,
             evaluator: &Evaluator,
@@ -242,7 +244,7 @@ impl Searcher {
             });
             //TT cutoff?
             if let Some(tt_entry) = tte {
-                if  !follows_prev_pv 
+                if  !is_pv_node 
                     && !is_three_fold 
                     && pos.board.half_move_clock < 96
                     && tt_entry.depth() >= (target_d.saturating_sub(d)) as u8
@@ -343,8 +345,7 @@ impl Searcher {
             if primary_selection == secondary_selection {
                 secondary_selection = NULL_MOVE;
             }
-            //TODO use low depth TT hit to order moves, maybe also give history bonus
-            //TODO i == s condition
+
             for i in s..e {
                 let mov: u32 =
                     Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
@@ -359,36 +360,84 @@ impl Searcher {
 
                 pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.zhash);
-                let child_eval: i16 = inner(
-                    d + 1,
-                    target_d,
-                    -beta,
-                    -alpha,
-                    in_quiescence,
-                    use_quiescence,
-                    child_follows_prev_pv,
-                    prev_pv,
-                    pos,
-                    evaluator,
-                    search_data,
-                    move_gen,
-                    zobrist,
-                    control,
-                    tt
-                );
+
+                let mut new_eval: i16;
+                if i == s && is_pv_node { //full-window search
+                    new_eval = -inner(
+                        d + 1,
+                        target_d,
+                        -beta,
+                        -alpha,
+                        in_quiescence,
+                        use_quiescence,
+                        child_follows_prev_pv,
+                        true,
+                        false,
+                        prev_pv,
+                        pos,
+                        evaluator,
+                        search_data,
+                        move_gen,
+                        zobrist,
+                        control,
+                        tt
+                    );
+                } else { //null-window search
+                    new_eval = -inner(
+                        d + 1,
+                        target_d,
+                        -alpha - 1,
+                        -alpha,
+                        in_quiescence,
+                        use_quiescence,
+                        child_follows_prev_pv,
+                        false,
+                        true,
+                        prev_pv,
+                        pos,
+                        evaluator,
+                        search_data,
+                        move_gen,
+                        zobrist,
+                        control,
+                        tt
+                    );
+
+                    if new_eval > alpha && is_pv_node { //re-search with full window
+                        new_eval = -inner(
+                            d + 1,
+                            target_d,
+                            -beta,
+                            -alpha,
+                            in_quiescence,
+                            use_quiescence,
+                            child_follows_prev_pv,
+                            true,
+                            false,
+                            prev_pv,
+                            pos,
+                            evaluator,
+                            search_data,
+                            move_gen,
+                            zobrist,
+                            control,
+                            tt
+                        );
+                    } //else if new_eval > alpha : let be treated like normal fail-high cutoff
+                }
+
                 search_data.board_hash_history.pop();
                 pos.unmake_move(mov, zobrist);
 
-                if child_eval == EVAL_QUIT {
+                if new_eval.abs() == EVAL_QUIT {
                     return EVAL_QUIT;
                 }
 
-                let new_eval: i16 = -child_eval; //candidate for this node
                 if new_eval > eval {
-                    //child ply's pv appended to this ply's pv
                     eval = new_eval;
                     best_move = mov;
-                    if d < target_d {
+                    
+                    if d < target_d && !is_null_window { //child ply's pv appended to this ply's pv
                         let cur_ply_s_idx: usize = search_data.pv_ply_indices[d];
                         let child_ply_s_idx: usize = cur_ply_s_idx + (target_d - d);
                         let child_ply_e_idx: usize = child_ply_s_idx + (target_d - (d + 1));
@@ -451,6 +500,8 @@ impl Searcher {
                 false,
                 use_quiescence,
                 true,
+                true,
+                false,
                 &prev_pv,
                 pos,
                 &self.evaluator,
