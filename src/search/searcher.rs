@@ -199,11 +199,10 @@ impl Searcher {
         let control = SearchControl::new(target_time, kill_switch);
 
         fn inner(
-            d: usize,
+            d: i16,
             target_d: usize,
             mut alpha: i16,
             mut beta: i16,
-            mut in_quiescence: bool,
             use_quiescence: bool,
             follows_prev_pv: bool,
             is_pv_node: bool,
@@ -221,21 +220,24 @@ impl Searcher {
                 return EVAL_QUIT;
             }
 
-            if d < target_d { //initialize triangular pv row for this ply
-                let row_start = search_data.pv_ply_indices[d];
+            let ply: usize = (target_d as i16 - d) as usize;
+
+            if d > 0 { //initialize triangular pv row for this ply
+                let row_start = search_data.pv_ply_indices[ply];
                 search_data.pv[row_start] = NULL_MOVE;
             }
 
             search_data.positions_searched += 1;
-            search_data.sel_depth = max(search_data.sel_depth, d);
+            search_data.sel_depth = max(search_data.sel_depth, ply);
 
             let mut eval: i16 = EVAL_INIT;
             let is_three_fold: bool = search_data.in_three_fold(pos);
+            let in_quiescence: bool = use_quiescence && d <= 0;
             let (s, e) = pos.search_move_bounds();
             
             let tte: Option<TTEntry> = tt.probe(Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock)).map(|entry| {
                 TTEntry {
-                    score: TranspositionTable::score_from_tt(entry.score, d as i16),
+                    score: TranspositionTable::score_from_tt(entry.score, ply as i16),
                     ..entry
                 }
             });
@@ -247,14 +249,14 @@ impl Searcher {
                 if  !is_pv_node 
                     && !is_three_fold 
                     && pos.board.half_move_clock < 96
-                    && tt_entry.depth() >= (target_d.saturating_sub(d)) as u8
+                    && tt_entry.depth() >= d.max(0) as u8
                     && !key_collision
                 { //don't trust tt if near 50 move draw or in PV-node
                     match tt_entry.bound_type() {
                         TTEntryType::Exact => {
-                            if d < target_d {
-                                let row_start = search_data.pv_ply_indices[d];
-                                let row_end = search_data.pv_ply_indices[d + 1];
+                            if d > 0 {
+                                let row_start = search_data.pv_ply_indices[ply];
+                                let row_end = search_data.pv_ply_indices[ply + 1];
 
                                 search_data.pv[row_start..row_end].fill(NULL_MOVE);
                                 search_data.pv[row_start] = tt_entry.best_move;
@@ -279,7 +281,7 @@ impl Searcher {
             //terminal node?
             if s == e {
                 if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + d as i16; //sooner mate is better
+                    return -MATE_EVAL + ply as i16; //sooner mate is better
                 } else if in_quiescence {
                     return evaluator.eval(
                         pos.board.pieces,
@@ -291,7 +293,7 @@ impl Searcher {
                 }
             } else if is_three_fold || pos.board.is_fifty_move_draw() {
                 return 0;
-            } else if d >= target_d {
+            } else if d <= 0 {
                 if use_quiescence {
                     if pos.board.nof_checkers == 0 {
                         eval = evaluator.eval(
@@ -314,19 +316,15 @@ impl Searcher {
                 }
             }
 
-            if d == target_d - 1 && use_quiescence { // target_d - 1 because here we generate moves for target_d
-                in_quiescence = true;
-            }
-
             let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
 
-            let prev_pv_mv: u32 = if follows_prev_pv && d < prev_pv.len() { prev_pv[d] } else { NULL_MOVE };
+            let prev_pv_mv: u32 = if follows_prev_pv && ply < prev_pv.len() { prev_pv[ply] } else { NULL_MOVE };
             let mut primary_selection: u32;
             let mut secondary_selection: u32;
             if tte.is_some() && !key_collision {
                 if prev_pv_mv != NULL_MOVE {
-                    if tte.unwrap().depth() as usize > target_d.saturating_sub(d + 1) {
+                    if tte.unwrap().depth() >= d.max(1) as u8 {
                         primary_selection = tte.unwrap().best_move;
                         secondary_selection = prev_pv_mv;
                     } else {
@@ -358,17 +356,16 @@ impl Searcher {
 
                 let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
 
-                pos.make_move(mov, true, false, in_quiescence, move_gen, zobrist);
+                pos.make_move(mov, true, false, use_quiescence && d <= 1, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.zhash);
 
                 let mut new_eval: i16;
                 if i == s && is_pv_node { //full-window search
                     new_eval = -inner(
-                        d + 1,
+                        d - 1,
                         target_d,
                         -beta,
                         -alpha,
-                        in_quiescence,
                         use_quiescence,
                         child_follows_prev_pv,
                         true,
@@ -384,11 +381,10 @@ impl Searcher {
                     );
                 } else { //null-window search
                     new_eval = -inner(
-                        d + 1,
+                        d - 1,
                         target_d,
                         -alpha - 1,
                         -alpha,
-                        in_quiescence,
                         use_quiescence,
                         child_follows_prev_pv,
                         false,
@@ -405,11 +401,10 @@ impl Searcher {
 
                     if new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
                         new_eval = -inner(
-                            d + 1,
+                            d - 1,
                             target_d,
                             -beta,
                             -alpha,
-                            in_quiescence,
                             use_quiescence,
                             child_follows_prev_pv,
                             true,
@@ -437,10 +432,10 @@ impl Searcher {
                     eval = new_eval;
                     best_move = mov;
                     
-                    if d < target_d && !is_null_window { //child ply's pv appended to this ply's pv
-                        let cur_ply_s_idx: usize = search_data.pv_ply_indices[d];
-                        let child_ply_s_idx: usize = cur_ply_s_idx + (target_d - d);
-                        let child_ply_e_idx: usize = child_ply_s_idx + (target_d - (d + 1));
+                    if d > 0 && !is_null_window { //child ply's pv appended to this ply's pv
+                        let cur_ply_s_idx: usize = search_data.pv_ply_indices[ply];
+                        let child_ply_s_idx: usize = cur_ply_s_idx + d as usize;
+                        let child_ply_e_idx: usize = child_ply_s_idx + d as usize - 1;
                         search_data.pv.copy_within(child_ply_s_idx..child_ply_e_idx, cur_ply_s_idx + 1);
                         search_data.pv[cur_ply_s_idx] = mov;
                     }
@@ -450,13 +445,13 @@ impl Searcher {
 
                 if alpha >= beta {
                     search_data.ab_cutoffs += 1;
-                    if d < target_d {
+                    if d > 0 {
                         Searcher::update_quiet_history_after_cutoff(
                             search_data,
                             pos.board.turn,
                             mov,
                             &pos.move_arr[s..i],
-                            target_d - d,
+                            d as usize,
                         );
                     }
                     break; //i.e. return alpha
@@ -466,7 +461,7 @@ impl Searcher {
             let tte: TTEntry = TTEntry::new_packed(
                 Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock),
                 best_move,
-                (target_d.saturating_sub(d)) as u8,
+                d.max(0) as u8,
                 if eval <= old_alpha {
                     TTEntryType::UpperBound
                 } else if eval >= old_beta {
@@ -474,7 +469,7 @@ impl Searcher {
                 } else {
                     TTEntryType::Exact
                 },
-                TranspositionTable::score_to_tt(eval, d as i16),
+                TranspositionTable::score_to_tt(eval, ply as i16),
                 tt.generation
             );
             tt.store(tte);
@@ -487,17 +482,16 @@ impl Searcher {
         let log_uci_diagnostics = self.search_config.log_uci_diagnostics;
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
-        for d in (synced_pv_depth + 1)..=target_depth {
-            let mut prev_pv = vec![NULL_MOVE; d];
+        for td in (synced_pv_depth + 1)..=target_depth {
+            let mut prev_pv = vec![NULL_MOVE; td];
             prev_pv[..completed_pv_len]
                 .copy_from_slice(&search_data.pv[..completed_pv_len]);
-            search_data.pv_ply_indices = get_triang_pv_ply_idx_table(d);
+            search_data.pv_ply_indices = get_triang_pv_ply_idx_table(td);
             let eval: i16 = inner(
-                0,
-                d,
+                td as i16,
+                td,
                 ALPHA_INIT,
                 BETA_INIT,
-                false,
                 use_quiescence,
                 true,
                 true,
@@ -515,19 +509,19 @@ impl Searcher {
             if eval == EVAL_QUIT {
                 search_data.reset_temp_performance_data();
                 if search_data.pv[0] == NULL_MOVE { //didn't finish any root move before stopping
-                    search_data.pv[..d].copy_from_slice(&prev_pv);
+                    search_data.pv[..td].copy_from_slice(&prev_pv);
                 }
                 break;
             }
 
-            completed_pv_len = search_data.pv[..d]
+            completed_pv_len = search_data.pv[..td]
                 .iter()
                 .position(|mov| *mov == NULL_MOVE)
-                .unwrap_or(d);
+                .unwrap_or(td);
 
             if log_uci_diagnostics {
                 println!(
-                    "info depth {d} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}", 
+                    "info depth {td} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}",
                     search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
                 );
             }

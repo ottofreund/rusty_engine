@@ -18,6 +18,7 @@ use std::sync::{
 };
 
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
+const QUIET_MATERIAL_DISADVANTAGE_FEN: &str = "6qk/8/8/8/8/8/8/K7 w - - 0 1";
 const STOP_CHECK_INTERVAL_NODES: u64 = 8192;
 const CANCEL_TEST_DEPTH: usize = 6;
 
@@ -77,6 +78,25 @@ fn static_depth_quiescence_rejects_poisoned_capture() {
     );
 }
 
+#[test]
+fn static_depth_scores_quiet_horizon_with_and_without_quiescence() {
+    let engine = TestEngine::new();
+
+    for quiescence in [false, true] {
+        let searcher = search_static_depth(&engine, QUIET_MATERIAL_DISADVANTAGE_FEN, 1, quiescence);
+        let root_hash = searcher.positions[0].zhash;
+        let root_score = searcher
+            .tt
+            .probe(root_hash)
+            .expect("completed root search should be stored in the TT")
+            .score;
+
+        assert!(
+            root_score < 0,
+            "quiet losing horizon scored {root_score} with quiescence={quiescence}"
+        );
+    }
+}
 
 #[test]
 fn static_depth_quiescence_preserves_nominal_pv_length() {
