@@ -200,6 +200,7 @@ impl Searcher {
 
         fn inner(
             d: i16,
+            ply: usize,
             target_d: usize,
             mut alpha: i16,
             mut beta: i16,
@@ -220,12 +221,12 @@ impl Searcher {
                 return EVAL_QUIT;
             }
 
-            let ply: usize = (target_d as i16 - d) as usize;
-
             if d > 0 { //initialize triangular pv row for this ply
                 let row_start = search_data.pv_ply_indices[ply];
                 search_data.pv[row_start] = NULL_MOVE;
             }
+
+            let root_relative_d: usize = target_d - ply.min(target_d); // d is disturbed by LMR so this is the actual d remaining relative to root
 
             search_data.positions_searched += 1;
             search_data.sel_depth = max(search_data.sel_depth, ply);
@@ -355,14 +356,20 @@ impl Searcher {
                 }
 
                 let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
-
+                
                 pos.make_move(mov, true, false, use_quiescence && d <= 1, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.zhash);
 
-                let mut new_eval: i16;
+                let lmr: i16 = if d < 3 || i == s || follows_prev_pv { 
+                    0
+                } else {
+                    (0.99 + f32::ln(d as f32) * f32::ln((i - s + 1) as f32) / 3.14) as i16 //from Obsidian
+                }; 
+                let mut new_eval: i16 = EVAL_INIT;
                 if i == s && is_pv_node { //full-window search
                     new_eval = -inner(
                         d - 1,
+                        ply + 1,
                         target_d,
                         -beta,
                         -alpha,
@@ -379,36 +386,18 @@ impl Searcher {
                         control,
                         tt
                     );
-                } else { //null-window search
-                    new_eval = -inner(
-                        d - 1,
-                        target_d,
-                        -alpha - 1,
-                        -alpha,
-                        use_quiescence,
-                        child_follows_prev_pv,
-                        false,
-                        true,
-                        prev_pv,
-                        pos,
-                        evaluator,
-                        search_data,
-                        move_gen,
-                        zobrist,
-                        control,
-                        tt
-                    );
-
-                    if new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
+                } else { //LMR null-window search ---(raises alpha)--> null-window search ---(raises alpha, doesn't fail-high)--> full-window search
+                    if lmr > 0 {
                         new_eval = -inner(
-                            d - 1,
+                            d - 1 - lmr,
+                            ply + 1,
                             target_d,
-                            -beta,
+                            -alpha - 1,
                             -alpha,
                             use_quiescence,
                             child_follows_prev_pv,
-                            true,
                             false,
+                            true,
                             prev_pv,
                             pos,
                             evaluator,
@@ -418,7 +407,51 @@ impl Searcher {
                             control,
                             tt
                         );
-                    } //else if new_eval > alpha : let be treated like normal fail-high cutoff
+                    }
+                    
+                    if new_eval.abs() != EVAL_QUIT && (lmr == 0 || new_eval > alpha) { //null-window search
+                        new_eval = -inner(
+                            d - 1,
+                            ply + 1,
+                            target_d,
+                            -alpha - 1,
+                            -alpha,
+                            use_quiescence,
+                            child_follows_prev_pv,
+                            false,
+                            true,
+                            prev_pv,
+                            pos,
+                            evaluator,
+                            search_data,
+                            move_gen,
+                            zobrist,
+                            control,
+                            tt
+                        );
+                        
+                        if new_eval.abs() != EVAL_QUIT && new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
+                            new_eval = -inner(
+                                d - 1,
+                                ply + 1,
+                                target_d,
+                                -beta,
+                                -alpha,
+                                use_quiescence,
+                                child_follows_prev_pv,
+                                true,
+                                false,
+                                prev_pv,
+                                pos,
+                                evaluator,
+                                search_data,
+                                move_gen,
+                                zobrist,
+                                control,
+                                tt
+                            );
+                        } //else if new_eval > alpha : let be treated like normal fail-high cutoff
+                    }
                 }
 
                 search_data.board_hash_history.pop();
@@ -434,8 +467,8 @@ impl Searcher {
                     
                     if d > 0 && !is_null_window { //child ply's pv appended to this ply's pv
                         let cur_ply_s_idx: usize = search_data.pv_ply_indices[ply];
-                        let child_ply_s_idx: usize = cur_ply_s_idx + d as usize;
-                        let child_ply_e_idx: usize = child_ply_s_idx + d as usize - 1;
+                        let child_ply_s_idx: usize = cur_ply_s_idx + root_relative_d;
+                        let child_ply_e_idx: usize = child_ply_s_idx + root_relative_d - 1;
                         search_data.pv.copy_within(child_ply_s_idx..child_ply_e_idx, cur_ply_s_idx + 1);
                         search_data.pv[cur_ply_s_idx] = mov;
                     }
@@ -489,6 +522,7 @@ impl Searcher {
             search_data.pv_ply_indices = get_triang_pv_ply_idx_table(td);
             let eval: i16 = inner(
                 td as i16,
+                0,
                 td,
                 ALPHA_INIT,
                 BETA_INIT,
