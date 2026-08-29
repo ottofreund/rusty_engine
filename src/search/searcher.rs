@@ -425,6 +425,9 @@ impl Searcher {
                             control,
                             tt
                         );
+                        if new_eval.abs() == EVAL_QUIT {
+                            return EVAL_QUIT;
+                        }
                         
                         if new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
                             new_eval = -inner(
