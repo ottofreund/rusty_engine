@@ -302,6 +302,6 @@ fn static_depth_search_observes_kill_switch_within_response_limit() {
         .expect("search must reserve a response margin");
 
     assert_search_stops_within("fixed-depth kill switch", response_limit, || {
-        kill_switch_response_time(&engine, TACTICAL_FEN, SearchMode::StaticDepth(6), true)
+        kill_switch_response_time(&engine, TACTICAL_FEN, SearchMode::StaticDepth(12), true)
     });
 }

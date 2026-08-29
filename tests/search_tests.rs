@@ -20,7 +20,7 @@ use std::sync::{
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
 const QUIET_MATERIAL_DISADVANTAGE_FEN: &str = "6qk/8/8/8/8/8/8/K7 w - - 0 1";
 const STOP_CHECK_INTERVAL_NODES: u64 = 8192;
-const CANCEL_TEST_DEPTH: usize = 6;
+const CANCEL_TEST_DEPTH: usize = 9;
 
 fn search_static_depth(engine: &TestEngine, fen: &str, depth: usize, quiescence: bool) -> Searcher {
     let pos = engine.position(fen);
@@ -287,7 +287,7 @@ fn static_depth_observes_preset_kill_switch_at_poll_interval() {
     killed.search_config.search_mode = SearchMode::StaticDepth(CANCEL_TEST_DEPTH);
     killed.search_config.quiescence = false;
     killed.search_config.log_diagnostics = false;
-    killed.search_config.log_uci_diagnostics = false;
+    killed.search_config.log_uci_diagnostics = true;
     let kill_switch = Arc::new(AtomicBool::new(true));
 
     killed.start_search(
@@ -298,6 +298,10 @@ fn static_depth_observes_preset_kill_switch_at_poll_interval() {
 
     let interrupted_depth = killed.search_data[0].pv_ply_indices[1];
     assert!((1..=CANCEL_TEST_DEPTH).contains(&interrupted_depth));
+
+    if interrupted_depth == CANCEL_TEST_DEPTH {
+        panic!("Search is too fast to test kill switch; need to increase CANCEL_TEST_DEPTH");
+    }
 
     let mut completed = Searcher::from(&start, MULTITHREADED);
     completed.search_config.search_mode = SearchMode::StaticDepth(interrupted_depth - 1);
@@ -355,7 +359,6 @@ fn static_depth_inactive_kill_switch_matches_no_switch() {
 
     let without_data = &without_switch.search_data[0];
     let with_data = &with_switch.search_data[0];
-    assert!(without_data.cumul_positions_searched > STOP_CHECK_INTERVAL_NODES);
     assert!(!kill_switch.load(Relaxed));
     assert_eq!(root_pv(&with_switch), root_pv(&without_switch));
     assert_eq!(

@@ -360,7 +360,7 @@ impl Searcher {
                 pos.make_move(mov, true, false, use_quiescence && d <= 1, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.zhash);
 
-                let lmr: i16 = if ply < 3 || i == s { 0 } else { (0.99 + f32::ln(ply as f32) * f32::ln((i - s + 1) as f32) / 3.14) as i16 }; //from Obsidian
+                let lmr: i16 = if d < 3 || i == s { 0 } else { (0.99 + f32::ln(d as f32) * f32::ln((i - s + 1) as f32) / 3.14) as i16 }; //from Obsidian
                 let mut new_eval: i16 = EVAL_INIT;
                 if i == s && is_pv_node { //full-window search
                     new_eval = -inner(
@@ -405,7 +405,7 @@ impl Searcher {
                         );
                     }
                     
-                    if lmr == 0 || new_eval > alpha { //null-window search
+                    if new_eval.abs() != EVAL_QUIT && (lmr == 0 || new_eval > alpha) { //null-window search
                         new_eval = -inner(
                             d - 1,
                             ply + 1,
@@ -425,11 +425,8 @@ impl Searcher {
                             control,
                             tt
                         );
-                        if new_eval.abs() == EVAL_QUIT {
-                            return EVAL_QUIT;
-                        }
                         
-                        if new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
+                        if new_eval.abs() != EVAL_QUIT && new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
                             new_eval = -inner(
                                 d - 1,
                                 ply + 1,
