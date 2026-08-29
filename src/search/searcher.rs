@@ -360,7 +360,11 @@ impl Searcher {
                 pos.make_move(mov, true, false, use_quiescence && d <= 1, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.zhash);
 
-                let lmr: i16 = if d < 3 || i == s { 0 } else { (0.99 + f32::ln(d as f32) * f32::ln((i - s + 1) as f32) / 3.14) as i16 }; //from Obsidian
+                let lmr: i16 = if d < 3 || i == s || follows_prev_pv { 
+                    0
+                } else {
+                    (0.99 + f32::ln(d as f32) * f32::ln((i - s + 1) as f32) / 3.14) as i16 //from Obsidian
+                }; 
                 let mut new_eval: i16 = EVAL_INIT;
                 if i == s && is_pv_node { //full-window search
                     new_eval = -inner(
