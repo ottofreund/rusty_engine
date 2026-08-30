@@ -5,7 +5,6 @@
 
 
 - Futility pruning, should be easy gains. Also reverse futility pruning?
-- Late move reductions
 
 - More eval heuristics, passed pawn bonus, isolated pawn penalty, controlled squares + other heuristics
 - Draw by insufficient material

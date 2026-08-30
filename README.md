@@ -2,12 +2,14 @@
 
 Rusty Engine is a work-in-progress chess engine written in Rust. It combines a
 bitboard-based chess core, perft-tested legal move generation, iterative-deepening
-alpha-beta search, a UCI command-line interface, and an [`iced`](https://iced.rs/)
-desktop GUI.
+principal-variation search, a UCI command-line interface, and an
+[`iced`](https://iced.rs/) desktop GUI.
 
 ![Rusty Engine board](.github/board_demo_img.png)
 
 ## Features
+
+### Move generation and position state
 
 - Bitboard board representation and magic-bitboard sliding attacks
 - Legal move generation for checks, pins, castling, en passant, and promotions
@@ -15,18 +17,38 @@ desktop GUI.
   king-count, castling-right, and en-passant consistency checks
 - Incremental Zobrist hashing with threefold repetition and fifty-move-rule
   handling in both games and search
-- Material and opening/endgame piece-square evaluation
-- Fixed-depth or timed iterative-deepening negamax search with alpha-beta pruning
-  and quiescence search
-- Principal-variation reuse, a history heuristic, static exchange evaluation,
-  and transposition-table move ordering and cutoffs
+
+### Search
+
+- Fixed-depth or timed iterative-deepening negamax with principal variation
+  search (PVS) and alpha-beta pruning
+- Cooperative cancellation and UCI diagnostics for depth, selective depth,
+  score, node and cutoff counts, and the principal variation
+
+### Selectivity
+
+- Capture-and-promotion quiescence search with stand-pat pruning and full move
+  generation when the side to move is in check
+- Logarithmic late-move reductions (LMR), with a full-depth re-search when a
+  reduced move improves alpha
+
+### Search enhancements and move ordering
+
+- Previous-principal-variation and transposition-table move priority, static
+  exchange evaluation for captures, and an aged history heuristic for quiet moves
 - A configurable 16 MB-by-default, cache-line-aligned, clustered transposition
-  table with depth-, bound-, and generation-aware replacement
-- Cooperative cancellation and UCI search diagnostics, including depth,
-  selective depth, score, node counts, cutoff counts, and principal variation
-- A UCI front end for position import, clock-based, fixed-time, or fixed-depth
-  search, Hash configuration, `stop`, `bestmove`/`ponder`, and board display
-  with `d`
+  table with depth-, bound-, and generation-aware replacement and search cutoffs
+
+### Evaluation
+
+- Material and piece-square evaluation, with game-phase interpolation between
+  opening and endgame pawn and king tables
+
+### Interfaces
+
+- A UCI front end for position import, `ucinewgame`, clock-based, fixed-time, or
+  fixed-depth search, Hash configuration, `stop`, board display with `d`, and
+  `bestmove` output with a principal-variation-derived `ponder` move
 - An `iced` board for player-versus-engine games and FEN loading, with its image
   and evaluation assets embedded in the binary
 
@@ -54,10 +76,11 @@ quit
 
 Supported search modes are `go depth <plies>`, `go movetime <milliseconds>`, or
 clock-based `go` commands using `wtime`, `btime`, `winc`, and `binc`. Positions
-may use `startpos` or a FEN followed by optional UCI moves. The non-standard `d`
-command prints the current board. The UCI `Hash` spin option configures the
-transposition table in MB, with a default of 16 and an accepted range of
-1–32768.
+may use `startpos` or a FEN followed by optional UCI moves. `ucinewgame` clears
+search state between games, while `stop` cooperatively cancels an active search.
+The non-standard `d` command prints the current board. The UCI `Hash` spin option
+configures the transposition table in MB, with a default of 16 and an accepted
+range of 1–32768.
 
 The desktop GUI is still available, but there is not yet a runtime front-end
 selector. Set `uci_mode` to `false` in `src/main.rs` and run the command above to
@@ -67,15 +90,17 @@ dialogs.
 
 ## Architecture
 
-- **`repr`** contains `Board`, `Position`, compact moves, and the legal move
-  generator.
-- **`search`** contains evaluation, iterative deepening and quiescence search,
-  search configuration and state, static exchange evaluation, move ordering,
-  cancellation logic, and the transposition table.
-- **`game`** provides `Game` for on-board state and `CpuGame` for importing and
-  synchronizing UCI positions.
-- **`utils`**, **`ui`**, and **`uci`** provide FEN/Zobrist utilities and the two
-  current front ends.
+- **`repr`** is the chess core: bitboards, compact moves, `Board` state,
+  reversible `Position` state, magic sliding attacks, and legal move generation.
+- **`search`** owns the PVS/LMR searcher, per-search state and configuration,
+  evaluation, static exchange evaluation, move ordering, and the transposition
+  table.
+- **`game`** provides `Game` for tracked player-versus-engine games and `CpuGame`
+  for importing or incrementally synchronizing UCI positions.
+- **`uci`** parses commands, manages UCI options, and runs cancellable searches
+  on a worker thread; **`ui`** contains the `iced` desktop front end.
+- **`utils`** provides FEN conversion and Zobrist hashing; `main.rs` currently
+  selects between the UCI and GUI front ends with a source-level flag.
 
 ## Testing
 
@@ -98,7 +123,7 @@ cargo test --release --test search_benchmark -- --ignored --show-output
 
 ## Remaining Work
 
-Planned work includes fuller UCI option, new-game, and pondering support;
-principal-variation search with null windows; multithreaded search; additional
-search pruning and extensions; richer evaluation; and draw detection for
-insufficient material.
+Planned work includes multithreaded search; search extensions; futility and
+reverse-futility pruning; incremental evaluation and richer positional terms;
+large-page allocation for the transposition table; draw detection for
+insufficient material; and full UCI pondering with `go ponder` and `ponderhit`.
