@@ -1,3 +1,5 @@
+pub const VERSION: &str = "1.0";
+
 pub const W_PAWN: u32 = 0;
 pub const W_KNIGHT: u32 = 1;
 pub const W_BISHOP: u32 = 2;

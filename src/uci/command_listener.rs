@@ -10,9 +10,11 @@ use std::{
 use iced::futures::lock::Mutex;
 
 use crate::{
-    game::{cpu_game::CpuGame}, repr::{
-        _move::{self, NULL_MOVE}, types::WHITE,
-    }, search::search_config::SearchMode, uci::uci_command::{_Option::Ponder, ArbiterCommand, GoCommand, PositionCommand}, utils::fen_tool::is_valid_fen,
+    game::cpu_game::CpuGame, repr::{
+        _move::{self, NULL_MOVE}, types::{VERSION, WHITE},
+    }, search::search_config::SearchMode, uci::uci_command::{
+        ArbiterCommand, GoCommand, PositionCommand, SetOptionCommand, UCI_OPTIONS, UciOptionId, UciOptionValue, resolve_uci_option,
+    }, utils::fen_tool::is_valid_fen,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -53,6 +55,48 @@ fn update_position(
     Ok(PositionUpdateMethod::Imported)
 }
 
+pub(super) fn uci_identification_lines() -> Vec<String> {
+    let mut lines = Vec::with_capacity(UCI_OPTIONS.len() + 2);
+    lines.push(format!("id name Rusty {}", VERSION));
+    lines.push("id author Otto Freund".to_owned());
+    lines.extend(UCI_OPTIONS.iter().map(ToString::to_string));
+    lines.push("uciok".to_owned());
+    lines
+}
+
+fn apply_resolved_option(cpu_game: &mut CpuGame, option: (UciOptionId, UciOptionValue)) {
+    match option {
+        (UciOptionId::Hash, UciOptionValue::Spin(size_mb)) => {
+            let size_mb = u32::try_from(size_mb).expect("validated Hash size should fit in u32");
+            cpu_game.searcher.tt.resize(size_mb);
+        }
+    }
+}
+
+fn reclaim_cpu_game(
+    cpu_game: &mut Option<Box<CpuGame>>,
+    active_search_thread: &mut Option<std::thread::JoinHandle<Box<CpuGame>>>,
+) {
+    if let Some(handle) = active_search_thread.take() {
+        *cpu_game = Some(handle.join().unwrap());
+    }
+}
+
+pub(super) fn apply_set_option_to_engine(
+    command: &SetOptionCommand,
+    cpu_game: &mut Option<Box<CpuGame>>,
+    active_search_thread: &mut Option<std::thread::JoinHandle<Box<CpuGame>>>,
+) {
+    let Some(option) = resolve_uci_option(command) else {
+        return;
+    };
+
+    reclaim_cpu_game(cpu_game, active_search_thread);
+    if let Some(cpu_game) = cpu_game.as_deref_mut() {
+        apply_resolved_option(cpu_game, option);
+    }
+}
+
 pub async fn listen(cpu_game: CpuGame) {
     let stdin = std::io::stdin();
     let mut display_board = cpu_game.position.board.clone();
@@ -68,9 +112,9 @@ pub async fn listen(cpu_game: CpuGame) {
             Some(c) => {
                 match c {
                     ArbiterCommand::UCI => {
-                        println!("id name Rusty");
-                        //println!("option name Ponder type check default true");
-                        println!("uciok");
+                        for line in uci_identification_lines() {
+                            println!("{line}");
+                        }
                     }
                     ArbiterCommand::Display => {
                         println!("{}", display_board.to_string());
@@ -78,17 +122,17 @@ pub async fn listen(cpu_game: CpuGame) {
                     ArbiterCommand::IsReady => {
                         println!("readyok");
                     }
-                    ArbiterCommand::SetOption(o) => {
-                        match o {
-                            Ponder(_) => {
-                                //can ignore safely, ponder if get "go ponder" else don't, no need for engine to know if ponder is enabled or not
-                            }
-                        }
+                    ArbiterCommand::SetOption(command) => {
+                        apply_set_option_to_engine(
+                            &command,
+                            &mut cpu_game,
+                            &mut active_search_thread,
+                        );
                     }
                     ArbiterCommand::UCINewGame => {
-                        if let Some(handle) = active_search_thread.take() {
+                        if active_search_thread.is_some() {
                             search_kill_switch.store(true, Relaxed);
-                            cpu_game = Some(handle.join().unwrap());
+                            reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
                         }
                         let cpu_g: &mut Box<CpuGame> = cpu_game.as_mut().unwrap();
                         cpu_g.searcher.reset();
@@ -96,9 +140,7 @@ pub async fn listen(cpu_game: CpuGame) {
                     ArbiterCommand::Go(gc) if gc.is_valid() => {
                         //TODO add ponder case
                         //join possible previous search thread before starting a new one
-                        if let Some(handle) = active_search_thread.take() {
-                            cpu_game = Some(handle.join().unwrap());
-                        }
+                        reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
 
                         let mut game: Box<CpuGame> = cpu_game.take().unwrap();
                         let kill_switch_clone = search_kill_switch.clone();
@@ -147,12 +189,9 @@ pub async fn listen(cpu_game: CpuGame) {
                         //TODO
                     }
                     ArbiterCommand::Position(pc) => {
-                        match active_search_thread.take() {
-                            Some(handle) => {
-                                search_kill_switch.store(true, Relaxed);
-                                cpu_game = Some(handle.join().unwrap());
-                            }
-                            None => {}
+                        if active_search_thread.is_some() {
+                            search_kill_switch.store(true, Relaxed);
+                            reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
                         }
 
                         let cpu_g: &mut CpuGame = cpu_game.as_mut().unwrap();
@@ -181,13 +220,11 @@ pub async fn listen(cpu_game: CpuGame) {
                     }
                 }
             }
-            None => {
-                if line.split_whitespace().next() == Some("go") {
-                    println!("info string Invalid go command");
-                } else {
-                    println!("info string Invalid command: {}", line);
-                }
-            }
+            None => match line.split_whitespace().next() {
+                Some("setoption") => {}
+                Some("go") => println!("info string Invalid go command"),
+                _ => println!("info string Invalid command: {}", line),
+            },
         }
     }
 }
@@ -201,6 +238,7 @@ pub(super) fn parse_command(line: &str) -> Option<ArbiterCommand> {
         "uci" => Some(ArbiterCommand::UCI),
         "d" => Some(ArbiterCommand::Display),
         "isready" => Some(ArbiterCommand::IsReady),
+        "setoption" => parse_set_option_command(&parts).map(ArbiterCommand::SetOption),
         "position" if !is_invalid_pos_command(&parts) => {
             let moves_idx: Option<usize> = parts.iter().position(|&x| x == "moves");
             let moves: Vec<String> = match moves_idx {
@@ -238,6 +276,27 @@ pub(super) fn parse_command(line: &str) -> Option<ArbiterCommand> {
         "quit" => Some(ArbiterCommand::Quit),
         _ => None,
     }
+}
+
+fn parse_set_option_command(parts: &[&str]) -> Option<SetOptionCommand> {
+    if !parts.get(1)?.eq_ignore_ascii_case("name") {
+        return None;
+    }
+
+    let value_idx = parts
+        .iter()
+        .enumerate()
+        .skip(2)
+        .find_map(|(idx, part)| part.eq_ignore_ascii_case("value").then_some(idx));
+    let name_end = value_idx.unwrap_or(parts.len());
+    if name_end == 2 {
+        return None;
+    }
+
+    Some(SetOptionCommand {
+        name: parts[2..name_end].join(" "),
+        value: value_idx.map(|idx| parts[idx + 1..].join(" ")),
+    })
 }
 
 fn parse_go_command(parts: &[&str]) -> Option<GoCommand> {

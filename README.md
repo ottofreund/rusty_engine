@@ -20,12 +20,13 @@ desktop GUI.
   and quiescence search
 - Principal-variation reuse, a history heuristic, static exchange evaluation,
   and transposition-table move ordering and cutoffs
-- A 16 MiB, cache-line-aligned, clustered transposition table with depth-,
-  bound-, and generation-aware replacement
+- A configurable 16 MB-by-default, cache-line-aligned, clustered transposition
+  table with depth-, bound-, and generation-aware replacement
 - Cooperative cancellation and UCI search diagnostics, including depth,
   selective depth, score, node counts, cutoff counts, and principal variation
 - A UCI front end for position import, clock-based, fixed-time, or fixed-depth
-  search, `stop`, `bestmove`/`ponder`, and board display with `d`
+  search, Hash configuration, `stop`, `bestmove`/`ponder`, and board display
+  with `d`
 - An `iced` board for player-versus-engine games and FEN loading, with its image
   and evaluation assets embedded in the binary
 
@@ -44,6 +45,7 @@ launching it, enter:
 
 ```text
 uci
+setoption name Hash value 64
 isready
 position startpos moves e2e4 e7e5
 go depth 6
@@ -53,7 +55,9 @@ quit
 Supported search modes are `go depth <plies>`, `go movetime <milliseconds>`, or
 clock-based `go` commands using `wtime`, `btime`, `winc`, and `binc`. Positions
 may use `startpos` or a FEN followed by optional UCI moves. The non-standard `d`
-command prints the current board.
+command prints the current board. The UCI `Hash` spin option configures the
+transposition table in MB, with a default of 16 and an accepted range of
+1–32768.
 
 The desktop GUI is still available, but there is not yet a runtime front-end
 selector. Set `uci_mode` to `false` in `src/main.rs` and run the command above to

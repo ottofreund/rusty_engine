@@ -119,3 +119,22 @@ fn falls_back_to_import_when_incremental_sync_is_not_possible() {
         .unwrap();
     assert_same_position(&desynced_game, &imported);
 }
+
+#[test]
+fn applies_set_option_after_reclaiming_engine_from_search_thread() {
+    let mut cpu_game = None;
+    let mut active_search_thread = Some(std::thread::spawn(|| Box::new(CpuGame::default())));
+    let command = SetOptionCommand {
+        name: "Hash".to_owned(),
+        value: Some("1".to_owned()),
+    };
+
+    apply_set_option_to_engine(&command, &mut cpu_game, &mut active_search_thread);
+
+    assert!(active_search_thread.is_none());
+    let cpu_game = cpu_game.expect("engine should be reclaimed from the search thread");
+    assert_eq!(
+        cpu_game.searcher.tt.nof_clusters,
+        (1024 * 1024) / std::mem::size_of::<crate::search::tt::TTCluster>()
+    );
+}

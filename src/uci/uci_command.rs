@@ -1,12 +1,16 @@
+use std::fmt;
+
 use crate::{
-    repr::_move, search::searcher::MAX_SEARCH_DEPTH, utils::fen_tool::DEFAULT_FEN,
+    repr::_move,
+    search::{searcher::MAX_SEARCH_DEPTH, tt::DEFAULT_TT_SIZE_MB},
+    utils::fen_tool::DEFAULT_FEN,
 };
 
 pub enum ArbiterCommand {
     UCI,
     Display,
     IsReady,
-    SetOption(_Option),
+    SetOption(SetOptionCommand),
     UCINewGame,
     Go(GoCommand),
     PonderHit,
@@ -35,13 +39,71 @@ impl EngineCommand {
     }
 }
 
-#[derive(Debug)]
-pub enum _Option {
-    Ponder(String), //option name
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetOptionCommand {
+    pub name: String,
+    pub value: Option<String>,
 }
 
-pub enum OptionType {
-    Check(String), //type name
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum UciOptionId {
+    Hash,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum UciOptionKind {
+    Spin { default: i64, min: i64, max: i64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct UciOptionSpec {
+    pub id: UciOptionId,
+    pub name: &'static str,
+    pub kind: UciOptionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum UciOptionValue {
+    Spin(i64),
+}
+
+pub(super) const UCI_OPTIONS: &[UciOptionSpec] = &[UciOptionSpec {
+    id: UciOptionId::Hash,
+    name: "Hash",
+    kind: UciOptionKind::Spin {
+        default: DEFAULT_TT_SIZE_MB as i64,
+        min: 1,
+        max: 32_768,
+    },
+}];
+
+impl fmt::Display for UciOptionSpec {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "option name {}", self.name)?;
+        match self.kind {
+            UciOptionKind::Spin { default, min, max } => write!(
+                formatter,
+                " type spin default {default} min {min} max {max}"
+            ),
+        }
+    }
+}
+
+pub(super) fn resolve_uci_option(
+    command: &SetOptionCommand,
+) -> Option<(UciOptionId, UciOptionValue)> {
+    let option = UCI_OPTIONS
+        .iter()
+        .find(|option| option.name.eq_ignore_ascii_case(&command.name))?;
+
+    match option.kind {
+        UciOptionKind::Spin { min, max, .. } => {
+            let value = command.value.as_deref()?.parse::<i64>().ok()?;
+            (min..=max)
+                .contains(&value)
+                .then_some((option.id, UciOptionValue::Spin(value)))
+        }
+    }
 }
 
 #[derive(Clone)]

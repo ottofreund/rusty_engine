@@ -4,7 +4,8 @@ use crate::{search::eval::MATE_BOUND};
 
 const CLUSTER_SIZE: usize = 4;
 const REPLACE_V_AGE_COEFFICIENT: u16 = 4;
-pub const DEFAULT_TT_SIZE: usize = 16 * 1024 * 1024; // == 16 MiB
+pub const DEFAULT_TT_SIZE_MB: u32 = 16;
+pub const DEFAULT_TT_SIZE: usize = DEFAULT_TT_SIZE_MB as usize * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TTEntryType {
