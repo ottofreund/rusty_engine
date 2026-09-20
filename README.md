@@ -60,6 +60,15 @@ cd rusty_engine
 cargo run --release
 ```
 
+To run the deterministic OpenBench workload and exit, use:
+
+```sh
+cargo run --release -- bench
+```
+
+It searches five fixed positions at depth 6 with one thread and emits a final
+`<nodes> nodes <nps> nps` line suitable for OpenBench.
+
 The default executable starts the stdin/stdout UCI interface. For example, after
 launching it, enter:
 
