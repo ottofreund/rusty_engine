@@ -70,6 +70,11 @@ fn apply_resolved_option(cpu_game: &mut CpuGame, option: (UciOptionId, UciOption
             let size_mb = u32::try_from(size_mb).expect("validated Hash size should fit in u32");
             cpu_game.searcher.tt.resize(size_mb);
         }
+        (UciOptionId::Threads, UciOptionValue::Spin(t)) => {
+            if t != 1 {
+                println!("info string Rusty only supports 1 thread, ignoring Threads option");
+            }
+        }
     }
 }
 
