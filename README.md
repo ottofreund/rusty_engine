@@ -2,7 +2,7 @@
 
 Rusty Engine is a work-in-progress chess engine written in Rust. It combines a
 bitboard-based chess core, perft-tested legal move generation, iterative-deepening
-principal-variation search, a UCI command-line interface, and an
+principal-variation search, a UCI command-line interface, and on this branch, a
 [`iced`](https://iced.rs/) desktop GUI.
 
 ![Rusty Engine board](.github/board_demo_img.png)
