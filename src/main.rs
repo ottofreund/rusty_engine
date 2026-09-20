@@ -1,8 +1,9 @@
-use iced::futures::executor::block_on;
 use rusty_engine::{game::cpu_game, repr::types::VERSION, uci::command_listener::listen};
 
-fn main() {
+#[tokio::main]
+async fn main() {
     println!("Rusty Engine v{} by Otto Freund", VERSION);
     let cpu_game = cpu_game::CpuGame::default();
-    block_on(listen(cpu_game));
+
+    listen(cpu_game).await;
 }

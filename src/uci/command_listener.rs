@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use iced::futures::lock::Mutex;
+use std::sync::Mutex;
 
 use crate::{
     game::cpu_game::CpuGame, repr::{
@@ -195,16 +195,23 @@ pub async fn listen(cpu_game: CpuGame) {
                         }
 
                         let cpu_g: &mut CpuGame = cpu_game.as_mut().unwrap();
-                        let previous = last_pos_command.lock().await.clone();
-                        match update_position(cpu_g, &previous, &pc) {
-                            Ok(_) => {
-                                display_board = cpu_g.position.board.clone();
-                                *last_pos_command.lock().await = pc.clone();
+                        match last_pos_command.try_lock() {
+                            Ok(mut p) => {
+                                let previous: PositionCommand = (*p).clone();
+                                match update_position(cpu_g, &previous, &pc) {
+                                    Ok(_) => {
+                                        display_board = cpu_g.position.board.clone();
+                                        *p = pc.clone();
+                                    }
+                                    Err(err) => {
+                                        println!("info string Error updating position: {}", err);
+                                    }
+                                }
                             }
-                            Err(err) => {
-                                println!("info string Error updating position: {}", err);
+                            Err(_) => {
+                                println!("info string Multiple position commands active, aborting");
                             }
-                        }
+                        }                        
                     }
                     ArbiterCommand::Quit => {
                         let kill_switch_clone = search_kill_switch.clone();

@@ -2,10 +2,8 @@
 
 Rusty Engine is a work-in-progress chess engine written in Rust. It combines a
 bitboard-based chess core, perft-tested legal move generation, iterative-deepening
-principal-variation search, a UCI command-line interface, and an
-[`iced`](https://iced.rs/) desktop GUI.
+principal-variation search, and a UCI command-line interface.
 
-![Rusty Engine board](.github/board_demo_img.png)
 
 ## Features
 
@@ -82,11 +80,8 @@ The non-standard `d` command prints the current board. The UCI `Hash` spin optio
 configures the transposition table in MB, with a default of 16 and an accepted
 range of 1–32768.
 
-The desktop GUI is still available, but there is not yet a runtime front-end
-selector. Set `uci_mode` to `false` in `src/main.rs` and run the command above to
-launch it. The GUI supports player-side selection, player-versus-engine play,
-promotion selection, FEN loading, legal-move highlighting, and game-over
-dialogs.
+The desktop GUI is available at the with-gui branch. The GUI supports player-side selection, player-versus-engine play,
+promotion selection, FEN loading, legal-move highlighting, and game-over dialogs.
 
 ## Architecture
 
@@ -98,7 +93,7 @@ dialogs.
 - **`game`** provides `Game` for tracked player-versus-engine games and `CpuGame`
   for importing or incrementally synchronizing UCI positions.
 - **`uci`** parses commands, manages UCI options, and runs cancellable searches
-  on a worker thread; **`ui`** contains the `iced` desktop front end.
+  on a worker thread;
 - **`utils`** provides FEN conversion and Zobrist hashing; `main.rs` currently
   selects between the UCI and GUI front ends with a source-level flag.
 
