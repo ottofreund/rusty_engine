@@ -11,7 +11,7 @@ endif
 .PHONY: all clean
 
 all:
-	$(CC) rustc --release --bin $(BIN) -- --emit link="$(OUTPUT)"
+	$(CC) rustc --release --bin $(BIN) -- -C target-cpu=native --emit link="$(OUTPUT)"
 
 clean:
 	$(CC) clean
