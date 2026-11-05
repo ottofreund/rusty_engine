@@ -257,6 +257,8 @@ fn search_benchmark_pos(
     let mut pos = engine.position(fen);
     let mut searcher = Searcher::from(&pos, BENCH_MULTITHREADED);
     searcher.search_config.search_mode = SearchMode::StaticDepth(depth);
+    searcher.search_config.log_diagnostics = false;
+    searcher.search_config.log_uci_diagnostics = false;
 
     let mut total_time_took = Duration::ZERO;
     for rep in 0..reps {
@@ -311,6 +313,7 @@ fn static_timed_search_benchmark_pos(
     searcher.search_config.search_mode = SearchMode::StaticTime(time_ms);
     searcher.search_config.quiescence = quiescence;
     searcher.search_config.log_diagnostics = false;
+    searcher.search_config.log_uci_diagnostics = false;
 
     let kill_switch = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 

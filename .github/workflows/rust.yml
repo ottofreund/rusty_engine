@@ -25,7 +25,7 @@ jobs:
       run: |
         set -o pipefail
 
-        cargo test --test search_benchmark -- --ignored --show-output 2>&1 | tee benchmark-search.txt
+        cargo test --release --test search_benchmark -- --ignored --test-threads=1 --show-output 2>&1 | tee benchmark-search.txt
 
         {
           echo "## Search benchmark"
@@ -40,7 +40,7 @@ jobs:
       run: |
         set -o pipefail
 
-        cargo test --test move_gen_benchmark -- --ignored --show-output 2>&1 | tee benchmark-move-generation.txt
+        cargo test --release --test move_gen_benchmark -- --ignored --test-threads=1 --show-output 2>&1 | tee benchmark-move-generation.txt
 
         {
           echo "## Move generation benchmark"

@@ -122,8 +122,13 @@ Ignored fixed-depth, consecutive-search, and timed-search benchmarks can be run
 with:
 
 ```sh
-cargo test --release --test search_benchmark -- --ignored --show-output
+cargo test --release --test search_benchmark -- --ignored --test-threads=1 --show-output
+cargo test --release --test move_gen_benchmark -- --ignored --test-threads=1 --show-output
 ```
+
+Run benchmarks in release mode and one at a time to avoid CPU contention between
+tests. Search diagnostics are disabled during measurements; benchmark summaries
+are printed afterward.
 
 ## Remaining Work
 
