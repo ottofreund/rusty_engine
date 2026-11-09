@@ -123,8 +123,11 @@ impl Searcher {
 
             if self.last_sync_deviates_from_pv || self.search_data[i].pv_ply_indices.len() < 2 {
                 self.search_data[i].pv.fill(NULL_MOVE);
+                self.search_data[i].completed_depth = 0;
             } else {
                 self.drop_pv_head(i);
+                let search_data = &mut self.search_data[i];
+                search_data.completed_depth = search_data.completed_depth.saturating_sub(1);
             }
         }
     }
@@ -509,16 +512,16 @@ impl Searcher {
             return eval;
         }
         //iterative deepening:
-        let synced_pv_depth: usize = self.count_pv_moves(idx);
-        let mut completed_pv_len: usize = synced_pv_depth;
+        let mut pv_len: usize = self.count_pv_moves(idx);
         let use_quiescence = self.search_config.quiescence;
         let log_uci_diagnostics = self.search_config.log_uci_diagnostics;
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
-        for td in (synced_pv_depth + 1)..=target_depth {
+        for td in (search_data.completed_depth + 1)..=target_depth {
             let mut prev_pv = vec![NULL_MOVE; td];
-            prev_pv[..completed_pv_len]
-                .copy_from_slice(&search_data.pv[..completed_pv_len]);
+            let ordering_pv_len = pv_len.min(td);
+            prev_pv[..ordering_pv_len]
+                .copy_from_slice(&search_data.pv[..ordering_pv_len]);
             search_data.pv_ply_indices = get_triang_pv_ply_idx_table(td);
             let eval: i16 = inner(
                 td as i16,
@@ -548,7 +551,8 @@ impl Searcher {
                 break;
             }
 
-            completed_pv_len = search_data.pv[..td]
+            search_data.completed_depth = td;
+            pv_len = search_data.pv[..td]
                 .iter()
                 .position(|mov| *mov == NULL_MOVE)
                 .unwrap_or(td);
@@ -556,7 +560,7 @@ impl Searcher {
             if log_uci_diagnostics {
                 println!(
                     "info depth {td} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}",
-                    search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
+                    search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
                 );
             }
             search_data.reset_temp_performance_data();
