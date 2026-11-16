@@ -2,7 +2,7 @@ mod common;
 
 use rusty_engine::{repr::_move, search::{
     eval::{MATE_BOUND, MATE_EVAL}, search_config::SearchMode, searcher::Searcher, tt::TranspositionTable,
-}, utils::zobrist::Zobrist};
+}};
 
 use crate::common::TestEngine;
 
@@ -52,6 +52,27 @@ const MULTITHREADED: bool = false;
 const RULE_FIFTY_TEST_BOARD_1: &str = "6qk/8/8/8/8/8/8/K7 w - -";
 const RULE_FIFTY_TEST_BOARD_2: &str = "8/8/8/8/8/2k3r1/8/2K5 w - -";
 const RULE_FIFTY_TEST_BOARD_3: &str = "6rk/8/8/8/3K4/8/8/8 w - -";
+
+#[test]
+fn near_fifty_move_draw_ignores_warmed_tt_scores() {
+    let engine = TestEngine::new();
+    for board in [RULE_FIFTY_TEST_BOARD_1, RULE_FIFTY_TEST_BOARD_2, RULE_FIFTY_TEST_BOARD_3] {
+        for clock in [96, 98, 99] {
+            let fresh = engine.position(&format!("{board} 0 1"));
+            let near_fifty = engine.position(&format!("{board} {clock} 1"));
+            assert_eq!(fresh.zhash, near_fifty.zhash);
+
+            let mut searcher = Searcher::from(&fresh, MULTITHREADED);
+            configure_static_search(&mut searcher, 5, true);
+            searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+            assert!(root_result(&searcher).1 < 0);
+
+            searcher.import_position(&near_fifty, None);
+            searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+            assert_eq!(root_result(&searcher).1, 0, "{board}, clock {clock}");
+        }
+    }
+}
 
 #[test]
 fn tt_reuse_does_not_depend_on_halfmove_clock_history() {
@@ -121,7 +142,7 @@ fn root_result(searcher: &Searcher) -> (String, i16) {
     let root_hash = searcher.positions[0].zhash;
     let root_score = searcher
         .tt
-        .probe(Zobrist::zkey50_adjusted(root_hash, searcher.positions[0].board.half_move_clock))
+        .probe(root_hash)
         .expect("completed root search should be stored in the TT")
         .score;
 

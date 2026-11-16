@@ -236,7 +236,7 @@ impl Searcher {
             let in_quiescence: bool = use_quiescence && d <= 0;
             let (s, e) = pos.search_move_bounds();
             
-            let tte: Option<TTEntry> = tt.probe(Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock)).map(|entry| {
+            let tte: Option<TTEntry> = tt.probe(pos.zhash).map(|entry| {
                 TTEntry {
                     score: TranspositionTable::score_from_tt(entry.score, ply as i16),
                     ..entry
@@ -492,7 +492,7 @@ impl Searcher {
             }
             //add TT entry
             let tte: TTEntry = TTEntry::new_packed(
-                Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock),
+                pos.zhash,
                 best_move,
                 d.max(0) as u8,
                 if eval <= old_alpha {
