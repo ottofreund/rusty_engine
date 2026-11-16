@@ -260,7 +260,7 @@ fn consecutive_static_search_syncs_exact_pv_tail() {
 }
 
 #[test]
-fn timed_search_gracefully_handles_abort_and_uses_incomplete_search_when_possible() {
+fn timed_search_gracefully_handles_abort_with_completed_iteration_results() {
     let engine = TestEngine::new();
     let start = engine.position(DEFAULT_FEN);
     let mut searcher = Searcher::from(&start, MULTITHREADED);
@@ -332,6 +332,7 @@ fn static_depth_observes_preset_kill_switch_at_poll_interval() {
 
     let pv = root_pv(&killed);
     assert!(!pv.is_empty());
+    assert_eq!(pv, root_pv(&completed));
     assert_legal_pv(&engine, &start, &pv);
 }
 

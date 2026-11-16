@@ -542,7 +542,7 @@ impl Searcher {
             search_data.cumul_positions_searched += search_data.positions_searched;
             if eval == EVAL_QUIT {
                 search_data.reset_temp_performance_data();
-                if search_data.pv[0] == NULL_MOVE { //didn't finish any root move before stopping
+                if prev_pv[0] != NULL_MOVE || search_data.pv[0] == NULL_MOVE {
                     search_data.pv[..td].copy_from_slice(&prev_pv);
                 }
                 break;
