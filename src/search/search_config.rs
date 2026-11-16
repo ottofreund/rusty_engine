@@ -58,7 +58,7 @@ impl SearchMode {
     ) -> Self {
         let time_left = if is_white_turn { wtime } else { btime };
         let inc = if is_white_turn { winc } else { binc };
-        let time_for_move = ((time_left / 20).saturating_add(inc)).min(time_left);
+        let time_for_move = ((time_left / 30).saturating_add(inc)).min(time_left);
         return Self::StaticTime(time_for_move.saturating_sub(SEARCH_RESPONSE_MARGIN));
     }
 }
