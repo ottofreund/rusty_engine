@@ -9,9 +9,12 @@ const HISTORY_AGING_NUMERATOR: i32 = 3;
 const HISTORY_AGING_DENOMINATOR: i32 = 4;
 
 pub struct SearchData {
-    // Triangular scratch/result table. The completed root PV always starts at index 0
-    // and never contains quiescence moves.
+    // Triangular scratch/result table. The root PV starts at index 0 and never
+    // contains quiescence moves. It can be partial after interruption; its length
+    // does not establish completed search depth.
     pub pv: [u32; TRIANG_PV_TABLE_SIZE],
+    /// Nominal depth of the last completed iteration, independent of PV length.
+    pub completed_depth: usize,
     // Start of every ply row followed by the final one-past-end table boundary.
     pub pv_ply_indices: Vec<usize>,
     pub mate_in: Option<u32>,
@@ -32,6 +35,7 @@ impl SearchData {
     /// Between games reset
     pub fn reset(&mut self) {
         self.pv.fill(NULL_MOVE);
+        self.completed_depth = 0;
         self.pv_ply_indices = get_triang_pv_ply_idx_table(1);
         self.history_table.fill(0);
         self.mate_in = None;
@@ -44,6 +48,7 @@ impl SearchData {
         board_hash_history.push(pos.zhash);
         return Self {
             pv: [NULL_MOVE; TRIANG_PV_TABLE_SIZE],
+            completed_depth: 0,
             pv_ply_indices: get_triang_pv_ply_idx_table(1),
             mate_in: None,
             board_hash_history: board_hash_history,
