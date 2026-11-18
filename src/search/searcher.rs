@@ -358,6 +358,16 @@ impl Searcher {
                     secondary_selection = NULL_MOVE;
                 }
 
+                // LMR can enter quiescence with a full move list. Keep quiet
+                // moves available for a possible full-depth re-search.
+                if in_quiescence
+                    && pos.board.nof_checkers == 0
+                    && !_move::is_eating(mov)
+                    && !_move::is_promotion(mov)
+                {
+                    continue;
+                }
+
                 let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
                 
                 pos.make_move(mov, true, false, use_quiescence && d <= 1, move_gen, zobrist);
