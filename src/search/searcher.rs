@@ -201,326 +201,6 @@ impl Searcher {
     ) {
         let control = SearchControl::new(target_time, kill_switch);
 
-        fn inner(
-            d: i16,
-            ply: usize,
-            target_d: usize,
-            mut alpha: i16,
-            mut beta: i16,
-            use_quiescence: bool,
-            follows_prev_pv: bool,
-            is_pv_node: bool,
-            is_null_window: bool,
-            prev_pv: &[u32],
-            pos: &mut Position,
-            evaluator: &Evaluator,
-            search_data: &mut SearchData,
-            move_gen: &MoveGen,
-            zobrist: &Zobrist,
-            control: &SearchControl<'_>,
-            tt: &mut TranspositionTable,
-        ) -> i16 {
-            if control.should_stop(search_data.positions_searched) {
-                return EVAL_QUIT;
-            }
-
-            if d > 0 { //initialize triangular pv row for this ply
-                let row_start = search_data.pv_ply_indices[ply];
-                search_data.pv[row_start] = NULL_MOVE;
-            }
-
-            let root_relative_d: usize = target_d - ply.min(target_d); // d is disturbed by LMR so this is the actual d remaining relative to root
-
-            search_data.positions_searched += 1;
-            search_data.sel_depth = max(search_data.sel_depth, ply);
-
-            let mut eval: i16 = EVAL_INIT;
-            let is_three_fold: bool = search_data.in_three_fold(pos);
-            let in_quiescence: bool = use_quiescence && d <= 0;
-            let (s, e) = pos.search_move_bounds();
-            
-            let tte: Option<TTEntry> = tt.probe(Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock)).map(|entry| {
-                TTEntry {
-                    score: TranspositionTable::score_from_tt(entry.score, ply as i16),
-                    ..entry
-                }
-            });
-            let key_collision: bool = tte.is_some_and(|entry| {
-                (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
-            });
-            //TT cutoff?
-            if let Some(tt_entry) = tte {
-                if  !is_pv_node 
-                    && !is_three_fold 
-                    && pos.board.half_move_clock < 96
-                    && tt_entry.depth() >= d.max(0) as u8
-                    && !key_collision
-                { //don't trust tt if near 50 move draw or in PV-node
-                    match tt_entry.bound_type() {
-                        TTEntryType::Exact => {
-                            if d > 0 {
-                                let row_start = search_data.pv_ply_indices[ply];
-                                let row_end = search_data.pv_ply_indices[ply + 1];
-
-                                search_data.pv[row_start..row_end].fill(NULL_MOVE);
-                                search_data.pv[row_start] = tt_entry.best_move;
-                            }
-                            return tt_entry.score;
-                        }
-                        TTEntryType::LowerBound => {
-                            alpha = max(alpha, tt_entry.score);
-                        }
-                        TTEntryType::UpperBound => {
-                            beta = min(beta, tt_entry.score);
-                        }
-                    }
-                    if alpha >= beta {
-                        return tt_entry.score;
-                    }
-                }
-            }
-            
-            let old_alpha: i16 = alpha;
-            let old_beta: i16 = beta;
-            //terminal node?
-            if s == e {
-                if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + ply as i16; //sooner mate is better
-                } else if in_quiescence {
-                    return evaluator.eval(
-                        pos.board.pieces,
-                        pos.board.turn,
-                        pos.board.late_game_phase,
-                    ); //might miss stalemate but not worth it to check for performance reasons
-                } else {
-                    return 0; //stalemate
-                }
-            } else if is_three_fold || pos.board.is_fifty_move_draw() {
-                return 0;
-            } else if d <= 0 {
-                if use_quiescence {
-                    if pos.board.nof_checkers == 0 {
-                        eval = evaluator.eval(
-                            pos.board.pieces,
-                            pos.board.turn,
-                            pos.board.late_game_phase,
-                        );
-                        if eval >= beta {
-                            search_data.stand_pat_cutoffs += 1;
-                            return eval;
-                        }
-                        alpha = max(alpha, eval);
-                    }
-                } else {
-                    return evaluator.eval(
-                        pos.board.pieces,
-                        pos.board.turn,
-                        pos.board.late_game_phase,
-                    );
-                }
-            }
-
-            let mut best_move: u32 = NULL_MOVE;
-            let mut only_bad_captures_left: Option<bool> = None;
-
-            let prev_pv_mv: u32 = if follows_prev_pv && ply < prev_pv.len() { prev_pv[ply] } else { NULL_MOVE };
-            let mut primary_selection: u32;
-            let mut secondary_selection: u32;
-            if tte.is_some() && !key_collision {
-                if prev_pv_mv != NULL_MOVE {
-                    if tte.unwrap().depth() >= d.max(1) as u8 {
-                        primary_selection = tte.unwrap().best_move;
-                        secondary_selection = prev_pv_mv;
-                    } else {
-                        primary_selection = prev_pv_mv;
-                        secondary_selection = tte.unwrap().best_move;
-                    }
-                } else {
-                    primary_selection = tte.unwrap().best_move;
-                    secondary_selection = NULL_MOVE;
-                }
-            } else {
-                primary_selection = prev_pv_mv; //can be NULL_MOVE
-                secondary_selection = NULL_MOVE;
-            }
-
-            if primary_selection == secondary_selection {
-                secondary_selection = NULL_MOVE;
-            }
-
-            for i in s..e {
-                let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
-
-                if mov == primary_selection {
-                    primary_selection = NULL_MOVE;
-                } else if mov == secondary_selection {
-                    secondary_selection = NULL_MOVE;
-                }
-
-                // LMR can enter quiescence with a full move list. Keep quiet
-                // moves available for a possible full-depth re-search.
-                if in_quiescence
-                    && pos.board.nof_checkers == 0
-                    && !_move::is_eating(mov)
-                    && !_move::is_promotion(mov)
-                {
-                    continue;
-                }
-
-                let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
-                
-                pos.make_move(mov, true, false, use_quiescence && d <= 1, move_gen, zobrist);
-                search_data.board_hash_history.push(pos.zhash);
-
-                let lmr: i16 = if d < 3 || i == s || follows_prev_pv { 
-                    0
-                } else {
-                    (0.99 + f32::ln(d as f32) * f32::ln((i - s + 1) as f32) / 3.14) as i16 //from Obsidian
-                }; 
-                let mut new_eval: i16 = EVAL_INIT;
-                if i == s && is_pv_node { //full-window search
-                    new_eval = -inner(
-                        d - 1,
-                        ply + 1,
-                        target_d,
-                        -beta,
-                        -alpha,
-                        use_quiescence,
-                        child_follows_prev_pv,
-                        true,
-                        false,
-                        prev_pv,
-                        pos,
-                        evaluator,
-                        search_data,
-                        move_gen,
-                        zobrist,
-                        control,
-                        tt
-                    );
-                } else { //LMR null-window search ---(raises alpha)--> null-window search ---(raises alpha, doesn't fail-high)--> full-window search
-                    if lmr > 0 {
-                        new_eval = -inner(
-                            d - 1 - lmr,
-                            ply + 1,
-                            target_d,
-                            -alpha - 1,
-                            -alpha,
-                            use_quiescence,
-                            child_follows_prev_pv,
-                            false,
-                            true,
-                            prev_pv,
-                            pos,
-                            evaluator,
-                            search_data,
-                            move_gen,
-                            zobrist,
-                            control,
-                            tt
-                        );
-                    }
-                    
-                    if new_eval.abs() != EVAL_QUIT && (lmr == 0 || new_eval > alpha) { //null-window search
-                        new_eval = -inner(
-                            d - 1,
-                            ply + 1,
-                            target_d,
-                            -alpha - 1,
-                            -alpha,
-                            use_quiescence,
-                            child_follows_prev_pv,
-                            false,
-                            true,
-                            prev_pv,
-                            pos,
-                            evaluator,
-                            search_data,
-                            move_gen,
-                            zobrist,
-                            control,
-                            tt
-                        );
-                        
-                        if new_eval.abs() != EVAL_QUIT && new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
-                            new_eval = -inner(
-                                d - 1,
-                                ply + 1,
-                                target_d,
-                                -beta,
-                                -alpha,
-                                use_quiescence,
-                                child_follows_prev_pv,
-                                true,
-                                false,
-                                prev_pv,
-                                pos,
-                                evaluator,
-                                search_data,
-                                move_gen,
-                                zobrist,
-                                control,
-                                tt
-                            );
-                        } //else if new_eval > alpha : let be treated like normal fail-high cutoff
-                    }
-                }
-
-                search_data.board_hash_history.pop();
-                pos.unmake_move(mov, zobrist);
-
-                if new_eval.abs() == EVAL_QUIT {
-                    return EVAL_QUIT;
-                }
-
-                if new_eval > eval {
-                    eval = new_eval;
-                    best_move = mov;
-                    
-                    if d > 0 && !is_null_window { //child ply's pv appended to this ply's pv
-                        let cur_ply_s_idx: usize = search_data.pv_ply_indices[ply];
-                        let child_ply_s_idx: usize = cur_ply_s_idx + root_relative_d;
-                        let child_ply_e_idx: usize = child_ply_s_idx + root_relative_d - 1;
-                        search_data.pv.copy_within(child_ply_s_idx..child_ply_e_idx, cur_ply_s_idx + 1);
-                        search_data.pv[cur_ply_s_idx] = mov;
-                    }
-                }
-
-                alpha = max(alpha, new_eval);
-
-                if alpha >= beta {
-                    search_data.ab_cutoffs += 1;
-                    if d > 0 {
-                        Searcher::update_quiet_history_after_cutoff(
-                            search_data,
-                            pos.board.turn,
-                            mov,
-                            &pos.move_arr[s..i],
-                            d as usize,
-                        );
-                    }
-                    break; //i.e. return alpha
-                }
-            }
-            //add TT entry
-            let tte: TTEntry = TTEntry::new_packed(
-                Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock),
-                best_move,
-                d.max(0) as u8,
-                if eval <= old_alpha {
-                    TTEntryType::UpperBound
-                } else if eval >= old_beta {
-                    TTEntryType::LowerBound
-                } else {
-                    TTEntryType::Exact
-                },
-                TranspositionTable::score_to_tt(eval, ply as i16),
-                tt.generation
-            );
-            tt.store(tte);
-            return eval;
-        }
         //iterative deepening:
         let mut pv_len: usize = self.count_pv_moves(idx);
         let use_quiescence = self.search_config.quiescence;
@@ -533,13 +213,14 @@ impl Searcher {
             prev_pv[..ordering_pv_len]
                 .copy_from_slice(&search_data.pv[..ordering_pv_len]);
             search_data.pv_ply_indices = get_triang_pv_ply_idx_table(td);
-            let eval: i16 = inner(
+            let eval: i16 = Self::negamax(
                 td as i16,
                 0,
                 td,
                 ALPHA_INIT,
                 BETA_INIT,
                 use_quiescence,
+                None,
                 true,
                 true,
                 false,
@@ -575,6 +256,347 @@ impl Searcher {
             }
             search_data.reset_temp_performance_data();
         }
+    }
+
+    fn negamax(
+        d: i16,
+        ply: usize,
+        target_d: usize,
+        mut alpha: i16,
+        mut beta: i16,
+        use_quiescence: bool,
+        move_end: Option<usize>,
+        follows_prev_pv: bool,
+        is_pv_node: bool,
+        is_null_window: bool,
+        prev_pv: &[u32],
+        pos: &mut Position,
+        evaluator: &Evaluator,
+        search_data: &mut SearchData,
+        move_gen: &MoveGen,
+        zobrist: &Zobrist,
+        control: &SearchControl<'_>,
+        tt: &mut TranspositionTable,
+    ) -> i16 {
+        if control.should_stop(search_data.positions_searched) {
+            return EVAL_QUIT;
+        }
+
+        if d > 0 { //initialize triangular pv row for this ply
+            let row_start = search_data.pv_ply_indices[ply];
+            search_data.pv[row_start] = NULL_MOVE;
+        }
+
+        let root_relative_d: usize = target_d - ply.min(target_d); // d is disturbed by LMR so this is the actual d remaining relative to root
+
+        search_data.positions_searched += 1;
+        search_data.sel_depth = max(search_data.sel_depth, ply);
+
+        let mut eval: i16 = EVAL_INIT;
+        let is_three_fold: bool = search_data.in_three_fold(pos);
+        let in_quiescence: bool = use_quiescence && d <= 0;
+        let (s, generated_end) = pos.search_move_bounds();
+        // The generated end still marks where descendants append their moves.
+        let e = move_end.unwrap_or(generated_end);
+
+        let tte: Option<TTEntry> = tt.probe(Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock)).map(|entry| {
+            TTEntry {
+                score: TranspositionTable::score_from_tt(entry.score, ply as i16),
+                ..entry
+            }
+        });
+        let key_collision: bool = tte.is_some_and(|entry| {
+            (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
+        });
+        //TT cutoff?
+        if let Some(tt_entry) = tte {
+            if  !is_pv_node
+                && !is_three_fold
+                && pos.board.half_move_clock < 96
+                && tt_entry.depth() >= d.max(0) as u8
+                && !key_collision
+            { //don't trust tt if near 50 move draw or in PV-node
+                match tt_entry.bound_type() {
+                    TTEntryType::Exact => {
+                        if d > 0 {
+                            let row_start = search_data.pv_ply_indices[ply];
+                            let row_end = search_data.pv_ply_indices[ply + 1];
+
+                            search_data.pv[row_start..row_end].fill(NULL_MOVE);
+                            search_data.pv[row_start] = tt_entry.best_move;
+                        }
+                        return tt_entry.score;
+                    }
+                    TTEntryType::LowerBound => {
+                        alpha = max(alpha, tt_entry.score);
+                    }
+                    TTEntryType::UpperBound => {
+                        beta = min(beta, tt_entry.score);
+                    }
+                }
+                if alpha >= beta {
+                    return tt_entry.score;
+                }
+            }
+        }
+
+        let old_alpha: i16 = alpha;
+        let old_beta: i16 = beta;
+        //terminal node?
+        if s == generated_end {
+            if pos.board.nof_checkers > 0 {
+                return -MATE_EVAL + ply as i16; //sooner mate is better
+            } else if in_quiescence {
+                return evaluator.eval(
+                    pos.board.pieces,
+                    pos.board.turn,
+                    pos.board.late_game_phase,
+                ); //might miss stalemate but not worth it to check for performance reasons
+            } else {
+                return 0; //stalemate
+            }
+        } else if is_three_fold || pos.board.is_fifty_move_draw() {
+            return 0;
+        } else if d <= 0 {
+            if use_quiescence {
+                if pos.board.nof_checkers == 0 {
+                    eval = evaluator.eval(
+                        pos.board.pieces,
+                        pos.board.turn,
+                        pos.board.late_game_phase,
+                    );
+                    if eval >= beta {
+                        search_data.stand_pat_cutoffs += 1;
+                        return eval;
+                    }
+                    alpha = max(alpha, eval);
+                }
+            } else {
+                return evaluator.eval(
+                    pos.board.pieces,
+                    pos.board.turn,
+                    pos.board.late_game_phase,
+                );
+            }
+        }
+
+        let mut best_move: u32 = NULL_MOVE;
+        let mut only_bad_captures_left: Option<bool> = None;
+
+        let prev_pv_mv: u32 = if follows_prev_pv && ply < prev_pv.len() { prev_pv[ply] } else { NULL_MOVE };
+        let mut primary_selection: u32;
+        let mut secondary_selection: u32;
+        if tte.is_some() && !key_collision {
+            if prev_pv_mv != NULL_MOVE {
+                if tte.unwrap().depth() >= d.max(1) as u8 {
+                    primary_selection = tte.unwrap().best_move;
+                    secondary_selection = prev_pv_mv;
+                } else {
+                    primary_selection = prev_pv_mv;
+                    secondary_selection = tte.unwrap().best_move;
+                }
+            } else {
+                primary_selection = tte.unwrap().best_move;
+                secondary_selection = NULL_MOVE;
+            }
+        } else {
+            primary_selection = prev_pv_mv; //can be NULL_MOVE
+            secondary_selection = NULL_MOVE;
+        }
+
+        if primary_selection == secondary_selection {
+            secondary_selection = NULL_MOVE;
+        }
+
+        for i in s..e {
+            let mov: u32 =
+                Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+
+            if mov == primary_selection {
+                primary_selection = NULL_MOVE;
+            } else if mov == secondary_selection {
+                secondary_selection = NULL_MOVE;
+            }
+
+            let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
+
+            pos.make_move(mov, true, false, use_quiescence && d <= 1, move_gen, zobrist);
+            search_data.board_hash_history.push(pos.zhash);
+
+            let lmr: i16 = if d < 3 || i == s || follows_prev_pv {
+                0
+            } else {
+                (0.99 + f32::ln(d as f32) * f32::ln((i - s + 1) as f32) / 3.14) as i16 //from Obsidian
+            };
+            let mut new_eval: i16 = EVAL_INIT;
+            if i == s && is_pv_node { //full-window search
+                new_eval = -Self::negamax(
+                    d - 1,
+                    ply + 1,
+                    target_d,
+                    -beta,
+                    -alpha,
+                    use_quiescence,
+                    None,
+                    child_follows_prev_pv,
+                    true,
+                    false,
+                    prev_pv,
+                    pos,
+                    evaluator,
+                    search_data,
+                    move_gen,
+                    zobrist,
+                    control,
+                    tt
+                );
+            } else { //LMR null-window search ---(raises alpha)--> null-window search ---(raises alpha, doesn't fail-high)--> full-window search
+                if lmr > 0 {
+                    let reduced_depth = d - 1 - lmr;
+                    let move_end = Self::reduced_move_end(pos, reduced_depth, use_quiescence);
+                    new_eval = -Self::negamax(
+                        reduced_depth,
+                        ply + 1,
+                        target_d,
+                        -alpha - 1,
+                        -alpha,
+                        use_quiescence,
+                        move_end,
+                        child_follows_prev_pv,
+                        false,
+                        true,
+                        prev_pv,
+                        pos,
+                        evaluator,
+                        search_data,
+                        move_gen,
+                        zobrist,
+                        control,
+                        tt
+                    );
+                }
+
+                if new_eval.abs() != EVAL_QUIT && (lmr == 0 || new_eval > alpha) { //null-window search
+                    new_eval = -Self::negamax(
+                        d - 1,
+                        ply + 1,
+                        target_d,
+                        -alpha - 1,
+                        -alpha,
+                        use_quiescence,
+                        None,
+                        child_follows_prev_pv,
+                        false,
+                        true,
+                        prev_pv,
+                        pos,
+                        evaluator,
+                        search_data,
+                        move_gen,
+                        zobrist,
+                        control,
+                        tt
+                    );
+
+                    if new_eval.abs() != EVAL_QUIT && new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
+                        new_eval = -Self::negamax(
+                            d - 1,
+                            ply + 1,
+                            target_d,
+                            -beta,
+                            -alpha,
+                            use_quiescence,
+                            None,
+                            child_follows_prev_pv,
+                            true,
+                            false,
+                            prev_pv,
+                            pos,
+                            evaluator,
+                            search_data,
+                            move_gen,
+                            zobrist,
+                            control,
+                            tt
+                        );
+                    } //else if new_eval > alpha : let be treated like normal fail-high cutoff
+                }
+            }
+
+            search_data.board_hash_history.pop();
+            pos.unmake_move(mov, zobrist);
+
+            if new_eval.abs() == EVAL_QUIT {
+                return EVAL_QUIT;
+            }
+
+            if new_eval > eval {
+                eval = new_eval;
+                best_move = mov;
+
+                if d > 0 && !is_null_window { //child ply's pv appended to this ply's pv
+                    let cur_ply_s_idx: usize = search_data.pv_ply_indices[ply];
+                    let child_ply_s_idx: usize = cur_ply_s_idx + root_relative_d;
+                    let child_ply_e_idx: usize = child_ply_s_idx + root_relative_d - 1;
+                    search_data.pv.copy_within(child_ply_s_idx..child_ply_e_idx, cur_ply_s_idx + 1);
+                    search_data.pv[cur_ply_s_idx] = mov;
+                }
+            }
+
+            alpha = max(alpha, new_eval);
+
+            if alpha >= beta {
+                search_data.ab_cutoffs += 1;
+                if d > 0 {
+                    Searcher::update_quiet_history_after_cutoff(
+                        search_data,
+                        pos.board.turn,
+                        mov,
+                        &pos.move_arr[s..i],
+                        d as usize,
+                    );
+                }
+                break; //i.e. return alpha
+            }
+        }
+        //add TT entry
+        let tte: TTEntry = TTEntry::new_packed(
+            Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock),
+            best_move,
+            d.max(0) as u8,
+            if eval <= old_alpha {
+                TTEntryType::UpperBound
+            } else if eval >= old_beta {
+                TTEntryType::LowerBound
+            } else {
+                TTEntryType::Exact
+            },
+            TranspositionTable::score_to_tt(eval, ply as i16),
+            tt.generation
+        );
+        tt.store(tte);
+        return eval;
+    }
+
+    fn reduced_move_end(
+        pos: &mut Position,
+        reduced_depth: i16,
+        use_quiescence: bool,
+    ) -> Option<usize> {
+        if !use_quiescence || reduced_depth > 0 || pos.board.nof_checkers != 0 {
+            return None;
+        }
+
+        let (start, end) = pos.search_move_bounds();
+        let mut tactical_end = start;
+        for i in start..end {
+            let mov = pos.move_arr[i];
+            if _move::is_eating(mov) || _move::is_promotion(mov) {
+                pos.move_arr.swap(tactical_end, i);
+                tactical_end += 1;
+            }
+        }
+        Some(tactical_end)
     }
 
     pub fn collect_best_move(&self) -> Option<u32> {
@@ -743,3 +765,7 @@ impl Searcher {
     }
 
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/searcher_tests.rs"]
+mod tests;
