@@ -10,7 +10,7 @@ use rusty_engine::{
         search_data::{get_triang_pv_ply_idx_table, TRIANG_PV_TABLE_SIZE},
         searcher::{Searcher, MAX_SEARCH_DEPTH},
     },
-    utils::fen_tool::DEFAULT_FEN,
+    utils::{fen_tool::DEFAULT_FEN, zobrist::Zobrist},
 };
 use std::sync::{
     atomic::{AtomicBool, Ordering::Relaxed},
@@ -95,6 +95,20 @@ fn static_depth_scores_quiet_horizon_with_and_without_quiescence() {
             root_score < 0,
             "quiet losing horizon scored {root_score} with quiescence={quiescence}"
         );
+    }
+}
+
+#[test]
+fn static_depth_scores_fifty_move_draw_at_quiet_horizon() {
+    let engine = TestEngine::new();
+    let fen = "7k/8/8/8/8/8/8/KR6 w - - 99 1";
+
+    for quiescence in [false, true] {
+        let searcher = search_static_depth(&engine, fen, 1, quiescence);
+        let root = &searcher.positions[0];
+        let key = Zobrist::zkey50_adjusted(root.zhash, root.board.half_move_clock);
+        let entry = searcher.tt.probe(key).expect("missing root TT entry");
+        assert_eq!(entry.score, 0, "quiescence={quiescence}");
     }
 }
 
