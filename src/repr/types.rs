@@ -41,6 +41,7 @@ pub fn opposite_turn(color: u32) -> u32 {
 
 #[derive(Clone, Debug)]
 pub struct BoardStateInfo {
+    pub zhash: u64,
     pub ep_sqr: Option<u32>,
     pub has_ep_take: bool,
     pub nof_checkers: u32,
