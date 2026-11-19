@@ -130,10 +130,30 @@ impl TranspositionTable {
         let mut replace_entry_v = i16::MAX;
         for i in 0..CLUSTER_SIZE {
             if cluster.entries[i].key == tte.key && cluster.entries[i].is_occupied() {
-                let existing_d: u8 = cluster.entries[i].depth();
-                let tte_depth: u8 = tte.depth();
-                if tte_depth > existing_d || (tte_depth == existing_d && tte.bound_type() == TTEntryType::Exact) { //replace existing same key entry if geq depth
-                    cluster.entries[i] = tte;
+                let existing = &mut cluster.entries[i];
+                let existing_depth = existing.depth();
+                let incoming_depth = tte.depth();
+                if incoming_depth > existing_depth {
+                    *existing = tte;
+                } else if incoming_depth == existing_depth {
+                    let stronger_bound = match tte.bound_type() {
+                        TTEntryType::Exact => {
+                            *existing = tte;
+                            return;
+                        }
+                        TTEntryType::LowerBound => {
+                            tte.score > existing.score
+                                && existing.bound_type() == TTEntryType::LowerBound
+                        }
+                        TTEntryType::UpperBound => {
+                            tte.score < existing.score
+                                && existing.bound_type() == TTEntryType::UpperBound
+                        }
+                    };
+                    if stronger_bound {
+                        *existing = tte;
+                    }
+                    existing.generation = self.generation;
                 }
                 return;
             }
