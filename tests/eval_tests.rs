@@ -8,7 +8,8 @@ use rusty_engine::{
         _move,
         position::Position,
         types::{
-            BLACK, B_KING_U, B_KNIGHT_U, B_PAWN_U, WHITE, W_KING_U, W_KNIGHT_U, W_PAWN_U, W_QUEEN,
+            BLACK, B_BISHOP_U, B_KING_U, B_KNIGHT_U, B_PAWN_U, WHITE, W_BISHOP_U, W_KING_U,
+            W_KNIGHT_U, W_PAWN_U, W_QUEEN,
         },
     },
     search::{
@@ -76,6 +77,39 @@ fn eval_for_black_mover_is_negated_and_mirrored() {
 
     let eval = evaluator.eval(pieces, BLACK, EARLY_GAME_PHASE);
     assert_eq!(eval, expected);
+}
+
+#[test]
+fn eval_scores_bishop_pair_once_for_bishops_on_both_square_colors() {
+    let evaluator = Evaluator::default();
+    let bishop_table = load_table("bishop.txt");
+    let c1 = square('c', 1);
+    let f1 = square('f', 1);
+    let e3 = square('e', 3);
+    let cases: [(&[u32], i16); 3] = [(&[c1, f1], 30), (&[c1, e3], 0), (&[c1, f1, e3], 30)];
+
+    for (squares, bonus) in cases {
+        for (side, bishop, mirror) in [(WHITE, W_BISHOP_U, 0), (BLACK, B_BISHOP_U, 56)] {
+            let mut pieces = [0u64; 12];
+            let mut ordinary_score = 0;
+            for &sq in squares {
+                pieces[bishop] |= 1u64 << (sq ^ mirror);
+                ordinary_score += PIECE_MATERIAL_VALUE[bishop] + bishop_table[sq as usize];
+            }
+
+            for phase in [EARLY_GAME_PHASE, MIDDLE_GAME_PHASE, LATE_GAME_PHASE] {
+                for mover in [WHITE, BLACK] {
+                    let sign = if mover == side { 1 } else { -1 };
+                    let contribution = evaluator.eval(pieces, mover, phase) - sign * ordinary_score;
+                    assert_eq!(
+                        contribution,
+                        sign * bonus,
+                        "{squares:?}, side {side}, mover {mover}, phase {phase}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

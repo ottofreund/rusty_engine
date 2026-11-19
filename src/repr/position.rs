@@ -168,6 +168,7 @@ impl Position {
         }
 
         let cur_board_state_info: BoardStateInfo = BoardStateInfo {
+            zhash: self.zhash,
             ep_sqr: self.board.ep_square,
             has_ep_take: self.has_ep_take,
             nof_checkers: self.board.nof_checkers,
@@ -382,7 +383,7 @@ impl Position {
 
     /// Unmakes move, resulting that the state of position is equivalent as to before moving.
     /// assumes mov was last made
-    pub fn unmake_move(&mut self, mov: u32, zobrist: &Zobrist) {
+    pub fn unmake_move(&mut self, mov: u32, _zobrist: &Zobrist) {
         let unmaking_white_move: bool = self.board.turn == BLACK;
         let from: u32 = _move::get_init(mov);
         let to: u32 = _move::get_target(mov);
@@ -490,7 +491,6 @@ impl Position {
          * 2. Update rest of board state
          *
          */
-        let lost_ep_take: Option<u32> = if self.has_ep_take { self.board.ep_square } else { None };
         let board_state_info: BoardStateInfo = self
             .board_state_info_stack
             .pop()
@@ -499,16 +499,7 @@ impl Position {
         self.board.ep_square = board_state_info.ep_sqr;
         self.board.half_move_clock = board_state_info.half_move_clock;
 
-        let gained_ep_take: Option<u32> = if board_state_info.has_ep_take { self.board.ep_square } else { None };
-        let had_ws: bool = self.board.ws();
-        let had_wl: bool = self.board.wl();
-        let had_bs: bool = self.board.bs();
-        let had_bl: bool = self.board.bl();
         self.board.update_castling_rights_unmake();
-        let gained_ws: bool = !had_ws && self.board.ws();
-        let gained_wl: bool = !had_wl && self.board.wl();
-        let gained_bs: bool = !had_bs && self.board.bs();
-        let gained_bl: bool = !had_bl && self.board.bl();
 
         self.board.nof_checkers = board_state_info.nof_checkers;
         self.board.check_block_sqrs = board_state_info.check_block_sqrs;
@@ -543,26 +534,7 @@ impl Position {
             self.last_target = _move::get_target(self.played_moves_stack.last().copied().unwrap());
         }
         self.has_ep_take = board_state_info.has_ep_take;
-        self.zhash = zobrist.updated_hash_backward(
-            self.zhash,
-            from as usize,
-            to as usize,
-            moved_piece,
-            unmaking_white_move,
-            is_promotion,
-            promotion_piece,
-            is_eating,
-            eaten_piece,
-            is_castle,
-            is_short_castle,
-            is_en_passant,
-            gained_ws,
-            gained_wl,
-            gained_bs,
-            gained_bl,
-            gained_ep_take,
-            lost_ep_take
-        );
+        self.zhash = board_state_info.zhash;
 
         return;
     }

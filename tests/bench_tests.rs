@@ -1,6 +1,6 @@
 use std::process::Command;
 
-const EXPECTED_NODES: u64 = 242_640;
+const EXPECTED_NODES: u64 = 235_252;
 
 fn run_bench() -> (u64, u64, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_rusty_engine"))
