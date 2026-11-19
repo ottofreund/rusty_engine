@@ -49,6 +49,8 @@ const TABLE_SOURCES: [&str; 8] = [
 pub const PIECE_MATERIAL_VALUE: [i16; 12] = [
     100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000,
 ];
+const DARK_SQUARES: u64 = 0xAA55_AA55_AA55_AA55;
+const BISHOP_PAIR_BONUS: i16 = 30;
 const PAWN_LATE_GAME_PST_IDX: usize = 6;
 const KING_LATE_GAME_PST_IDX: usize = 7;
 
@@ -136,6 +138,15 @@ impl Evaluator {
             let idx: usize = bitboard::pop_lsb(&mut b_king_bb) as usize ^ 56;
             black_v += (phase_coeffs.0 * self.pst_king_early[idx]
                 + phase_coeffs.1 * self.pst_king_late[idx]) as i16;
+        }
+
+        let white_bishops = pieces[W_BISHOP_U];
+        if white_bishops & DARK_SQUARES != 0 && white_bishops & !DARK_SQUARES != 0 {
+            white_v += BISHOP_PAIR_BONUS;
+        }
+        let black_bishops = pieces[B_BISHOP_U];
+        if black_bishops & DARK_SQUARES != 0 && black_bishops & !DARK_SQUARES != 0 {
+            black_v += BISHOP_PAIR_BONUS;
         }
 
         //negamax compliant
