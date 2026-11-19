@@ -54,8 +54,9 @@ const BISHOP_PAIR_BONUS: i16 = 30;
 const PAWN_LATE_GAME_PST_IDX: usize = 6;
 const KING_LATE_GAME_PST_IDX: usize = 7;
 
-//Stockfish 16 inspired bonus values
+// Normalize Stockfish-inspired bonuses using its endgame pawn value.
 const PASSED_PAWN_BONUS: [[i16; 8]; MAX_LATE_GAME_PHASE + 1] = {
+    let scale = PIECE_MATERIAL_VALUE[W_PAWN_U] as f32 / 208.0;
     let opening = [0., 0., 15., 21., 65., 165., 280., 0.];
     let endgame = [0., 38., 40., 50., 80., 180., 270., 0.];
     let mut table = [[0; 8]; MAX_LATE_GAME_PHASE + 1];
@@ -64,7 +65,8 @@ const PASSED_PAWN_BONUS: [[i16; 8]; MAX_LATE_GAME_PHASE + 1] = {
         let (early, late) = PHASE_COEFFS[phase];
         let mut rank = 0;
         while rank < 8 {
-            table[phase][rank] = (early * opening[rank] + late * endgame[rank]) as i16;
+            let bonus = early * opening[rank] + late * endgame[rank];
+            table[phase][rank] = (bonus * scale) as i16;
             rank += 1;
         }
         phase += 1;

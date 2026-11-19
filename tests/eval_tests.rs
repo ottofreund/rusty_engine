@@ -128,9 +128,9 @@ fn eval_tapers_pawn_and_king_tables_across_given_phase() {
 
     let material = PIECE_MATERIAL_VALUE[W_PAWN_U] + PIECE_MATERIAL_VALUE[W_KING_U];
     let phases = [
-        (EARLY_GAME_PHASE, (1.0, 0.0), 15),
-        (MIDDLE_GAME_PHASE, (0.52, 0.48), 26),
-        (LATE_GAME_PHASE, (0.04, 0.96), 38),
+        (EARLY_GAME_PHASE, (1.0, 0.0), 7),
+        (MIDDLE_GAME_PHASE, (0.52, 0.48), 12),
+        (LATE_GAME_PHASE, (0.04, 0.96), 18),
     ];
 
     for (phase, coefficients, passer_bonus) in phases {
@@ -159,9 +159,9 @@ fn seventh_rank_passer_scores_for_either_color_with_a_piece_in_front() {
     mirrored[W_KNIGHT_U] = 1 << (b8 ^ 56);
 
     for (phase, coefficients, bonus) in [
-        (EARLY_GAME_PHASE, (1.0, 0.0), 280),
-        (MIDDLE_GAME_PHASE, (0.52, 0.48), 275),
-        (LATE_GAME_PHASE, (0.04, 0.96), 270),
+        (EARLY_GAME_PHASE, (1.0, 0.0), 134),
+        (MIDDLE_GAME_PHASE, (0.52, 0.48), 132),
+        (LATE_GAME_PHASE, (0.04, 0.96), 130),
     ] {
         let score = PIECE_MATERIAL_VALUE[W_PAWN_U]
             + tapered_value(pawn_open[b7], pawn_end[b7], coefficients)
@@ -254,7 +254,7 @@ fn passed_pawns_match_square_by_square_detection() {
         .map(|sq| PIECE_MATERIAL_VALUE[W_PAWN_U] + tapered_value(early[sq], late[sq], (0.04, 0.96)))
         .collect();
     let bonuses: Vec<_> = (0..64)
-        .map(|sq| [0, 36, 38, 48, 79, 179, 270, 0][sq / 8])
+        .map(|sq| [0, 17, 18, 23, 38, 86, 130, 0][sq / 8])
         .collect();
     let check = |white: u64, black: u64| {
         let mut pieces = [0; 12];
@@ -293,8 +293,8 @@ fn sums_only_frontmost_passers_on_distinct_files() {
     let evaluator = Evaluator::default();
     let pst = load_table("pawn_e.txt");
     for (color, pawns, bonus) in [
-        (W_PAWN_U, (1u64 << 32) | (1 << 40) | (1 << 27), 165 + 21), // a5, a6, d4
-        (B_PAWN_U, (1u64 << 39) | (1 << 31), 65),                   // h5, h4
+        (W_PAWN_U, (1u64 << 32) | (1 << 40) | (1 << 27), 79 + 10), // a5, a6, d4
+        (B_PAWN_U, (1u64 << 39) | (1 << 31), 31),                  // h5, h4
     ] {
         let mut pieces = [0; 12];
         pieces[color] = pawns;
