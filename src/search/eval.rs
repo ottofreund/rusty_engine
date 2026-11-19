@@ -1,9 +1,9 @@
 use crate::{
-    repr::{bitboard, types::*},
+    repr::{bitboard, board::FILES, types::*},
     search::table_loader::parse_table_values,
 };
 
-pub const PHASE_MULTIPLIERS: [i16; 12] = [0, 1, 1, 2, 4, 0, 0, 1, 1, 2, 4, 0]; //giving 25 distinct phases
+pub const PHASE_MULTIPLIERS: [i16; 12] = [0, 1, 1, 2, 4, 0, 0, 1, 1, 2, 4, 0]; //multiplier for each piece type, "how much weight it has on lateness of the game"
 pub const MAX_LATE_GAME_PHASE: usize = 24;
 const PHASE_COEFFS: [(f32, f32); MAX_LATE_GAME_PHASE + 1] = [
     (1.0, 0.0),
@@ -52,6 +52,56 @@ pub const PIECE_MATERIAL_VALUE: [i16; 12] = [
 const PAWN_LATE_GAME_PST_IDX: usize = 6;
 const KING_LATE_GAME_PST_IDX: usize = 7;
 
+//Stockfish 16 inspired bonus values
+const PASSED_PAWN_BONUS: [[i16; 8]; MAX_LATE_GAME_PHASE + 1] = {
+    let opening = [0., 0., 15., 21., 65., 165., 280., 0.];
+    let endgame = [0., 38., 40., 50., 80., 180., 270., 0.];
+    let mut table = [[0; 8]; MAX_LATE_GAME_PHASE + 1];
+    let mut phase = 0;
+    while phase < table.len() {
+        let (early, late) = PHASE_COEFFS[phase];
+        let mut rank = 0;
+        while rank < 8 {
+            table[phase][rank] = (early * opening[rank] + late * endgame[rank]) as i16;
+            rank += 1;
+        }
+        phase += 1;
+    }
+    table
+};
+
+#[inline]
+fn passed_pawns(friendly: u64, enemy: u64, color: u32) -> u64 {
+    let mut blockers = friendly | enemy | ((enemy & !FILES[0]) >> 1) | ((enemy & !FILES[7]) << 1);
+    // Project blockers strictly behind them, leaving their own rank eligible.
+    if color == WHITE {
+        blockers |= blockers >> 8;
+        blockers |= blockers >> 16;
+        blockers |= blockers >> 32;
+        friendly & !(blockers >> 8)
+    } else {
+        blockers |= blockers << 8;
+        blockers |= blockers << 16;
+        blockers |= blockers << 32;
+        friendly & !(blockers << 8)
+    }
+}
+
+#[inline]
+fn passed_pawn_score(friendly: u64, enemy: u64, color: u32, bonuses: &[i16; 8]) -> i16 {
+    if friendly == 0 {
+        return 0;
+    }
+    let mut passers = passed_pawns(friendly, enemy, color);
+    let square_flip = if color == WHITE { 0 } else { 56 };
+    let mut score = 0;
+    while passers != 0 {
+        let relative_square = bitboard::pop_lsb(&mut passers) as usize ^ square_flip;
+        score += bonuses[relative_square / 8];
+    }
+    score
+}
+
 //pst: piece square table
 pub struct Evaluator {
     pst: [Vec<i16>; 8], // [6] == pawn late game, [7] == king late game
@@ -87,8 +137,8 @@ impl Evaluator {
     /// mover is only required for negamax algorithm's sake <br>
     /// late_game_phase ranges from [0, MAX_LATE_GAME_PHASE]
     pub fn eval(&self, pieces: [u64; 12], mover: u32, late_game_phase: usize) -> i16 {
-        let mut white_v: i16 = 0;
-        let mut black_v: i16 = 0;
+        let bonuses = &PASSED_PAWN_BONUS[late_game_phase];
+        let mut white_v = passed_pawn_score(pieces[W_PAWN_U], pieces[B_PAWN_U], WHITE, bonuses);
         let phase_coeffs: (f32, f32) = PHASE_COEFFS[late_game_phase];
 
         let mut w_pawn_bb: u64 = pieces[W_PAWN_U];
@@ -114,6 +164,7 @@ impl Evaluator {
                 + phase_coeffs.1 * self.pst_king_late[idx]) as i16;
         }
 
+        let mut black_v = passed_pawn_score(pieces[B_PAWN_U], pieces[W_PAWN_U], BLACK, bonuses);
         let mut b_pawn_bb: u64 = pieces[B_PAWN_U];
         while b_pawn_bb > 0 {
             black_v += PIECE_MATERIAL_VALUE[B_PAWN_U];
