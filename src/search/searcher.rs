@@ -283,41 +283,27 @@ impl Searcher {
             let old_alpha: i16 = alpha;
             let old_beta: i16 = beta;
             //terminal node?
-            if s == e {
-                if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + ply as i16; //sooner mate is better
-                } else if in_quiescence {
-                    return evaluator.eval(
-                        pos.board.pieces,
-                        pos.board.turn,
-                        pos.board.late_game_phase,
-                    ); //might miss stalemate but not worth it to check for performance reasons
-                } else {
-                    return 0; //stalemate
-                }
-            } else if is_three_fold || pos.board.is_fifty_move_draw() {
+            let in_check = pos.board.nof_checkers > 0;
+            if s == e && in_check {
+                return -MATE_EVAL + ply as i16; //sooner mate is better
+            }
+            if s == e && !in_quiescence {
+                return 0; // stalemate
+            }
+            if is_three_fold || pos.board.is_fifty_move_draw() {
                 return 0;
-            } else if d <= 0 {
-                if use_quiescence {
-                    if pos.board.nof_checkers == 0 {
-                        eval = evaluator.eval(
-                            pos.board.pieces,
-                            pos.board.turn,
-                            pos.board.late_game_phase,
-                        );
-                        if eval >= beta {
-                            search_data.stand_pat_cutoffs += 1;
-                            return eval;
-                        }
-                        alpha = max(alpha, eval);
-                    }
-                } else {
-                    return evaluator.eval(
-                        pos.board.pieces,
-                        pos.board.turn,
-                        pos.board.late_game_phase,
-                    );
+            }
+
+            if d <= 0 && (!in_quiescence || !in_check) {
+                eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase);
+                if !in_quiescence || s == e { //not using quiescence or reached quiet node
+                    return eval;
                 }
+                if eval >= beta { //can stand-pat?
+                    search_data.stand_pat_cutoffs += 1;
+                    return eval;
+                }
+                alpha = max(alpha, eval);
             }
 
             let mut best_move: u32 = NULL_MOVE;
