@@ -4,7 +4,7 @@ use crate::{
     repr::{
         _move::{self, *}, board::Board, move_gen::MoveGen, position::Position,
     }, search::{
-        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
+        eval::{Evaluator, MATE_BOUND, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
     }, utils::zobrist::Zobrist,
 };
 
@@ -544,8 +544,14 @@ impl Searcher {
                 .unwrap_or(td);
 
             if log_uci_diagnostics {
+                let (score_kind, score) = if eval.abs() >= MATE_BOUND {
+                    let mate_plies = MATE_EVAL - eval.abs();
+                    ("mate", ((mate_plies + 1) / 2) * eval.signum())
+                } else {
+                    ("cp", eval)
+                };
                 println!(
-                    "info depth {td} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}",
+                    "info depth {td} seldepth {} score {score_kind} {score} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}",
                     search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
                 );
             }
