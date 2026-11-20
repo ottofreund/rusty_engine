@@ -119,6 +119,20 @@ fn depth_one_futility_searches_late_quiet_mate() {
 }
 
 #[test]
+fn depth_one_pv_futility_preserves_alpha_improvement() {
+    let engine = TestEngine::new();
+    let fen = "2bqk1n1/3nbp2/rp4pr/p1p1p2p/N3P3/2PPBN1P/PP3PP1/1R1K1B1R w - - 0 1";
+    let searcher = search_static_depth(&engine, fen, 4, true);
+
+    // After d3d4 g6g5 f1a6, c8a6 raises alpha despite later quiet moves being pruned.
+    let child = engine.position("2bqk1n1/3nbp2/Bp5r/p1p1p1pp/N2PP3/2P1BN1P/PP3PP1/1R1K3R b - - 0 1");
+    let key = Zobrist::zkey50_adjusted(child.zhash, child.board.half_move_clock);
+    let entry = searcher.tt.probe(key).expect("missing PV child TT entry");
+    assert!(entry.bound_type() == TTEntryType::Exact);
+    assert_eq!(TranspositionTable::score_from_tt(entry.score, 3), 581);
+}
+
+#[test]
 fn static_depth_quiescence_rejects_poisoned_capture() {
     let engine = TestEngine::new();
     let fen = "4k3/8/5p2/4p3/3Q4/8/8/4K3 w - - 0 1";

@@ -309,8 +309,6 @@ impl Searcher {
 
             let futility_pruning = d == 1
                 && ply > 0
-                && !is_pv_node
-                && is_null_window
                 && !in_check
                 && alpha >= 0
                 && beta < MATE_BOUND
@@ -511,8 +509,9 @@ impl Searcher {
                 }
                 i += 1;
             }
-            if end != e && alpha < beta {
-                eval = old_alpha;
+            if end != e {
+                // Treat skipped moves as failing low against the original alpha.
+                eval = max(eval, old_alpha);
             }
             //add TT entry
             let tte: TTEntry = TTEntry::new_packed(
