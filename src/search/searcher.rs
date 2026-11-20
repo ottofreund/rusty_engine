@@ -127,7 +127,12 @@ impl Searcher {
             } else {
                 self.drop_pv_head(i);
                 let search_data = &mut self.search_data[i];
-                search_data.completed_depth = search_data.completed_depth.saturating_sub(1);
+                // A truncated PV can leave the new root without a move.
+                search_data.completed_depth = if search_data.pv[0] == NULL_MOVE {
+                    0
+                } else {
+                    search_data.completed_depth.saturating_sub(1)
+                };
             }
         }
     }
@@ -229,10 +234,14 @@ impl Searcher {
                 search_data.pv[row_start] = NULL_MOVE;
             }
 
-            let root_relative_d: usize = target_d - ply.min(target_d); // d is disturbed by LMR so this is the actual d remaining relative to root
-
             search_data.positions_searched += 1;
             search_data.sel_depth = max(search_data.sel_depth, ply);
+
+            if pos.board.has_insufficient_material() && ply != 0 {
+                return 0;
+            }
+
+            let root_relative_d: usize = target_d - ply.min(target_d); // d is disturbed by LMR so this is the actual d remaining relative to root
 
             let mut eval: i16 = EVAL_INIT;
             let is_three_fold: bool = search_data.in_three_fold(pos);

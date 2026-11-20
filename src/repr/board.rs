@@ -1,7 +1,13 @@
 use crate::{
     repr::{
-        _move::NULL_MOVE, move_gen::{MoveGen, add_en_passant}, types::{B_KING, B_KING_U, B_PAWN_U, W_KING, W_KING_U, W_PAWN_U, WHITE, opposite_turn},
-    }, search::eval::{MAX_LATE_GAME_PHASE, PHASE_MULTIPLIERS},
+        _move::NULL_MOVE,
+        move_gen::{add_en_passant, MoveGen},
+        types::{
+            opposite_turn, B_BISHOP_U, B_KING, B_KING_U, B_KNIGHT_U, B_PAWN_U, B_QUEEN_U, B_ROOK_U,
+            WHITE, W_BISHOP_U, W_KING, W_KING_U, W_KNIGHT_U, W_PAWN_U, W_QUEEN_U, W_ROOK_U,
+        },
+    },
+    search::eval::{MAX_LATE_GAME_PHASE, PHASE_MULTIPLIERS},
 };
 
 pub const FILES: [u64; 8] = [
@@ -25,6 +31,7 @@ pub const RANKS: [u64; 8] = [
     0xFF00000000000000,
 ];
 pub const EDGES: u64 = FILES[0] | FILES[7] | RANKS[0] | RANKS[7];
+pub(crate) const DARK_SQUARES: u64 = 0xAA55_AA55_AA55_AA55;
 /// Mutable state board representing a legal chess position
 #[derive(Clone, Debug)]
 pub struct Board {
@@ -371,6 +378,23 @@ impl Board {
         return self.half_move_clock >= 100;
     }
 
+    #[inline]
+    pub(crate) fn has_insufficient_material(&self) -> bool {
+        let pieces = &self.pieces;
+        if pieces[W_PAWN_U] | pieces[B_PAWN_U] != 0
+            || pieces[W_ROOK_U] | pieces[B_ROOK_U] | pieces[W_QUEEN_U] | pieces[B_QUEEN_U] != 0
+        {
+            return false;
+        }
+
+        let knights = pieces[W_KNIGHT_U] | pieces[B_KNIGHT_U];
+        let bishops = pieces[W_BISHOP_U] | pieces[B_BISHOP_U];
+        if knights != 0 {
+            return bishops == 0 && knights.is_power_of_two();
+        }
+        bishops & DARK_SQUARES == 0 || bishops & !DARK_SQUARES == 0
+    }
+
     pub fn eq(&self, other: &Self, move_gen: &MoveGen) -> bool {
         return self.pieces == other.pieces
             && self.turn == other.turn
@@ -423,4 +447,31 @@ pub fn square_to_string(sqr_idx: u32) -> String {
     let rank: u32 = sqr_idx / 8 + 1;
     res.push_str(&rank.to_string());
     return res;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MoveGen;
+    use crate::utils::fen_tool::fen_to_board;
+
+    #[test]
+    fn detects_insufficient_material_from_piece_squares() {
+        let move_gen = MoveGen::init();
+        for (fen, expected) in [
+            ("7k/8/8/8/8/8/8/K7 w - - 0 1", true),
+            ("7k/8/8/8/8/8/8/K2B4 w - - 0 1", true),
+            ("5n1k/8/8/8/8/8/8/K7 w - - 0 1", true),
+            ("5b1k/8/8/6B1/8/4B3/8/K1B5 w - - 0 1", true),
+            ("7k/5b2/8/8/8/8/8/K2B4 w - - 0 1", true),
+            ("7k/8/8/8/8/4N3/8/K1N5 w - - 0 1", false),
+            ("5n1k/8/8/8/8/8/8/K1B5 w - - 0 1", false),
+            ("5b1k/8/8/8/8/8/8/K2B4 w - - 0 1", false),
+            ("7k/8/8/8/8/8/2P5/K7 w - - 0 1", false),
+            ("7k/8/8/8/8/8/8/K1R5 w - - 0 1", false),
+            ("7k/4q3/8/8/8/8/8/K7 w - - 0 1", false),
+        ] {
+            let board = fen_to_board(fen.to_owned(), &move_gen).expect(fen);
+            assert_eq!(board.has_insufficient_material(), expected, "{fen}");
+        }
+    }
 }
