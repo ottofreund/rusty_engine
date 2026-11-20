@@ -15,6 +15,7 @@ const ALPHA_INIT: i16 = -i16::MAX;
 const BETA_INIT: i16 = i16::MAX;
 const EVAL_INIT: i16 = -i16::MAX;
 const EVAL_QUIT: i16 = 31111;
+const FUTILITY_MARGIN: i16 = 150;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
@@ -306,6 +307,16 @@ impl Searcher {
                 alpha = max(alpha, eval);
             }
 
+            let futility_pruning = d == 1
+                && ply > 0
+                && !is_pv_node
+                && is_null_window
+                && !in_check
+                && alpha >= 0
+                && beta < MATE_BOUND
+                && evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
+                    <= alpha - FUTILITY_MARGIN;
+            let mut check_info = None;
             let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
 
@@ -334,9 +345,29 @@ impl Searcher {
                 secondary_selection = NULL_MOVE;
             }
 
-            for i in s..e {
+            let mut i = s;
+            let mut end = e;
+            while i < end {
                 let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..end], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+
+                // EVAL_INIT also keeps the first move in the search.
+                if futility_pruning
+                    && eval > -MATE_BOUND
+                    && mov != primary_selection
+                    && mov != secondary_selection
+                    && !is_eating(mov)
+                    && !is_promotion(mov)
+                    && !is_castle(mov)
+                {
+                    let info = check_info.get_or_insert_with(|| move_gen.check_info(&pos.board));
+                    if !move_gen.gives_check(&pos.board, info, mov) {
+                        // Keep the searched prefix intact for history updates.
+                        end -= 1;
+                        pos.move_arr.swap(i, end);
+                        continue;
+                    }
+                }
 
                 if mov == primary_selection {
                     primary_selection = NULL_MOVE;
@@ -478,6 +509,10 @@ impl Searcher {
                     }
                     break; //i.e. return alpha
                 }
+                i += 1;
+            }
+            if end != e && alpha < beta {
+                eval = old_alpha;
             }
             //add TT entry
             let tte: TTEntry = TTEntry::new_packed(

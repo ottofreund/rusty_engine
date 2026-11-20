@@ -6,9 +6,11 @@ use rusty_engine::{
     repr::_move::{self, NULL_MOVE},
     repr::position::Position,
     search::{
+        eval::MATE_EVAL,
         search_config::SearchMode,
         search_data::{get_triang_pv_ply_idx_table, TRIANG_PV_TABLE_SIZE},
         searcher::{Searcher, MAX_SEARCH_DEPTH},
+        tt::{TTEntry, TTEntryType, TranspositionTable},
     },
     utils::{fen_tool::DEFAULT_FEN, zobrist::Zobrist},
 };
@@ -52,6 +54,67 @@ fn assert_legal_pv(engine: &TestEngine, start: &Position, pv: &[u32]) {
             _move::to_string(*mov, true)
         );
         engine.make_search_move(&mut replay, *mov);
+    }
+}
+
+#[test]
+fn depth_one_futility_searches_late_quiet_mate() {
+    let engine = TestEngine::new();
+    let start = engine.position("4r2k/p7/5KQ1/8/8/8/8/8 b - - 0 1");
+    let find_move = |pos: &Position, name| {
+        pos.legal_search_moves()
+            .iter()
+            .copied()
+            .find(|&mov| _move::to_string(mov, true) == name)
+            .unwrap()
+    };
+    let first_root_move = find_move(&start, "e8e7");
+    let second_root_move = find_move(&start, "e8b8");
+    let mut child = start.clone();
+    engine.make_search_move(&mut child, second_root_move);
+    let key = Zobrist::zkey50_adjusted(child.zhash, child.board.half_move_clock);
+    let first_reply = find_move(&child, "g6f7");
+    let quiet_sibling = find_move(&child, "g6f5");
+    let mate = find_move(&child, "g6g7");
+
+    for quiescence in [false, true] {
+        let mut searcher = Searcher::from(&start, MULTITHREADED);
+        searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+        searcher.search_config.quiescence = quiescence;
+        let data = &mut searcher.search_data[0];
+        data.completed_depth = 1;
+        data.pv[0] = first_root_move;
+        // Rook on e7 can be captured, setting alpha for the e8b8 null-window search.
+        for (side, mov, bonus) in [
+            (start.board.turn, second_root_move, 200),
+            (child.board.turn, quiet_sibling, 200),
+            (child.board.turn, mate, 100),
+        ] {
+            data.update_history_entry(
+                side,
+                _move::get_init(mov),
+                _move::get_target(mov),
+                bonus,
+            );
+        }
+        searcher.tt.store(TTEntry::new_packed(
+            key,
+            first_reply,
+            0,
+            TTEntryType::UpperBound,
+            0,
+            searcher.tt.generation,
+        ));
+
+        searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+        let entry = searcher.tt.probe(key).expect("missing non-PV child TT entry");
+        assert_eq!(entry.best_move, mate, "quiescence={quiescence}");
+        assert!(entry.bound_type() == TTEntryType::LowerBound);
+        assert_eq!(
+            TranspositionTable::score_from_tt(entry.score, 1),
+            MATE_EVAL - 2
+        );
     }
 }
 
