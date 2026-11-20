@@ -360,10 +360,17 @@ impl Searcher {
                 {
                     let info = check_info.get_or_insert_with(|| move_gen.check_info(&pos.board));
                     if !move_gen.gives_check(&pos.board, info, mov) {
-                        // Keep the searched prefix intact for history updates.
-                        end -= 1;
-                        pos.move_arr.swap(i, end);
-                        continue;
+                        let child_key = zobrist.quiet_move_tt_key(pos, mov, move_gen);
+                        let raises_alpha = tt.probe(child_key).is_some_and(|entry| {
+                            matches!(entry.bound_type(), TTEntryType::Exact | TTEntryType::UpperBound)
+                                && -TranspositionTable::score_from_tt(entry.score, (ply + 1) as i16) > alpha
+                        });
+                        if !raises_alpha {
+                            // Keep the searched prefix intact for history updates.
+                            end -= 1;
+                            pos.move_arr.swap(i, end);
+                            continue;
+                        }
                     }
                 }
 

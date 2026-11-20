@@ -57,17 +57,18 @@ fn assert_legal_pv(engine: &TestEngine, start: &Position, pv: &[u32]) {
     }
 }
 
+fn find_move(pos: &Position, name: &str) -> u32 {
+    pos.legal_search_moves()
+        .iter()
+        .copied()
+        .find(|&mov| _move::to_string(mov, true) == name)
+        .unwrap()
+}
+
 #[test]
 fn depth_one_futility_searches_late_quiet_mate() {
     let engine = TestEngine::new();
     let start = engine.position("4r2k/p7/5KQ1/8/8/8/8/8 b - - 0 1");
-    let find_move = |pos: &Position, name| {
-        pos.legal_search_moves()
-            .iter()
-            .copied()
-            .find(|&mov| _move::to_string(mov, true) == name)
-            .unwrap()
-    };
     let first_root_move = find_move(&start, "e8e7");
     let second_root_move = find_move(&start, "e8b8");
     let mut child = start.clone();
@@ -130,6 +131,60 @@ fn depth_one_pv_futility_preserves_alpha_improvement() {
     let entry = searcher.tt.probe(key).expect("missing PV child TT entry");
     assert!(entry.bound_type() == TTEntryType::Exact);
     assert_eq!(TranspositionTable::score_from_tt(entry.score, 3), 581);
+}
+
+#[test]
+fn depth_one_futility_keeps_quiet_move_with_improving_child_tt_bound() {
+    let engine = TestEngine::new();
+    let start = engine.position("4r2k/p7/1P4K1/8/Q7/8/8/8 b - - 0 1");
+    let first = find_move(&start, "e8e3");
+    let second = find_move(&start, "e8e5");
+    let mut child = start.clone();
+    engine.make_search_move(&mut child, second);
+    let child_key = Zobrist::zkey50_adjusted(child.zhash, child.board.half_move_clock);
+    let first_reply = find_move(&child, "b6a7");
+    let quiet = find_move(&child, "a4d4");
+
+    let mut leaf = child;
+    engine.make_search_move(&mut leaf, quiet);
+    let leaf_key = Zobrist::zkey50_adjusted(leaf.zhash, leaf.board.half_move_clock);
+    let mut searcher = Searcher::from(&leaf, MULTITHREADED);
+    searcher.tt.resize(1);
+    searcher.search_config.search_mode = SearchMode::StaticDepth(3);
+    searcher.search_config.log_uci_diagnostics = false;
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+    let mate = searcher.tt.probe(leaf_key).expect("missing cached mate");
+    assert!(mate.bound_type() == TTEntryType::Exact);
+    assert_eq!(mate.score, -MATE_EVAL + 4);
+
+    for (bound, score, expected) in [
+        (TTEntryType::Exact, mate.score, MATE_EVAL - 6),
+        (TTEntryType::UpperBound, mate.score, MATE_EVAL - 6),
+        (TTEntryType::UpperBound, -902, 902),
+    ] {
+        searcher.reset();
+        searcher.import_position(&start, None);
+        searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+        let data = &mut searcher.search_data[0];
+        data.completed_depth = 1;
+        data.pv[0] = first;
+        data.update_history_entry(
+            start.board.turn, _move::get_init(second), _move::get_target(second), 200,
+        );
+        searcher.tt.store(TTEntry::new_packed(
+            child_key, first_reply, 0, TTEntryType::UpperBound, 0, searcher.tt.generation,
+        ));
+        searcher.tt.store(TTEntry::new_packed(
+            leaf_key, mate.best_move, mate.depth(), bound, score, searcher.tt.generation,
+        ));
+
+        searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+        let entry = searcher.tt.probe(child_key).expect("missing child TT entry");
+        assert_eq!(entry.best_move, quiet);
+        assert!(entry.bound_type() == TTEntryType::LowerBound);
+        assert_eq!(TranspositionTable::score_from_tt(entry.score, 1), expected);
+    }
 }
 
 #[test]

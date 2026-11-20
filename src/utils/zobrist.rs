@@ -1,9 +1,10 @@
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use crate::repr::bitboard;
-use crate::repr::board::Board;
-use crate::repr::types::{BLACK, B_PAWN_U, B_ROOK_U, NOF_PIECE_TYPES, W_PAWN_U, W_ROOK_U};
+use crate::repr::{
+    _move, bitboard, board::Board, move_gen::MoveGen, position::Position,
+    types::{BLACK, B_KING_U, B_PAWN_U, B_ROOK_U, NOF_PIECE_TYPES, WHITE, W_KING_U, W_PAWN_U, W_ROOK_U},
+};
 
 const PIECE_RANDS_LEN: usize = NOF_PIECE_TYPES as usize * 2 * 64;
 const NOF_SQUARES: usize = 64;
@@ -52,6 +53,45 @@ impl Zobrist {
         }
 
         return h;
+    }
+
+    /// TT key after a legal non-checking move with no capture, promotion or castle.
+    pub(crate) fn quiet_move_tt_key(&self, pos: &Position, mov: u32, move_gen: &MoveGen) -> u64 {
+        let board = &pos.board;
+        let from = _move::get_init(mov) as usize;
+        let to = _move::get_target(mov) as usize;
+        let piece = _move::get_moved_piece(mov) as usize;
+        let is_white = board.turn == WHITE;
+        let allows_ep = _move::is_double_push(mov)
+            && move_gen.has_ep_after_quiet_double_push(board, from, to);
+        let old_ep = if pos.has_ep_take { board.ep_square } else { None };
+        // A quiet move cannot land on a rook home square with an active right.
+        let key = self.updated_hash_forward(
+            pos.zhash,
+            from,
+            to,
+            piece,
+            is_white,
+            false,
+            None,
+            false,
+            None,
+            false,
+            false,
+            allows_ep,
+            false,
+            is_white && (from == 7 || piece == W_KING_U) && board.ws(),
+            is_white && (from == 0 || piece == W_KING_U) && board.wl(),
+            !is_white && (from == 63 || piece == B_KING_U) && board.bs(),
+            !is_white && (from == 56 || piece == B_KING_U) && board.bl(),
+            old_ep,
+        );
+        let clock = if piece == W_PAWN_U || piece == B_PAWN_U {
+            0
+        } else {
+            board.half_move_clock + 1
+        };
+        Self::zkey50_adjusted(key, clock)
     }
 
     ///when making move
@@ -310,5 +350,46 @@ impl Default for Zobrist {
             bs_rand: rng.random::<u64>(),
             bl_rand: rng.random::<u64>(),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quiet_move_tt_key_matches_make_move() {
+        let move_gen = MoveGen::init();
+        let zobrist = Zobrist::default();
+        for fen in [
+            "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 49 1",
+            "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 57 1",
+            "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
+            "4k3/8/8/8/3p4/8/4P3/4K3 w - - 57 1",
+            "k7/3p4/8/4P3/8/8/8/4K3 b - - 49 1",
+            "k3r3/3p4/8/4P3/8/8/8/4K3 b - - 49 1",
+            "8/5p2/8/r5PK/8/8/8/k7 b - - 0 1",
+        ] {
+            let pos = Position::from(fen, &move_gen, &zobrist).unwrap();
+            let info = move_gen.check_info(&pos.board);
+            for &mov in pos.legal_search_moves() {
+                if _move::is_eating(mov)
+                    || _move::is_promotion(mov)
+                    || _move::is_castle(mov)
+                    || move_gen.gives_check(&pos.board, &info, mov)
+                {
+                    continue;
+                }
+                let key = zobrist.quiet_move_tt_key(&pos, mov, &move_gen);
+                let mut child = pos.clone();
+                child.make_move(mov, true, false, true, &move_gen, &zobrist);
+                assert_eq!(
+                    key,
+                    Zobrist::zkey50_adjusted(child.zhash, child.board.half_move_clock),
+                    "{fen} after {}",
+                    _move::to_string(mov, true)
+                );
+            }
+        }
     }
 }

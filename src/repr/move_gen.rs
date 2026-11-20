@@ -225,6 +225,31 @@ impl MoveGen {
             || self.sliding_attacks(king, occupied, true) & rooks != 0
     }
 
+    pub(crate) fn has_ep_after_quiet_double_push(&self, board: &Board, from: usize, to: usize) -> bool {
+        let opponent = board.turn ^ 1;
+        let target = (from + to) / 2;
+        let mut pawns = PAWN_CHECK_SQUARES[opponent as usize][target]
+            & board.pieces[opponent as usize * NOF_PIECE_TYPES_U + W_PAWN_U];
+        if pawns == 0 {
+            return false;
+        }
+
+        // The push gave no check. An en passant reply can only expose a slider.
+        let king = board.get_king_sqr_idx(opponent) as usize;
+        let occupied = board.total_occupation() ^ (1 << from) ^ (1 << target);
+        let offset = board.turn as usize * NOF_PIECE_TYPES_U;
+        let queens = board.pieces[offset + W_QUEEN_U];
+        let bishops = board.pieces[offset + W_BISHOP_U] | queens;
+        let rooks = board.pieces[offset + W_ROOK_U] | queens;
+        while pawns != 0 {
+            let pawn = bitboard::pop_lsb(&mut pawns);
+            if !self.sliders_give_check(king, occupied ^ (1 << pawn), bishops, rooks) {
+                return true;
+            }
+        }
+        false
+    }
+
     #[inline]
     fn discovered_check_blockers(
         &self,
