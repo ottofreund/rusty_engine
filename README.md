@@ -41,6 +41,7 @@ principal-variation search, and a UCI command-line interface.
 
 - Material and piece-square evaluation, with game-phase interpolation between
   opening and endgame pawn and king tables
+- Bonuses for passed pawns and the bishop pair
 
 ### Interfaces
 
