@@ -9,7 +9,7 @@ use rusty_engine::{
         position::Position,
         types::{
             BLACK, B_BISHOP_U, B_KING_U, B_KNIGHT_U, B_PAWN_U, WHITE, W_BISHOP_U, W_KING_U,
-            W_PAWN_U, W_QUEEN,
+            W_KNIGHT_U, W_PAWN_U, W_QUEEN,
         },
     },
     search::{
@@ -128,17 +128,50 @@ fn eval_tapers_pawn_and_king_tables_across_given_phase() {
 
     let material = PIECE_MATERIAL_VALUE[W_PAWN_U] + PIECE_MATERIAL_VALUE[W_KING_U];
     let phases = [
-        (EARLY_GAME_PHASE, (1.0, 0.0)),
-        (MIDDLE_GAME_PHASE, (0.52, 0.48)),
-        (LATE_GAME_PHASE, (0.04, 0.96)),
+        (EARLY_GAME_PHASE, (1.0, 0.0), 7),
+        (MIDDLE_GAME_PHASE, (0.52, 0.48), 12),
+        (LATE_GAME_PHASE, (0.04, 0.96), 18),
     ];
 
-    for (phase, coefficients) in phases {
+    for (phase, coefficients, passer_bonus) in phases {
         let expected = material
             + tapered_value(pawn_open[17], pawn_end[17], coefficients)
-            + tapered_value(king_open[20], king_end[20], coefficients);
+            + tapered_value(king_open[20], king_end[20], coefficients)
+            + passer_bonus;
 
         assert_eq!(evaluator.eval(pieces, WHITE, phase), expected);
+    }
+}
+
+#[test]
+fn seventh_rank_passer_scores_for_either_color_with_a_piece_in_front() {
+    let evaluator = Evaluator::default();
+    let pawn_open = load_table("pawn_e.txt");
+    let pawn_end = load_table("pawn_l.txt");
+    let knight = load_table("knight.txt");
+    let b7 = 49;
+    let b8 = 57;
+    let mut pieces = [0; 12];
+    pieces[W_PAWN_U] = 1 << b7;
+    pieces[B_KNIGHT_U] = 1 << b8;
+    let mut mirrored = [0; 12];
+    mirrored[B_PAWN_U] = 1 << (b7 ^ 56);
+    mirrored[W_KNIGHT_U] = 1 << (b8 ^ 56);
+
+    for (phase, coefficients, bonus) in [
+        (EARLY_GAME_PHASE, (1.0, 0.0), 134),
+        (MIDDLE_GAME_PHASE, (0.52, 0.48), 132),
+        (LATE_GAME_PHASE, (0.04, 0.96), 130),
+    ] {
+        let score = PIECE_MATERIAL_VALUE[W_PAWN_U]
+            + tapered_value(pawn_open[b7], pawn_end[b7], coefficients)
+            + bonus
+            - PIECE_MATERIAL_VALUE[B_KNIGHT_U]
+            - knight[b8 ^ 56];
+        assert_eq!(evaluator.eval(pieces, WHITE, phase), score);
+        assert_eq!(evaluator.eval(pieces, BLACK, phase), -score);
+        assert_eq!(evaluator.eval(mirrored, BLACK, phase), score);
+        assert_eq!(evaluator.eval(mirrored, WHITE, phase), -score);
     }
 }
 
@@ -177,6 +210,106 @@ fn eval_with_both_sides_pieces_is_consistent_for_each_mover() {
     assert_eq!(eval_from_white, expected_white);
     assert_eq!(eval_from_black, expected_black);
     assert_eq!(eval_from_white, -eval_from_black);
+}
+
+fn reference_passers(friendly: u64, enemy: u64, white: bool) -> u64 {
+    let mut result = 0;
+    for square in 0i32..64 {
+        let pawn = 1u64 << square;
+        if friendly & pawn == 0 {
+            continue;
+        }
+        let blocked = (0i32..64).any(|other| {
+            let ahead = if white {
+                other / 8 > square / 8
+            } else {
+                other / 8 < square / 8
+            };
+            let files_apart = (other % 8 - square % 8).abs();
+            let bit = 1u64 << other;
+            ahead
+                && ((files_apart == 0 && friendly & bit != 0)
+                    || (files_apart <= 1 && enemy & bit != 0))
+        });
+        if !blocked {
+            result |= pawn;
+        }
+    }
+    result
+}
+
+fn pawn_table_sum(pawns: u64, values: &[i16]) -> i16 {
+    (0..64)
+        .filter(|sq| pawns & (1 << sq) != 0)
+        .map(|sq| values[sq])
+        .sum()
+}
+
+#[test]
+fn passed_pawns_match_square_by_square_detection() {
+    let evaluator = Evaluator::default();
+    let early = load_table("pawn_e.txt");
+    let late = load_table("pawn_l.txt");
+    let base: Vec<_> = (0..64)
+        .map(|sq| PIECE_MATERIAL_VALUE[W_PAWN_U] + tapered_value(early[sq], late[sq], (0.04, 0.96)))
+        .collect();
+    let bonuses: Vec<_> = (0..64)
+        .map(|sq| [0, 17, 18, 23, 38, 86, 130, 0][sq / 8])
+        .collect();
+    let check = |white: u64, black: u64| {
+        let mut pieces = [0; 12];
+        pieces[W_PAWN_U] = white;
+        pieces[B_PAWN_U] = black;
+        let expected = pawn_table_sum(white, &base) - pawn_table_sum(black.swap_bytes(), &base)
+            + pawn_table_sum(reference_passers(white, black, true), &bonuses)
+            - pawn_table_sum(
+                reference_passers(black, white, false).swap_bytes(),
+                &bonuses,
+            );
+        assert_eq!(
+            evaluator.eval(pieces, WHITE, LATE_GAME_PHASE),
+            expected,
+            "white {white:#018x}, black {black:#018x}"
+        );
+    };
+    check(0, 0);
+    for square in 0..64 {
+        let pawn = 1u64 << square;
+        check(0, pawn);
+        check(pawn, 0);
+        for other in 0..64 {
+            if square != other {
+                let blocker = 1u64 << other;
+                check(pawn, blocker);
+                check(pawn | blocker, 0);
+                check(0, pawn | blocker);
+            }
+        }
+    }
+}
+
+#[test]
+fn sums_only_frontmost_passers_on_distinct_files() {
+    let evaluator = Evaluator::default();
+    let pst = load_table("pawn_e.txt");
+    for (color, pawns, bonus) in [
+        (W_PAWN_U, (1u64 << 32) | (1 << 40) | (1 << 27), 79 + 10), // a5, a6, d4
+        (B_PAWN_U, (1u64 << 39) | (1 << 31), 31),                  // h5, h4
+    ] {
+        let mut pieces = [0; 12];
+        pieces[color] = pawns;
+        let (mover, relative) = if color == W_PAWN_U {
+            (WHITE, pawns)
+        } else {
+            (BLACK, pawns.swap_bytes())
+        };
+        let base = PIECE_MATERIAL_VALUE[color] * pawns.count_ones() as i16
+            + pawn_table_sum(relative, &pst);
+        assert_eq!(
+            evaluator.eval(pieces, mover, EARLY_GAME_PHASE),
+            base + bonus
+        );
+    }
 }
 
 #[test]
