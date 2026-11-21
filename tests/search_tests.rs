@@ -19,6 +19,7 @@ use std::sync::{
 
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
 const QUIET_MATERIAL_DISADVANTAGE_FEN: &str = "6qk/8/8/8/8/8/8/K7 w - - 0 1";
+const FORCED_INSUFFICIENT_MATERIAL_CAPTURE_FEN: &str = "5b2/8/8/8/8/1k6/8/Kr6 w - - 0 1";
 const STOP_CHECK_INTERVAL_NODES: u64 = 8192;
 const CANCEL_TEST_DEPTH: usize = 9;
 
@@ -110,6 +111,51 @@ fn static_depth_scores_fifty_move_draw_at_quiet_horizon() {
         let entry = searcher.tt.probe(key).expect("missing root TT entry");
         assert_eq!(entry.score, 0, "quiescence={quiescence}");
     }
+}
+
+#[test]
+fn forced_capture_ends_search_on_insufficient_material() {
+    let engine = TestEngine::new();
+    let fen = FORCED_INSUFFICIENT_MATERIAL_CAPTURE_FEN;
+    let pos = engine.position(fen);
+    let [capture] = pos.legal_search_moves() else {
+        panic!("expected one legal move");
+    };
+    assert!(_move::is_eating(*capture));
+
+    for depth in [1, 2] {
+        for quiescence in [false, true] {
+            let searcher = search_static_depth(&engine, fen, depth, quiescence);
+            let entry = searcher.tt.probe(pos.zhash).expect("missing root TT entry");
+            let context = format!("depth={depth}, quiescence={quiescence}");
+            assert_eq!(entry.score, 0, "{context}");
+            assert_eq!(root_pv(&searcher), [*capture], "{context}");
+            assert_eq!(
+                searcher.search_data[0].cumul_positions_searched,
+                2 * depth as u64,
+                "{context}"
+            );
+        }
+    }
+}
+
+#[test]
+fn insufficient_material_root_selects_a_legal_move_after_sync() {
+    let engine = TestEngine::new();
+    let fen = FORCED_INSUFFICIENT_MATERIAL_CAPTURE_FEN;
+    let mut pos = engine.position(fen);
+    let mut searcher = search_static_depth(&engine, fen, 3, true);
+    let capture = searcher.collect_best_move().expect("forced capture");
+    engine.make_search_move(&mut pos, capture);
+    searcher.sync_new_move(&pos, Some(capture));
+
+    searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let best_move = searcher.collect_best_move().expect("drawn root has moves");
+    assert!(pos.legal_search_moves().contains(&best_move));
+    assert_eq!(root_pv(&searcher), [best_move]);
+    assert_eq!(searcher.tt.probe(pos.zhash).unwrap().score, 0);
 }
 
 #[test]
