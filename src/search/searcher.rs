@@ -599,12 +599,11 @@ impl Searcher {
             pos.make_move(mov, true, false, true, move_gen, zobrist);
             search_data.board_hash_history.push(pos.zhash);
 
-            let full_window = i == s && is_pv_node;
-            let mut new_eval = -Self::quiescence(
+            let new_eval = -Self::quiescence(
                 ply + 1,
-                if full_window { -beta } else { -alpha - 1 },
+                -beta,
                 -alpha,
-                full_window,
+                is_pv_node,
                 pos,
                 evaluator,
                 search_data,
@@ -613,17 +612,6 @@ impl Searcher {
                 control,
                 tt,
             );
-            if !full_window
-                && is_pv_node
-                && new_eval.abs() != EVAL_QUIT
-                && new_eval > alpha
-                && new_eval < beta
-            {
-                new_eval = -Self::quiescence(
-                    ply + 1, -beta, -alpha, true, pos, evaluator, search_data, move_gen, zobrist,
-                    control, tt,
-                );
-            }
 
             search_data.board_hash_history.pop();
             pos.unmake_move(mov, zobrist);
