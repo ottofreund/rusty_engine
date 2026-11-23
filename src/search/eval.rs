@@ -1,5 +1,9 @@
 use crate::{
-    repr::{bitboard, board::FILES, types::*},
+    repr::{
+        bitboard,
+        board::{DARK_SQUARES, FILES},
+        types::*,
+    },
     search::table_loader::parse_table_values,
 };
 
@@ -49,7 +53,6 @@ const TABLE_SOURCES: [&str; 8] = [
 pub const PIECE_MATERIAL_VALUE: [i16; 12] = [
     100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000,
 ];
-const DARK_SQUARES: u64 = 0xAA55_AA55_AA55_AA55;
 const BISHOP_PAIR_BONUS: i16 = 30;
 const PAWN_LATE_GAME_PST_IDX: usize = 6;
 const KING_LATE_GAME_PST_IDX: usize = 7;
