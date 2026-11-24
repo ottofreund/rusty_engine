@@ -15,7 +15,7 @@ const ALPHA_INIT: i16 = -i16::MAX;
 const BETA_INIT: i16 = i16::MAX;
 const EVAL_INIT: i16 = -i16::MAX;
 const EVAL_QUIT: i16 = 31111;
-const FUTILITY_MARGIN: i16 = 150;
+const FUTILITY_MARGIN: i16 = 60;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
