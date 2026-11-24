@@ -244,13 +244,23 @@ impl Searcher {
             search_data.positions_searched += 1;
             search_data.sel_depth = max(search_data.sel_depth, ply);
 
-            if pos.board.has_insufficient_material() && ply != 0 {
+            let (s, e) = pos.search_move_bounds();
+            let is_three_fold: bool = search_data.in_three_fold(pos);
+            //terminal conditions
+            if s == e {
+                if pos.board.nof_checkers > 0 {
+                    return -MATE_EVAL + ply as i16;
+                }
+                return 0; // stalemate
+            }
+            if is_three_fold || pos.board.is_fifty_move_draw() || (pos.board.has_insufficient_material() && ply != 0) {
                 return 0;
             }
+            if d <= 0 {
+                return evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase);
+            }
 
-            let is_three_fold: bool = search_data.in_three_fold(pos);
             let depth = d.max(0) as u8;
-            let (s, e) = pos.search_move_bounds();
             let key = Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock);
             let tte = Searcher::probe_tt(tt, key, &pos.move_arr[s..e], ply);
             if let Some(tt_entry) = tte {
@@ -276,19 +286,6 @@ impl Searcher {
                         return tt_entry.score;
                     }
                 }
-            }
-            //terminal conditions
-            if s == e {
-                if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + ply as i16;
-                }
-                return 0; // stalemate
-            }
-            if is_three_fold || pos.board.is_fifty_move_draw() {
-                return 0;
-            }
-            if d <= 0 {
-                return evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase);
             }
 
             let (old_alpha, old_beta) = (alpha, beta);
