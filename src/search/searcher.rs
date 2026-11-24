@@ -15,7 +15,8 @@ const ALPHA_INIT: i16 = -i16::MAX;
 const BETA_INIT: i16 = i16::MAX;
 const EVAL_INIT: i16 = -i16::MAX;
 const EVAL_QUIT: i16 = 31111;
-const FUTILITY_MARGIN: i16 = 60;
+const FUTILITY_BASE_MARGIN: i16 = 60;
+const FUTILITY_MARGIN_PER_DEPTH: i16 = 40;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
@@ -289,13 +290,12 @@ impl Searcher {
                 }
             }
 
-            let futility_pruning = d == 1
-                && ply > 0
+            let futility_pruning = ply > 0
                 && pos.board.nof_checkers == 0
                 && alpha >= 0
                 && beta < MATE_BOUND
                 && evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
-                    <= alpha - FUTILITY_MARGIN;
+                    <= alpha - (FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * (d - 1));
             let mut check_info = None;
             let (old_alpha, old_beta) = (alpha, beta);
             let root_relative_d = target_d - ply.min(target_d); // LMR can change d
