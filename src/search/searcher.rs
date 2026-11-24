@@ -15,6 +15,7 @@ const ALPHA_INIT: i16 = -i16::MAX;
 const BETA_INIT: i16 = i16::MAX;
 const EVAL_INIT: i16 = -i16::MAX;
 const EVAL_QUIT: i16 = 31111;
+const NULL_MOVE_REDUCTION: i16 = 3;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
@@ -285,6 +286,50 @@ impl Searcher {
                     if alpha >= beta {
                         return tt_entry.score;
                     }
+                }
+            }
+
+            if !is_pv_node
+                && d > 1 + NULL_MOVE_REDUCTION
+                && pos.board.nof_checkers == 0
+                && pos.last_target != NULL_MOVE
+                && beta.abs() < MATE_BOUND
+                && pos.board.half_move_clock < 96
+                && pos.board.has_non_pawn_material()
+                && evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase) >= beta
+            {
+                pos.make_null_move(move_gen, zobrist);
+                // A repetition must stay within the real moves after the pass.
+                let repetition_start = search_data.repetition_start;
+                search_data.repetition_start = search_data.board_hash_history.len();
+                let null_eval = -inner(
+                    d - 1 - NULL_MOVE_REDUCTION,
+                    ply + 1,
+                    target_d,
+                    -beta,
+                    1 - beta,
+                    use_quiescence,
+                    false,
+                    false,
+                    true,
+                    prev_pv,
+                    pos,
+                    evaluator,
+                    search_data,
+                    move_gen,
+                    zobrist,
+                    control,
+                    tt,
+                );
+                search_data.repetition_start = repetition_start;
+                pos.unmake_null_move();
+
+                if null_eval.abs() == EVAL_QUIT {
+                    return EVAL_QUIT;
+                }
+                if null_eval >= beta {
+                    search_data.ab_cutoffs += 1;
+                    return beta;
                 }
             }
 

@@ -379,6 +379,15 @@ impl Board {
     }
 
     #[inline]
+    pub(crate) fn has_non_pawn_material(&self) -> bool {
+        if self.turn == WHITE {
+            self.white_occupation & !(self.pieces[W_PAWN_U] | self.pieces[W_KING_U]) != 0
+        } else {
+            self.black_occupation & !(self.pieces[B_PAWN_U] | self.pieces[B_KING_U]) != 0
+        }
+    }
+
+    #[inline]
     pub(crate) fn has_insufficient_material(&self) -> bool {
         let pieces = &self.pieces;
         if pieces[W_PAWN_U] | pieces[B_PAWN_U] != 0

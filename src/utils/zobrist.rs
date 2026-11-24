@@ -21,6 +21,15 @@ pub struct Zobrist {
 }
 
 impl Zobrist {
+    #[inline]
+    pub(crate) fn hash_after_null_move(&self, hash: u64, lost_ep_take: Option<u32>) -> u64 {
+        let mut hash = hash ^ self.black_turn_rand;
+        if let Some(square) = lost_ep_take {
+            hash ^= self.en_passant_file_rands[square as usize % 8];
+        }
+        hash
+    }
+
     pub fn init_hash(&self, board: &Board, has_ep_take: bool) -> u64 {
         let mut h: u64 = 0;
 
