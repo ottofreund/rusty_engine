@@ -27,6 +27,28 @@ const BS_CASTLING_GAP_BB: u64 = 6917529027641081856; //2^61 + 2^62
 const BL_CASTLING_GAP_BB: u64 = 1008806316530991104; //2^57 + 2^58 + 2^59
 const WL_ATTACK_GAP_BB: u64 = 12; //2^2 + 2^3
 const BL_ATTACK_GAP_BB: u64 = 864691128455135232; //2^58 + 2^59
+
+// Reverse pawn attacks use the king's square, including the back ranks.
+const PAWN_CHECK_SQUARES: [[u64; 64]; 2] = {
+    let mut masks = [[0; 64]; 2];
+    let mut square = 0;
+    while square < 64 {
+        let origin = 1u64 << square;
+        let attacks = ((origin & !FILES[0]) << 7) | ((origin & !FILES[7]) << 9);
+        masks[BLACK as usize][square] = attacks;
+        masks[WHITE as usize][square ^ 56] = attacks.swap_bytes();
+        square += 1;
+    }
+    masks
+};
+
+/// Checking destinations and discovered-check blockers for the current side to move.
+#[derive(Clone, Copy)]
+pub struct CheckInfo {
+    direct: [u64; NOF_PIECE_TYPES_U],
+    discovered_blockers: u64,
+}
+
 ///Uses **magic_bb** handle for precomputed slide moves.
 pub struct MoveGen {
     pub attack_bbs: [[u64; 64]; 12], //empty board attack bbs, for pawns doesn't include forward moves, since they aren't attacked by pawns. Doesn't include en passant or castling either.
@@ -66,6 +88,166 @@ impl MoveGen {
             bishop_bbs_no_edges,
             magic_bb,
         };
+    }
+
+    /// Computes check masks for the side to move, reusable across sibling moves.
+    pub fn check_info(&self, board: &Board) -> CheckInfo {
+        let opponent = board.turn ^ 1;
+        let king = board.get_king_sqr_idx(opponent) as usize;
+        let occupied = board.total_occupation();
+        let friendly = if board.turn == WHITE {
+            board.white_occupation
+        } else {
+            board.black_occupation
+        };
+        let offset = board.turn as usize * NOF_PIECE_TYPES_U;
+        let queens = board.pieces[offset + W_QUEEN_U];
+        let bishop = self.sliding_attacks(king, occupied, false);
+        let rook = self.sliding_attacks(king, occupied, true);
+        let discovered_blockers = self.discovered_check_blockers(
+            king,
+            occupied,
+            bishop & friendly,
+            board.pieces[offset + W_BISHOP_U] | queens,
+            false,
+        ) | self.discovered_check_blockers(
+            king,
+            occupied,
+            rook & friendly,
+            board.pieces[offset + W_ROOK_U] | queens,
+            true,
+        );
+
+        CheckInfo {
+            direct: [
+                PAWN_CHECK_SQUARES[board.turn as usize][king],
+                self.attack_bbs[W_KNIGHT_U][king],
+                bishop,
+                rook,
+                bishop | rook,
+                0, // A legal king move cannot give direct check.
+            ],
+            discovered_blockers,
+        }
+    }
+
+    /// Tests whether a legal move gives check without making it.
+    /// The move must be legal on `board`, and `info` must describe that same board.
+    #[inline]
+    pub fn gives_check(&self, board: &Board, info: &CheckInfo, mov: u32) -> bool {
+        let piece = _move::get_moved_piece(mov) as usize % NOF_PIECE_TYPES_U;
+        if _move::is_promotion(mov)
+            || _move::is_en_passant(mov)
+            || (piece == W_KING_U && _move::is_castle(mov))
+        {
+            return self.special_move_gives_check(board, info, mov);
+        }
+
+        let to = 1 << _move::get_target(mov);
+        if info.direct[piece] & to != 0 {
+            return true;
+        }
+
+        let from = 1 << _move::get_init(mov);
+        if info.discovered_blockers & from == 0 {
+            return false;
+        }
+
+        let king = board.get_king_sqr_idx(board.turn ^ 1) as usize;
+        let occupied = (board.total_occupation() & !from) | to;
+        let offset = board.turn as usize * NOF_PIECE_TYPES_U;
+        let queens = board.pieces[offset + W_QUEEN_U];
+        self.sliders_give_check(
+            king,
+            occupied,
+            (board.pieces[offset + W_BISHOP_U] | queens) & !from,
+            (board.pieces[offset + W_ROOK_U] | queens) & !from,
+        )
+    }
+
+    fn special_move_gives_check(&self, board: &Board, info: &CheckInfo, mov: u32) -> bool {
+        let king = board.get_king_sqr_idx(board.turn ^ 1) as usize;
+        let offset = board.turn as usize * NOF_PIECE_TYPES_U;
+        let mut pieces: [u64; NOF_PIECE_TYPES_U] = board.pieces[offset..offset + NOF_PIECE_TYPES_U]
+            .try_into()
+            .unwrap();
+        let from = 1 << _move::get_init(mov);
+        let target = _move::get_target(mov);
+        let to = 1 << target;
+        let mut occupied = (board.total_occupation() & !from) | to;
+
+        if _move::is_promotion(mov) {
+            let promoted = _move::get_promotion_piece(mov) as usize - offset;
+            pieces[W_PAWN_U] &= !from;
+            pieces[promoted] |= to;
+        } else if _move::is_en_passant(mov) {
+            let victim = if board.turn == WHITE {
+                target - 8
+            } else {
+                target + 8
+            };
+            occupied &= !(1 << victim);
+            pieces[W_PAWN_U] = (pieces[W_PAWN_U] & !from) | to;
+        } else {
+            // The encoded target is the king's destination.
+            let (rook_from, rook_to) = if _move::is_short_castle(mov) {
+                (target + 1, target - 1)
+            } else {
+                (target - 2, target + 1)
+            };
+            let rook_move = (1 << rook_from) | (1 << rook_to);
+            occupied ^= rook_move;
+            pieces[W_ROOK_U] ^= rook_move;
+        }
+
+        (info.direct[W_PAWN_U] & pieces[W_PAWN_U]) != 0
+            || (info.direct[W_KNIGHT_U] & pieces[W_KNIGHT_U]) != 0
+            || self.sliders_give_check(
+                king,
+                occupied,
+                pieces[W_BISHOP_U] | pieces[W_QUEEN_U],
+                pieces[W_ROOK_U] | pieces[W_QUEEN_U],
+            )
+    }
+
+    #[inline]
+    fn sliding_attacks(&self, square: usize, occupied: u64, rook: bool) -> u64 {
+        self.get_sliding_for(
+            square,
+            self.get_relevant_blockers(square, occupied, rook),
+            rook,
+        )
+    }
+
+    #[inline]
+    fn sliders_give_check(&self, king: usize, occupied: u64, bishops: u64, rooks: u64) -> bool {
+        self.sliding_attacks(king, occupied, false) & bishops != 0
+            || self.sliding_attacks(king, occupied, true) & rooks != 0
+    }
+
+    #[inline]
+    fn discovered_check_blockers(
+        &self,
+        king: usize,
+        occupied: u64,
+        first_friendly: u64,
+        sliders: u64,
+        rook: bool,
+    ) -> u64 {
+        if first_friendly == 0 || sliders == 0 {
+            return 0;
+        }
+
+        let mut revealed = self.sliding_attacks(king, occupied & !first_friendly, rook)
+            & sliders
+            & !first_friendly;
+        let mut blockers = 0;
+        while revealed != 0 {
+            let slider = bitboard::pop_lsb(&mut revealed) as usize;
+            // The reverse ray finds the original blocker between the slider and king.
+            blockers |= self.sliding_attacks(slider, occupied, rook) & first_friendly;
+        }
+        blockers
     }
 
     ///Called once upon arriving to a new position. <br>
@@ -609,13 +791,12 @@ fn process_square(
     bishop_bbs_no_edges: &mut [u64; 64],
 ) {
     let sqr_idx: u32 = x % 8 + y * 8;
-    //with pawns moves for black the same as white but flipped and mirrored
-    //for all other pieces attacking squares are identical for white and black
-    //1. pawn attacks, flip bb for black corresponding (at different idx)
-    let white_pawn_bb: u64 = pawn_attacks_white_for(sqr_idx);
-    let black_pawn_bb: u64 = white_pawn_bb.swap_bytes();
-    attack_bbs[W_PAWN_U][sqr_idx as usize] = white_pawn_bb;
-    attack_bbs[B_PAWN_U][(x % 8 + (7 - y) * 8) as usize] = black_pawn_bb;
+    // Pawn move generation uses the opposite color's check squares.
+    if y != 0 && y != 7 {
+        let square = sqr_idx as usize;
+        attack_bbs[W_PAWN_U][square] = PAWN_CHECK_SQUARES[BLACK as usize][square];
+        attack_bbs[B_PAWN_U][square] = PAWN_CHECK_SQUARES[WHITE as usize][square];
+    }
     //2. knight attacks
     let mut bb_knight: u64 = 0;
     for jump in KNIGHT_JUMPS {
@@ -766,21 +947,6 @@ fn slide_to_dir(
             res |= 1 << cur_sqr;
         }
     }
-    return res;
-}
-
-///Used for initialization of attacking bitboards  <br/>
-///Computes the attacking squares for **sqr** from white's perspective
-fn pawn_attacks_white_for(sqr: u32) -> u64 {
-    let non_accessible_ranks: u64 = RANKS[0] | RANKS[7]; //first and last rank non-accessible
-    if bitboard::contains_square(non_accessible_ranks, sqr) {
-        return 0;
-    }
-    let mut res: u64 = 0;
-    //add left attacks, removing overflow to H file
-    res |= bitboard::diff(((1u128 << sqr) << 7) as u64, FILES[7]);
-    //add right attacks, removing overflow to A file
-    res |= bitboard::diff(((1u128 << sqr) << 9) as u64, FILES[0]);
     return res;
 }
 

@@ -1,3 +1,4 @@
+pub mod bench;
 pub mod game;
 pub mod repr;
 pub mod search;

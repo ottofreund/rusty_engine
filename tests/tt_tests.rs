@@ -127,3 +127,53 @@ fn root_result(searcher: &Searcher) -> (String, i16) {
 
     (_move::to_string(best_move, true), root_score)
 }
+
+#[test]
+fn same_key_replacement_prefers_depth_then_bound() {
+    use rusty_engine::search::tt::{TTEntry, TTEntryType::*};
+
+    let cases = [
+        // Existing bound, incoming bound, depth, score, generation, replace, stored generation
+        (LowerBound, LowerBound, 4, 20, 3, true, 3),
+        (LowerBound, LowerBound, 4, 5, 3, false, 3),
+        (LowerBound, LowerBound, 4, 10, 3, false, 3),
+        (UpperBound, UpperBound, 4, 5, 2, true, 3),
+        (UpperBound, UpperBound, 4, 20, 3, false, 3),
+        (UpperBound, UpperBound, 4, 10, 3, false, 3),
+        (LowerBound, Exact, 4, 5, 3, true, 3),
+        (Exact, Exact, 4, 5, 3, true, 3),
+        (Exact, LowerBound, 4, 20, 3, false, 3),
+        (Exact, UpperBound, 4, 5, 3, false, 3),
+        (UpperBound, LowerBound, 4, 20, 3, false, 3),
+        (LowerBound, UpperBound, 4, 5, 3, false, 3),
+        (Exact, LowerBound, 5, 5, 3, true, 3),
+        (LowerBound, Exact, 3, 20, 3, false, 2),
+    ];
+
+    let mut tt = TranspositionTable::default();
+    for (index, (old_bound, new_bound, depth, score, generation, replace, expected_generation)) in
+        cases.into_iter().enumerate()
+    {
+        tt.clear();
+        let key = 123;
+        let existing = TTEntry::new_packed(key, 1, 4, old_bound, 10, 2);
+        let incoming = TTEntry::new_packed(key, 2, depth, new_bound, score, generation);
+        tt.generation = 2;
+        tt.store(existing);
+        tt.generation = 3;
+        tt.store(incoming);
+
+        let stored = tt.probe(key).unwrap();
+        let expected = if replace { incoming } else { existing };
+        assert_eq!(stored.score, expected.score, "case {index} score");
+        assert_eq!(stored.best_move, expected.best_move, "case {index} move");
+        assert_eq!(
+            stored.depth_and_bound_type, expected.depth_and_bound_type,
+            "case {index} depth and bound"
+        );
+        assert_eq!(
+            stored.generation, expected_generation,
+            "case {index} generation"
+        );
+    }
+}

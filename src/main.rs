@@ -1,13 +1,15 @@
-use iced::futures::executor::block_on;
-use rusty_engine::{game::cpu_game, repr::types::VERSION, uci::command_listener::listen, ui::app};
+use rusty_engine::{bench, game::cpu_game, repr::types::VERSION, uci::command_listener::listen};
 
-fn main() {
-    let uci_mode: bool = false;
-    if uci_mode {
-        println!("Rusty Engine v{} by Otto Freund", VERSION);
-        let cpu_game = cpu_game::CpuGame::default();
-        block_on(listen(cpu_game));
-    } else {
-        app::run_fr().unwrap();
+#[tokio::main]
+async fn main() {
+    if std::env::args().nth(1).as_deref() == Some("bench") {
+        let result = bench::run();
+        println!("{} nodes {} nps", result.nodes, result.nps);
+        return;
     }
+
+    println!("Rusty Engine v{} by Otto Freund", VERSION);
+    let cpu_game = cpu_game::CpuGame::default();
+
+    listen(cpu_game).await;
 }

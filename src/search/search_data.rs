@@ -9,13 +9,17 @@ const HISTORY_AGING_NUMERATOR: i32 = 3;
 const HISTORY_AGING_DENOMINATOR: i32 = 4;
 
 pub struct SearchData {
-    // Triangular scratch/result table. The completed root PV always starts at index 0
-    // and never contains quiescence moves.
+    // Triangular scratch/result table. The root PV starts at index 0 and never
+    // contains quiescence moves. It can be partial after interruption; its length
+    // does not establish completed search depth.
     pub pv: [u32; TRIANG_PV_TABLE_SIZE],
+    /// Nominal depth of the last completed iteration, independent of PV length.
+    pub completed_depth: usize,
     // Start of every ply row followed by the final one-past-end table boundary.
     pub pv_ply_indices: Vec<usize>,
     pub mate_in: Option<u32>,
     pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
+    pub(super) repetition_start: usize,
     pub history_table: [i16; 2 * 64 * 64], //history_table[side * 4096 + from_sq * 64 + to_sq]
     pub see_helper: SeeWorker,
     //per search data
@@ -32,9 +36,11 @@ impl SearchData {
     /// Between games reset
     pub fn reset(&mut self) {
         self.pv.fill(NULL_MOVE);
+        self.completed_depth = 0;
         self.pv_ply_indices = get_triang_pv_ply_idx_table(1);
         self.history_table.fill(0);
         self.mate_in = None;
+        self.repetition_start = 0;
         self.reset_temp_performance_data();
         self.reset_cumul_performance_data();
     }
@@ -44,9 +50,11 @@ impl SearchData {
         board_hash_history.push(pos.zhash);
         return Self {
             pv: [NULL_MOVE; TRIANG_PV_TABLE_SIZE],
+            completed_depth: 0,
             pv_ply_indices: get_triang_pv_ply_idx_table(1),
             mate_in: None,
             board_hash_history: board_hash_history,
+            repetition_start: 0,
             history_table: [0; 2 * 64 * 64],
             see_helper: SeeWorker::default(),
             positions_searched: 0,
@@ -66,13 +74,8 @@ impl SearchData {
 
     pub fn in_three_fold(&self, pos: &Position) -> bool {
         let mut count: u32 = 1;
-        let mut i: usize;
-        if self.board_hash_history.len() % 2 == 0 {
-            i = 1;
-        } else {
-            i = 0;
-        }
-        let e: usize = self.board_hash_history.len() - 1;
+        let e = self.board_hash_history.len().saturating_sub(1);
+        let mut i = self.repetition_start + ((e ^ self.repetition_start) & 1);
         while i < e {
             if pos.zhash == self.board_hash_history[i] {
                 count += 1;
@@ -129,4 +132,23 @@ pub fn get_triang_pv_ply_idx_table(target_d: usize) -> Vec<usize> {
     }
     pv_ply_indices.push(cumul);
     return pv_ply_indices
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{repr::move_gen::MoveGen, utils::zobrist::Zobrist};
+
+    #[test]
+    fn repetition_scan_stops_at_null_move_boundary() {
+        let pos = Position::default(&MoveGen::init(), &Zobrist::default());
+        let hash = pos.zhash;
+        let other = !hash;
+        let mut data = SearchData::with_board_hash_history(&pos, vec![hash, other, hash, other, hash]);
+        assert!(data.in_three_fold(&pos));
+        data.repetition_start = 3;
+        assert!(!data.in_three_fold(&pos));
+        data.board_hash_history.extend([other, hash, other, hash]);
+        assert!(data.in_three_fold(&pos));
+    }
 }

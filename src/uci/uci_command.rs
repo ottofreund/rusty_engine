@@ -48,6 +48,7 @@ pub struct SetOptionCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UciOptionId {
     Hash,
+    Threads,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,15 +68,26 @@ pub(super) enum UciOptionValue {
     Spin(i64),
 }
 
-pub(super) const UCI_OPTIONS: &[UciOptionSpec] = &[UciOptionSpec {
-    id: UciOptionId::Hash,
-    name: "Hash",
-    kind: UciOptionKind::Spin {
-        default: DEFAULT_TT_SIZE_MB as i64,
-        min: 1,
-        max: 32_768,
+pub(super) const UCI_OPTIONS: &[UciOptionSpec] = &[
+    UciOptionSpec {
+        id: UciOptionId::Hash,
+        name: "Hash",
+        kind: UciOptionKind::Spin {
+            default: DEFAULT_TT_SIZE_MB as i64,
+            min: 1,
+            max: 32_768,
+        },
     },
-}];
+    UciOptionSpec {
+        id: UciOptionId::Threads,
+        name: "Threads",
+        kind: UciOptionKind::Spin {
+            default: 1,
+            min: 1,
+            max: 1,
+        },
+    }
+];
 
 impl fmt::Display for UciOptionSpec {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

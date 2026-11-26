@@ -2,7 +2,7 @@
 
 Rusty Engine is a work-in-progress chess engine written in Rust. It combines a
 bitboard-based chess core, perft-tested legal move generation, iterative-deepening
-principal-variation search, a UCI command-line interface, and on this branch, a
+principal-variation search, a UCI command-line interface, and an
 [`iced`](https://iced.rs/) desktop GUI.
 
 ![Rusty Engine board](.github/board_demo_img.png)
@@ -31,6 +31,10 @@ principal-variation search, a UCI command-line interface, and on this branch, a
   generation when the side to move is in check
 - Logarithmic late-move reductions (LMR), with a full-depth re-search when a
   reduced move improves alpha
+- Null-move pruning at eligible non-PV nodes, using a fixed three-ply reduction
+  to test whether passing the turn still reaches beta
+- Depth-scaled futility pruning for later quiet moves when static evaluation is
+  below alpha by at least a margin that grows with remaining depth
 
 ### Search enhancements and move ordering
 
@@ -43,6 +47,7 @@ principal-variation search, a UCI command-line interface, and on this branch, a
 
 - Material and piece-square evaluation, with game-phase interpolation between
   opening and endgame pawn and king tables
+- Bonuses for passed pawns and the bishop pair
 
 ### Interfaces
 
@@ -59,11 +64,24 @@ Requires a current stable Rust toolchain with Cargo.
 ```sh
 git clone https://github.com/ottofreund/rusty_engine.git
 cd rusty_engine
+git switch with-gui
 cargo run --release
 ```
 
-The default executable starts the stdin/stdout UCI interface. For example, after
-launching it, enter:
+The GUI supports player-side selection, player-versus-engine play, promotion
+selection, FEN loading, legal-move highlighting, and game-over dialogs.
+
+To run the deterministic OpenBench workload and exit, use the engine binary.
+
+```sh
+cargo run --release --bin rusty_engine -- bench
+```
+
+It searches five fixed positions at depth 6 with one thread and emits a final
+`<nodes> nodes <nps> nps` line suitable for OpenBench.
+
+Start the stdin/stdout UCI interface with `cargo run --release --bin rusty_engine`.
+After launching it, you can enter these commands.
 
 ```text
 uci
@@ -82,12 +100,6 @@ The non-standard `d` command prints the current board. The UCI `Hash` spin optio
 configures the transposition table in MB, with a default of 16 and an accepted
 range of 1–32768.
 
-The desktop GUI is still available, but there is not yet a runtime front-end
-selector. Set `uci_mode` to `false` in `src/main.rs` and run the command above to
-launch it. The GUI supports player-side selection, player-versus-engine play,
-promotion selection, FEN loading, legal-move highlighting, and game-over
-dialogs.
-
 ## Architecture
 
 - **`repr`** is the chess core: bitboards, compact moves, `Board` state,
@@ -98,9 +110,9 @@ dialogs.
 - **`game`** provides `Game` for tracked player-versus-engine games and `CpuGame`
   for importing or incrementally synchronizing UCI positions.
 - **`uci`** parses commands, manages UCI options, and runs cancellable searches
-  on a worker thread; **`ui`** contains the `iced` desktop front end.
-- **`utils`** provides FEN conversion and Zobrist hashing; `main.rs` currently
-  selects between the UCI and GUI front ends with a source-level flag.
+  on a worker thread.
+- **`ui`** contains the `iced` desktop front end.
+- **`utils`** provides FEN conversion and Zobrist hashing.
 
 ## Testing
 
@@ -118,12 +130,16 @@ Ignored fixed-depth, consecutive-search, and timed-search benchmarks can be run
 with:
 
 ```sh
-cargo test --release --test search_benchmark -- --ignored --show-output
+cargo test --release --test search_benchmark -- --ignored --test-threads=1 --show-output
+cargo test --release --test move_gen_benchmark -- --ignored --test-threads=1 --show-output
 ```
+
+Run benchmarks in release mode and one at a time to avoid CPU contention between
+tests. Search diagnostics are disabled during measurements; benchmark summaries
+are printed afterward.
 
 ## Remaining Work
 
-Planned work includes multithreaded search; search extensions; futility and
-reverse-futility pruning; incremental evaluation and richer positional terms;
-large-page allocation for the transposition table; draw detection for
-insufficient material; and full UCI pondering with `go ponder` and `ponderhit`.
+Planned work includes multithreaded search, search extensions, reverse-futility
+pruning, incremental evaluation and richer positional terms, large-page
+allocation for the transposition table, and full UCI pondering with `go ponder` and `ponderhit`.

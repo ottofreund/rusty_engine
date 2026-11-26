@@ -4,7 +4,7 @@ use crate::{
     repr::{
         _move::{self, *}, board::Board, move_gen::MoveGen, position::Position,
     }, search::{
-        eval::{Evaluator, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
+        eval::{Evaluator, MATE_BOUND, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
     }, utils::zobrist::Zobrist,
 };
 
@@ -15,6 +15,9 @@ const ALPHA_INIT: i16 = -i16::MAX;
 const BETA_INIT: i16 = i16::MAX;
 const EVAL_INIT: i16 = -i16::MAX;
 const EVAL_QUIT: i16 = 31111;
+const NULL_MOVE_REDUCTION: i16 = 3;
+const FUTILITY_BASE_MARGIN: i16 = 60;
+const FUTILITY_MARGIN_PER_DEPTH: i16 = 40;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
@@ -123,8 +126,16 @@ impl Searcher {
 
             if self.last_sync_deviates_from_pv || self.search_data[i].pv_ply_indices.len() < 2 {
                 self.search_data[i].pv.fill(NULL_MOVE);
+                self.search_data[i].completed_depth = 0;
             } else {
                 self.drop_pv_head(i);
+                let search_data = &mut self.search_data[i];
+                // A truncated PV can leave the new root without a move.
+                search_data.completed_depth = if search_data.pv[0] == NULL_MOVE {
+                    0
+                } else {
+                    search_data.completed_depth.saturating_sub(1)
+                };
             }
         }
     }
@@ -217,6 +228,13 @@ impl Searcher {
             control: &SearchControl<'_>,
             tt: &mut TranspositionTable,
         ) -> i16 {
+            if d <= 0 && use_quiescence {
+                return Searcher::quiescence(
+                    ply, alpha, beta, is_pv_node, pos, evaluator, search_data, move_gen, zobrist,
+                    control, tt,
+                );
+            }
+
             if control.should_stop(search_data.positions_searched) {
                 return EVAL_QUIT;
             }
@@ -226,128 +244,145 @@ impl Searcher {
                 search_data.pv[row_start] = NULL_MOVE;
             }
 
-            let root_relative_d: usize = target_d - ply.min(target_d); // d is disturbed by LMR so this is the actual d remaining relative to root
-
             search_data.positions_searched += 1;
             search_data.sel_depth = max(search_data.sel_depth, ply);
 
-            let mut eval: i16 = EVAL_INIT;
-            let is_three_fold: bool = search_data.in_three_fold(pos);
-            let in_quiescence: bool = use_quiescence && d <= 0;
             let (s, e) = pos.search_move_bounds();
-            
-            let tte: Option<TTEntry> = tt.probe(Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock)).map(|entry| {
-                TTEntry {
-                    score: TranspositionTable::score_from_tt(entry.score, ply as i16),
-                    ..entry
+            let is_three_fold: bool = search_data.in_three_fold(pos);
+            //terminal conditions
+            if s == e {
+                if pos.board.nof_checkers > 0 {
+                    return -MATE_EVAL + ply as i16;
                 }
-            });
-            let key_collision: bool = tte.is_some_and(|entry| {
-                (entry.best_move == NULL_MOVE && entry.depth() > 0) || !pos.move_arr[s..e].contains(&entry.best_move) //first term for quiescence case where stand-pat is best and NULL_MOVE is stored
-            });
-            //TT cutoff?
+                return 0; // stalemate
+            }
+            if is_three_fold || pos.board.is_fifty_move_draw() || (pos.board.has_insufficient_material() && ply != 0) {
+                return 0;
+            }
+            if d <= 0 {
+                return evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase);
+            }
+
+            let depth = d.max(0) as u8;
+            let key = Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock);
+            let tte = Searcher::probe_tt(tt, key, &pos.move_arr[s..e], ply);
             if let Some(tt_entry) = tte {
-                if  !is_pv_node 
-                    && !is_three_fold 
+                if !is_pv_node
+                    && !is_three_fold
                     && pos.board.half_move_clock < 96
-                    && tt_entry.depth() >= d.max(0) as u8
-                    && !key_collision
-                { //don't trust tt if near 50 move draw or in PV-node
+                    && tt_entry.depth() >= depth
+                {
                     match tt_entry.bound_type() {
                         TTEntryType::Exact => {
                             if d > 0 {
                                 let row_start = search_data.pv_ply_indices[ply];
                                 let row_end = search_data.pv_ply_indices[ply + 1];
-
                                 search_data.pv[row_start..row_end].fill(NULL_MOVE);
                                 search_data.pv[row_start] = tt_entry.best_move;
                             }
                             return tt_entry.score;
                         }
-                        TTEntryType::LowerBound => {
-                            alpha = max(alpha, tt_entry.score);
-                        }
-                        TTEntryType::UpperBound => {
-                            beta = min(beta, tt_entry.score);
-                        }
+                        TTEntryType::LowerBound => alpha = max(alpha, tt_entry.score),
+                        TTEntryType::UpperBound => beta = min(beta, tt_entry.score),
                     }
                     if alpha >= beta {
                         return tt_entry.score;
                     }
                 }
             }
-            
-            let old_alpha: i16 = alpha;
-            let old_beta: i16 = beta;
-            //terminal node?
-            if s == e {
-                if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + ply as i16; //sooner mate is better
-                } else if in_quiescence {
-                    return evaluator.eval(
-                        pos.board.pieces,
-                        pos.board.turn,
-                        pos.board.late_game_phase,
-                    ); //might miss stalemate but not worth it to check for performance reasons
-                } else {
-                    return 0; //stalemate
+
+            if !is_pv_node
+                && d > 1 + NULL_MOVE_REDUCTION
+                && pos.board.nof_checkers == 0
+                && pos.last_target != NULL_MOVE
+                && beta.abs() < MATE_BOUND
+                && pos.board.half_move_clock < 96
+                && pos.board.has_non_pawn_material()
+                && evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase) >= beta
+            {
+                pos.make_null_move(move_gen, zobrist);
+                // A repetition must stay within the real moves after the pass.
+                let repetition_start = search_data.repetition_start;
+                search_data.repetition_start = search_data.board_hash_history.len();
+                let null_eval = -inner(
+                    d - 1 - NULL_MOVE_REDUCTION,
+                    ply + 1,
+                    target_d,
+                    -beta,
+                    1 - beta,
+                    use_quiescence,
+                    false,
+                    false,
+                    true,
+                    prev_pv,
+                    pos,
+                    evaluator,
+                    search_data,
+                    move_gen,
+                    zobrist,
+                    control,
+                    tt,
+                );
+                search_data.repetition_start = repetition_start;
+                pos.unmake_null_move();
+
+                if null_eval.abs() == EVAL_QUIT {
+                    return EVAL_QUIT;
                 }
-            } else if is_three_fold || pos.board.is_fifty_move_draw() {
-                return 0;
-            } else if d <= 0 {
-                if use_quiescence {
-                    if pos.board.nof_checkers == 0 {
-                        eval = evaluator.eval(
-                            pos.board.pieces,
-                            pos.board.turn,
-                            pos.board.late_game_phase,
-                        );
-                        if eval >= beta {
-                            search_data.stand_pat_cutoffs += 1;
-                            return eval;
-                        }
-                        alpha = max(alpha, eval);
-                    }
-                } else {
-                    return evaluator.eval(
-                        pos.board.pieces,
-                        pos.board.turn,
-                        pos.board.late_game_phase,
-                    );
+                if null_eval >= beta {
+                    search_data.ab_cutoffs += 1;
+                    return beta;
                 }
             }
 
+            let futility_pruning = ply > 0
+                && pos.board.nof_checkers == 0
+                && alpha >= 0
+                && beta < MATE_BOUND
+                && evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
+                    <= alpha - (FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * (d - 1));
+            let mut check_info = None;
+            let (old_alpha, old_beta) = (alpha, beta);
+            let root_relative_d = target_d - ply.min(target_d); // LMR can change d
+            let mut eval = EVAL_INIT;
             let mut best_move: u32 = NULL_MOVE;
             let mut only_bad_captures_left: Option<bool> = None;
 
             let prev_pv_mv: u32 = if follows_prev_pv && ply < prev_pv.len() { prev_pv[ply] } else { NULL_MOVE };
-            let mut primary_selection: u32;
-            let mut secondary_selection: u32;
-            if tte.is_some() && !key_collision {
-                if prev_pv_mv != NULL_MOVE {
-                    if tte.unwrap().depth() >= d.max(1) as u8 {
-                        primary_selection = tte.unwrap().best_move;
-                        secondary_selection = prev_pv_mv;
-                    } else {
-                        primary_selection = prev_pv_mv;
-                        secondary_selection = tte.unwrap().best_move;
-                    }
-                } else {
-                    primary_selection = tte.unwrap().best_move;
-                    secondary_selection = NULL_MOVE;
+            let (mut primary_selection, mut secondary_selection) = match tte {
+                Some(entry) if prev_pv_mv == NULL_MOVE || entry.depth() >= depth => {
+                    (entry.best_move, prev_pv_mv)
                 }
-            } else {
-                primary_selection = prev_pv_mv; //can be NULL_MOVE
-                secondary_selection = NULL_MOVE;
-            }
-
+                Some(entry) => (prev_pv_mv, entry.best_move),
+                None => (prev_pv_mv, NULL_MOVE),
+            };
             if primary_selection == secondary_selection {
                 secondary_selection = NULL_MOVE;
             }
 
-            for i in s..e {
+            let mut i = s;
+            let mut end = e;
+            while i < end {
                 let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..end], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+
+                // EVAL_INIT also keeps the first move in the search.
+                if futility_pruning
+                    && eval > -MATE_BOUND
+                    && mov != primary_selection
+                    && mov != secondary_selection
+                    && !is_eating(mov)
+                    && !is_promotion(mov)
+                    && !is_castle(mov)
+                {
+                    let info = check_info.get_or_insert_with(|| move_gen.check_info(&pos.board));
+                    if !move_gen.gives_check(&pos.board, info, mov) {
+                        // Keep the searched prefix intact for history updates.
+                        end -= 1;
+                        pos.move_arr.swap(i, end);
+                        continue;
+                    }
+                }
 
                 if mov == primary_selection {
                     primary_selection = NULL_MOVE;
@@ -357,7 +392,7 @@ impl Searcher {
 
                 let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
                 
-                pos.make_move(mov, true, false, use_quiescence && d <= 1, move_gen, zobrist);
+                pos.make_move(mov, true, false, use_quiescence && d == 1, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.zhash);
 
                 let lmr: i16 = if d < 3 || i == s || follows_prev_pv { 
@@ -465,7 +500,7 @@ impl Searcher {
                     eval = new_eval;
                     best_move = mov;
                     
-                    if d > 0 && !is_null_window { //child ply's pv appended to this ply's pv
+                    if !is_null_window { //child ply's pv appended to this ply's pv
                         let cur_ply_s_idx: usize = search_data.pv_ply_indices[ply];
                         let child_ply_s_idx: usize = cur_ply_s_idx + root_relative_d;
                         let child_ply_e_idx: usize = child_ply_s_idx + root_relative_d - 1;
@@ -478,47 +513,35 @@ impl Searcher {
 
                 if alpha >= beta {
                     search_data.ab_cutoffs += 1;
-                    if d > 0 {
-                        Searcher::update_quiet_history_after_cutoff(
-                            search_data,
-                            pos.board.turn,
-                            mov,
-                            &pos.move_arr[s..i],
-                            d as usize,
-                        );
-                    }
-                    break; //i.e. return alpha
+                    Searcher::update_quiet_history_after_cutoff(
+                        search_data,
+                        pos.board.turn,
+                        mov,
+                        &pos.move_arr[s..i],
+                        d as usize,
+                    );
+                    break;
                 }
+                i += 1;
             }
-            //add TT entry
-            let tte: TTEntry = TTEntry::new_packed(
-                Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock),
-                best_move,
-                d.max(0) as u8,
-                if eval <= old_alpha {
-                    TTEntryType::UpperBound
-                } else if eval >= old_beta {
-                    TTEntryType::LowerBound
-                } else {
-                    TTEntryType::Exact
-                },
-                TranspositionTable::score_to_tt(eval, ply as i16),
-                tt.generation
-            );
-            tt.store(tte);
-            return eval;
+            if end != e {
+                // Treat skipped moves as failing low against the original alpha.
+                eval = max(eval, old_alpha);
+            }
+            Searcher::store_tt(tt, key, best_move, depth, eval, ply, old_alpha, old_beta);
+            eval
         }
         //iterative deepening:
-        let synced_pv_depth: usize = self.count_pv_moves(idx);
-        let mut completed_pv_len: usize = synced_pv_depth;
+        let mut pv_len: usize = self.count_pv_moves(idx);
         let use_quiescence = self.search_config.quiescence;
         let log_uci_diagnostics = self.search_config.log_uci_diagnostics;
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
-        for td in (synced_pv_depth + 1)..=target_depth {
+        for td in (search_data.completed_depth + 1)..=target_depth {
             let mut prev_pv = vec![NULL_MOVE; td];
-            prev_pv[..completed_pv_len]
-                .copy_from_slice(&search_data.pv[..completed_pv_len]);
+            let ordering_pv_len = pv_len.min(td);
+            prev_pv[..ordering_pv_len]
+                .copy_from_slice(&search_data.pv[..ordering_pv_len]);
             search_data.pv_ply_indices = get_triang_pv_ply_idx_table(td);
             let eval: i16 = inner(
                 td as i16,
@@ -548,19 +571,183 @@ impl Searcher {
                 break;
             }
 
-            completed_pv_len = search_data.pv[..td]
+            search_data.completed_depth = td;
+            pv_len = search_data.pv[..td]
                 .iter()
                 .position(|mov| *mov == NULL_MOVE)
                 .unwrap_or(td);
 
             if log_uci_diagnostics {
+                let (score_kind, score) = if eval.abs() >= MATE_BOUND {
+                    let mate_plies = MATE_EVAL - eval.abs();
+                    ("mate", ((mate_plies + 1) / 2) * eval.signum())
+                } else {
+                    ("cp", eval)
+                };
                 println!(
-                    "info depth {td} seldepth {} score cp {eval} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}",
-                    search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..completed_pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
+                    "info depth {td} seldepth {} score {score_kind} {score} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}",
+                    search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
                 );
             }
             search_data.reset_temp_performance_data();
         }
+    }
+
+    fn quiescence(
+        ply: usize,
+        mut alpha: i16,
+        mut beta: i16,
+        is_pv_node: bool,
+        pos: &mut Position,
+        evaluator: &Evaluator,
+        search_data: &mut SearchData,
+        move_gen: &MoveGen,
+        zobrist: &Zobrist,
+        control: &SearchControl<'_>,
+        tt: &mut TranspositionTable,
+    ) -> i16 {
+        if control.should_stop(search_data.positions_searched) {
+            return EVAL_QUIT;
+        }
+
+        search_data.positions_searched += 1;
+        search_data.sel_depth = max(search_data.sel_depth, ply);
+
+        if pos.board.has_insufficient_material() {
+            return 0;
+        }
+
+        let is_three_fold = search_data.in_three_fold(pos);
+        // A reduced search can enter with a full move list.
+        let (s, e) = pos.search_move_bounds();
+        let key = Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock);
+        let tte = Self::probe_tt(tt, key, &pos.move_arr[s..e], ply);
+        if let Some(tt_entry) = tte {
+            if !is_pv_node && !is_three_fold && pos.board.half_move_clock < 96 {
+                match tt_entry.bound_type() {
+                    TTEntryType::Exact => return tt_entry.score,
+                    TTEntryType::LowerBound => alpha = max(alpha, tt_entry.score),
+                    TTEntryType::UpperBound => beta = min(beta, tt_entry.score),
+                }
+                if alpha >= beta {
+                    return tt_entry.score;
+                }
+            }
+        }
+
+        let in_check = pos.board.nof_checkers > 0;
+        if s == e && in_check {
+            return -MATE_EVAL + ply as i16;
+        }
+        if is_three_fold || pos.board.is_fifty_move_draw() {
+            return 0;
+        }
+
+        let (old_alpha, old_beta) = (alpha, beta);
+        let mut eval = EVAL_INIT;
+        if !in_check {
+            eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase);
+            if s == e {
+                return eval;
+            }
+            if eval >= beta {
+                search_data.stand_pat_cutoffs += 1;
+                return eval;
+            }
+            alpha = max(alpha, eval);
+        }
+
+        let mut best_move = NULL_MOVE;
+        let mut primary_selection = tte.map_or(NULL_MOVE, |entry| entry.best_move);
+        let mut only_bad_captures_left = None;
+        for i in s..e {
+            let mov = Self::partial_selection_sort(
+                &mut pos.move_arr[i..e],
+                primary_selection,
+                NULL_MOVE,
+                &mut only_bad_captures_left,
+                move_gen,
+                search_data,
+                &pos.board,
+            );
+            primary_selection = NULL_MOVE;
+
+            pos.make_move(mov, true, false, true, move_gen, zobrist);
+            search_data.board_hash_history.push(pos.zhash);
+
+            let new_eval = -Self::quiescence(
+                ply + 1,
+                -beta,
+                -alpha,
+                is_pv_node,
+                pos,
+                evaluator,
+                search_data,
+                move_gen,
+                zobrist,
+                control,
+                tt,
+            );
+
+            search_data.board_hash_history.pop();
+            pos.unmake_move(mov, zobrist);
+
+            if new_eval.abs() == EVAL_QUIT {
+                return EVAL_QUIT;
+            }
+            if new_eval > eval {
+                eval = new_eval;
+                best_move = mov;
+            }
+            alpha = max(alpha, new_eval);
+            if alpha >= beta {
+                search_data.ab_cutoffs += 1;
+                break;
+            }
+        }
+        Self::store_tt(tt, key, best_move, 0, eval, ply, old_alpha, old_beta);
+        eval
+    }
+
+    #[inline]
+    fn probe_tt(tt: &TranspositionTable, key: u64, moves: &[u32], ply: usize) -> Option<TTEntry> {
+        tt.probe(key)
+            .filter(|entry| {
+                (entry.best_move != NULL_MOVE || entry.depth() == 0)
+                    && moves.contains(&entry.best_move)
+            })
+            .map(|entry| TTEntry {
+                score: TranspositionTable::score_from_tt(entry.score, ply as i16),
+                ..entry
+            })
+    }
+
+    #[inline]
+    fn store_tt(
+        tt: &mut TranspositionTable,
+        key: u64,
+        best_move: u32,
+        depth: u8,
+        eval: i16,
+        ply: usize,
+        old_alpha: i16,
+        old_beta: i16,
+    ) {
+        let bound = if eval <= old_alpha {
+            TTEntryType::UpperBound
+        } else if eval >= old_beta {
+            TTEntryType::LowerBound
+        } else {
+            TTEntryType::Exact
+        };
+        tt.store(TTEntry::new_packed(
+            key,
+            best_move,
+            depth,
+            bound,
+            TranspositionTable::score_to_tt(eval, ply as i16),
+            tt.generation,
+        ));
     }
 
     pub fn collect_best_move(&self) -> Option<u32> {

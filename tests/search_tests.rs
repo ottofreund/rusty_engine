@@ -6,11 +6,13 @@ use rusty_engine::{
     repr::_move::{self, NULL_MOVE},
     repr::position::Position,
     search::{
+        eval::MATE_EVAL,
         search_config::SearchMode,
         search_data::{get_triang_pv_ply_idx_table, TRIANG_PV_TABLE_SIZE},
         searcher::{Searcher, MAX_SEARCH_DEPTH},
+        tt::{TTEntry, TTEntryType, TranspositionTable},
     },
-    utils::fen_tool::DEFAULT_FEN,
+    utils::{fen_tool::DEFAULT_FEN, zobrist::Zobrist},
 };
 use std::sync::{
     atomic::{AtomicBool, Ordering::Relaxed},
@@ -19,6 +21,7 @@ use std::sync::{
 
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
 const QUIET_MATERIAL_DISADVANTAGE_FEN: &str = "6qk/8/8/8/8/8/8/K7 w - - 0 1";
+const FORCED_INSUFFICIENT_MATERIAL_CAPTURE_FEN: &str = "5b2/8/8/8/8/1k6/8/Kr6 w - - 0 1";
 const STOP_CHECK_INTERVAL_NODES: u64 = 8192;
 const CANCEL_TEST_DEPTH: usize = 9;
 
@@ -53,6 +56,81 @@ fn assert_legal_pv(engine: &TestEngine, start: &Position, pv: &[u32]) {
         );
         engine.make_search_move(&mut replay, *mov);
     }
+}
+
+#[test]
+fn depth_one_futility_searches_late_quiet_mate() {
+    let engine = TestEngine::new();
+    let start = engine.position("4r2k/p7/5KQ1/8/8/8/8/8 b - - 0 1");
+    let find_move = |pos: &Position, name| {
+        pos.legal_search_moves()
+            .iter()
+            .copied()
+            .find(|&mov| _move::to_string(mov, true) == name)
+            .unwrap()
+    };
+    let first_root_move = find_move(&start, "e8e7");
+    let second_root_move = find_move(&start, "e8b8");
+    let mut child = start.clone();
+    engine.make_search_move(&mut child, second_root_move);
+    let key = Zobrist::zkey50_adjusted(child.zhash, child.board.half_move_clock);
+    let first_reply = find_move(&child, "g6f7");
+    let quiet_sibling = find_move(&child, "g6f5");
+    let mate = find_move(&child, "g6g7");
+
+    for quiescence in [false, true] {
+        let mut searcher = Searcher::from(&start, MULTITHREADED);
+        searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+        searcher.search_config.quiescence = quiescence;
+        let data = &mut searcher.search_data[0];
+        data.completed_depth = 1;
+        data.pv[0] = first_root_move;
+        // Rook on e7 can be captured, setting alpha for the e8b8 null-window search.
+        for (side, mov, bonus) in [
+            (start.board.turn, second_root_move, 200),
+            (child.board.turn, quiet_sibling, 200),
+            (child.board.turn, mate, 100),
+        ] {
+            data.update_history_entry(
+                side,
+                _move::get_init(mov),
+                _move::get_target(mov),
+                bonus,
+            );
+        }
+        searcher.tt.store(TTEntry::new_packed(
+            key,
+            first_reply,
+            0,
+            TTEntryType::UpperBound,
+            0,
+            searcher.tt.generation,
+        ));
+
+        searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+        let entry = searcher.tt.probe(key).expect("missing non-PV child TT entry");
+        assert_eq!(entry.best_move, mate, "quiescence={quiescence}");
+        assert!(entry.bound_type() == TTEntryType::LowerBound);
+        assert_eq!(
+            TranspositionTable::score_from_tt(entry.score, 1),
+            MATE_EVAL - 2
+        );
+    }
+}
+
+#[test]
+fn depth_one_pv_futility_preserves_alpha_improvement() {
+    let engine = TestEngine::new();
+    let fen = "2bqk1n1/3nbp2/rp4pr/p1p1p2p/N3P3/2PPBN1P/PP3PP1/1R1K1B1R w - - 0 1";
+    let searcher = search_static_depth(&engine, fen, 4, true);
+
+    // After d3d4 g6g5 f1a6, c8a6 raises alpha despite later quiet moves being pruned.
+    let child = engine.position("2bqk1n1/3nbp2/Bp5r/p1p1p1pp/N2PP3/2P1BN1P/PP3PP1/1R1K3R b - - 0 1");
+    let key = Zobrist::zkey50_adjusted(child.zhash, child.board.half_move_clock);
+    let entry = searcher.tt.probe(key).expect("missing PV child TT entry");
+    assert!(entry.bound_type() == TTEntryType::Exact);
+    assert_eq!(TranspositionTable::score_from_tt(entry.score, 3), 581);
 }
 
 #[test]
@@ -96,6 +174,65 @@ fn static_depth_scores_quiet_horizon_with_and_without_quiescence() {
             "quiet losing horizon scored {root_score} with quiescence={quiescence}"
         );
     }
+}
+
+#[test]
+fn static_depth_scores_fifty_move_draw_at_quiet_horizon() {
+    let engine = TestEngine::new();
+    let fen = "7k/8/8/8/8/8/8/KR6 w - - 99 1";
+
+    for quiescence in [false, true] {
+        let searcher = search_static_depth(&engine, fen, 1, quiescence);
+        let root = &searcher.positions[0];
+        let key = Zobrist::zkey50_adjusted(root.zhash, root.board.half_move_clock);
+        let entry = searcher.tt.probe(key).expect("missing root TT entry");
+        assert_eq!(entry.score, 0, "quiescence={quiescence}");
+    }
+}
+
+#[test]
+fn forced_capture_ends_search_on_insufficient_material() {
+    let engine = TestEngine::new();
+    let fen = FORCED_INSUFFICIENT_MATERIAL_CAPTURE_FEN;
+    let pos = engine.position(fen);
+    let [capture] = pos.legal_search_moves() else {
+        panic!("expected one legal move");
+    };
+    assert!(_move::is_eating(*capture));
+
+    for depth in [1, 2] {
+        for quiescence in [false, true] {
+            let searcher = search_static_depth(&engine, fen, depth, quiescence);
+            let entry = searcher.tt.probe(pos.zhash).expect("missing root TT entry");
+            let context = format!("depth={depth}, quiescence={quiescence}");
+            assert_eq!(entry.score, 0, "{context}");
+            assert_eq!(root_pv(&searcher), [*capture], "{context}");
+            assert_eq!(
+                searcher.search_data[0].cumul_positions_searched,
+                2 * depth as u64,
+                "{context}"
+            );
+        }
+    }
+}
+
+#[test]
+fn insufficient_material_root_selects_a_legal_move_after_sync() {
+    let engine = TestEngine::new();
+    let fen = FORCED_INSUFFICIENT_MATERIAL_CAPTURE_FEN;
+    let mut pos = engine.position(fen);
+    let mut searcher = search_static_depth(&engine, fen, 3, true);
+    let capture = searcher.collect_best_move().expect("forced capture");
+    engine.make_search_move(&mut pos, capture);
+    searcher.sync_new_move(&pos, Some(capture));
+
+    searcher.search_config.search_mode = SearchMode::StaticDepth(2);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+    let best_move = searcher.collect_best_move().expect("drawn root has moves");
+    assert!(pos.legal_search_moves().contains(&best_move));
+    assert_eq!(root_pv(&searcher), [best_move]);
+    assert_eq!(searcher.tt.probe(pos.zhash).unwrap().score, 0);
 }
 
 #[test]
@@ -210,7 +347,17 @@ fn mate_in_one_terminates_static_root_pv() {
     assert_eq!(pv.len(), 1);
     assert_ne!(pv[0], seeded_non_mate);
     assert_eq!(searcher.search_data[0].pv[1], NULL_MOVE);
+    assert_eq!(searcher.search_data[0].completed_depth, 2);
     assert_legal_pv(&engine, &start, &pv);
+
+    let nodes = searcher.search_data[0].cumul_positions_searched;
+    for depth in [2, 1] {
+        searcher.search_config.search_mode = SearchMode::StaticDepth(depth);
+        searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+        assert_eq!(searcher.search_data[0].cumul_positions_searched, nodes);
+        assert_eq!(searcher.search_data[0].completed_depth, 2);
+        assert_eq!(root_pv(&searcher), pv);
+    }
 
     let mut result = start;
     result.make_move(
@@ -256,6 +403,7 @@ fn consecutive_static_search_syncs_exact_pv_tail() {
 
         assert_eq!(root_pv(&searcher), before[1..]);
         assert_eq!(searcher.collect_best_move(), before.get(1).copied());
+        assert_eq!(searcher.search_data[0].completed_depth, 2);
     }
 }
 
@@ -290,14 +438,11 @@ fn static_depth_observes_preset_kill_switch_at_poll_interval() {
     killed.search_config.log_uci_diagnostics = true;
     let kill_switch = Arc::new(AtomicBool::new(true));
 
-    killed.start_search(
-        &engine.move_gen,
-        &engine.zobrist,
-        Some(kill_switch.clone()),
-    );
+    killed.start_search(&engine.move_gen, &engine.zobrist, Some(kill_switch.clone()));
 
     let interrupted_depth = killed.search_data[0].pv_ply_indices[1];
     assert!((1..=CANCEL_TEST_DEPTH).contains(&interrupted_depth));
+    assert_eq!(killed.search_data[0].completed_depth, interrupted_depth - 1);
 
     if interrupted_depth == CANCEL_TEST_DEPTH {
         panic!("Search is too fast to test kill switch; need to increase CANCEL_TEST_DEPTH");
@@ -324,15 +469,179 @@ fn static_depth_observes_preset_kill_switch_at_poll_interval() {
     assert_eq!(killed_data.stand_pat_cutoffs, 0);
     assert_eq!(killed_data.sel_depth, 0);
     assert_eq!(killed_data.board_hash_history, vec![start.zhash]);
-    assert!(
-        killed.positions[0]
-            .board
-            .eq(&start.board, &engine.move_gen)
-    );
+    assert!(killed.positions[0].board.eq(&start.board, &engine.move_gen));
 
     let pv = root_pv(&killed);
     assert!(!pv.is_empty());
+    assert!(pv.len() > killed.search_data[0].completed_depth);
     assert_legal_pv(&engine, &start, &pv);
+
+    // Repeated cancellations may complete more work using the TT, but the
+    // interrupted iteration must always be retried before it counts as complete.
+    for _ in 0..2 {
+        let interrupted_depth = killed.search_data[0].pv_ply_indices[1];
+        let nodes = killed.search_data[0].cumul_positions_searched;
+        kill_switch.store(false, Relaxed);
+        killed.search_config.search_mode = SearchMode::StaticDepth(interrupted_depth);
+        killed.start_search(&engine.move_gen, &engine.zobrist, Some(kill_switch.clone()));
+        assert!(killed.search_data[0].cumul_positions_searched > nodes);
+        assert_eq!(killed.search_data[0].completed_depth, interrupted_depth);
+        assert_legal_pv(&engine, &start, &root_pv(&killed));
+
+        kill_switch.store(true, Relaxed);
+        killed.search_config.search_mode = SearchMode::StaticDepth(CANCEL_TEST_DEPTH);
+        killed.start_search(&engine.move_gen, &engine.zobrist, Some(kill_switch.clone()));
+        assert!(killed.search_data[0].completed_depth < CANCEL_TEST_DEPTH);
+        assert_eq!(
+            killed.search_data[0].completed_depth + 1,
+            killed.search_data[0].pv_ply_indices[1]
+        );
+        assert_legal_pv(&engine, &start, &root_pv(&killed));
+    }
+}
+
+#[test]
+fn abort_before_first_root_move_restores_prior_pv() {
+    let engine = TestEngine::new();
+    let mut searcher = search_static_depth(&engine, DEFAULT_FEN, 3, false);
+    let prior_pv = root_pv(&searcher);
+    let best_move = searcher.collect_best_move();
+    let ponder_move = searcher.collect_ponder_move();
+
+    // Put the next polling boundary at the first child, before a root move can
+    // finish. This exercises fallback without relying on machine speed.
+    searcher.search_data[0].positions_searched = STOP_CHECK_INTERVAL_NODES - 1;
+    searcher.search_config.search_mode = SearchMode::StaticDepth(4);
+    searcher.start_search(
+        &engine.move_gen,
+        &engine.zobrist,
+        Some(Arc::new(AtomicBool::new(true))),
+    );
+
+    assert_eq!(searcher.search_data[0].completed_depth, 3);
+    assert_eq!(searcher.search_data[0].pv_ply_indices[1], 4);
+    assert_eq!(root_pv(&searcher), prior_pv);
+    assert_eq!(searcher.collect_best_move(), best_move);
+    assert_eq!(searcher.collect_ponder_move(), ponder_move);
+
+    let mut pos = engine.position(DEFAULT_FEN);
+    engine.make_search_move(&mut pos, prior_pv[0]);
+    searcher.sync_new_move(&pos, Some(prior_pv[0]));
+    assert_eq!(root_pv(&searcher), prior_pv[1..]);
+    assert_eq!(searcher.search_data[0].completed_depth, 2);
+}
+
+#[test]
+fn sync_after_interruption_preserves_completed_work_and_retries_unfinished_depth() {
+    let engine = TestEngine::new();
+    let mut pos = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&pos, MULTITHREADED);
+    searcher.search_config.quiescence = false;
+    searcher.search_config.search_mode = SearchMode::StaticDepth(CANCEL_TEST_DEPTH);
+    searcher.start_search(
+        &engine.move_gen,
+        &engine.zobrist,
+        Some(Arc::new(AtomicBool::new(true))),
+    );
+    let pv = root_pv(&searcher);
+    let interrupted_depth = searcher.search_data[0].pv_ply_indices[1];
+    assert!(pv.len() > 2);
+    assert_eq!(
+        searcher.search_data[0].completed_depth,
+        interrupted_depth - 1
+    );
+
+    for synced_moves in 1..=2 {
+        let mov = pv[synced_moves - 1];
+        engine.make_search_move(&mut pos, mov);
+        searcher.sync_new_move(&pos, Some(mov));
+        assert_eq!(
+            searcher.search_data[0].completed_depth,
+            interrupted_depth - 1 - synced_moves
+        );
+        assert_eq!(root_pv(&searcher), pv[synced_moves..]);
+        assert_legal_pv(&engine, &pos, &root_pv(&searcher));
+    }
+
+    // Completed work remains reusable even though a deeper iteration was aborted.
+    let completed_depth = searcher.search_data[0].completed_depth;
+    let nodes = searcher.search_data[0].cumul_positions_searched;
+    searcher.search_config.search_mode = SearchMode::StaticDepth(completed_depth);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+    assert_eq!(searcher.search_data[0].cumul_positions_searched, nodes);
+    assert_eq!(searcher.search_data[0].completed_depth, completed_depth);
+
+    // The longer retained PV must not certify the unfinished depth after sync.
+    let target_depth = interrupted_depth - 2;
+    assert_eq!(root_pv(&searcher).len(), target_depth);
+    searcher.search_config.search_mode = SearchMode::StaticDepth(target_depth);
+    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+    assert!(searcher.search_data[0].cumul_positions_searched > nodes);
+    assert_eq!(searcher.search_data[0].completed_depth, target_depth);
+    assert_legal_pv(&engine, &pos, &root_pv(&searcher));
+
+    // Synchronization also preserves completion after a successful retry.
+    let best_move = searcher.collect_best_move().unwrap();
+    engine.make_search_move(&mut pos, best_move);
+    searcher.sync_new_move(&pos, Some(best_move));
+    assert_eq!(searcher.search_data[0].completed_depth, target_depth - 1);
+}
+
+#[test]
+fn divergent_sync_clears_completed_depth_and_pv() {
+    let engine = TestEngine::new();
+    let mut pos = engine.position(DEFAULT_FEN);
+    let mut searcher = search_static_depth(&engine, DEFAULT_FEN, 3, false);
+    let other_move = pos
+        .legal_search_moves()
+        .iter()
+        .copied()
+        .find(|mov| Some(*mov) != searcher.collect_best_move())
+        .unwrap();
+    engine.make_search_move(&mut pos, other_move);
+    searcher.sync_new_move(&pos, Some(other_move));
+
+    assert_eq!(searcher.search_data[0].completed_depth, 0);
+    assert!(root_pv(&searcher).is_empty());
+}
+
+#[test]
+fn import_and_reset_clear_completion_state() {
+    let engine = TestEngine::new();
+    let pos = engine.position(DEFAULT_FEN);
+    let mut searcher = Searcher::from(&pos, MULTITHREADED);
+    assert_eq!(searcher.search_data[0].completed_depth, 0);
+
+    for interrupted in [false, true] {
+        for import in [false, true] {
+            searcher.search_config.quiescence = false;
+            searcher.search_config.search_mode =
+                SearchMode::StaticDepth(if interrupted { CANCEL_TEST_DEPTH } else { 3 });
+            searcher.start_search(
+                &engine.move_gen,
+                &engine.zobrist,
+                Some(Arc::new(AtomicBool::new(interrupted))),
+            );
+            assert!(searcher.search_data[0].completed_depth > 0);
+            if import {
+                searcher.import_position(&pos, Some(vec![pos.zhash]));
+            } else {
+                searcher.reset();
+            }
+            assert_eq!(searcher.search_data[0].completed_depth, 0);
+            assert!(root_pv(&searcher).is_empty());
+
+            // A fresh search establishes reusable completed work.
+            searcher.search_config.search_mode = SearchMode::StaticDepth(3);
+            searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+            let best_move = searcher.collect_best_move().unwrap();
+            let mut next = pos.clone();
+            engine.make_search_move(&mut next, best_move);
+            searcher.sync_new_move(&next, Some(best_move));
+            assert_eq!(searcher.search_data[0].completed_depth, 2);
+            searcher.import_position(&pos, None);
+        }
+    }
 }
 
 #[test]
@@ -351,11 +660,7 @@ fn static_depth_inactive_kill_switch_matches_no_switch() {
     let kill_switch = Arc::new(AtomicBool::new(false));
 
     without_switch.start_search(&engine.move_gen, &engine.zobrist, None);
-    with_switch.start_search(
-        &engine.move_gen,
-        &engine.zobrist,
-        Some(kill_switch.clone()),
-    );
+    with_switch.start_search(&engine.move_gen, &engine.zobrist, Some(kill_switch.clone()));
 
     let without_data = &without_switch.search_data[0];
     let with_data = &with_switch.search_data[0];
@@ -393,11 +698,15 @@ fn shallower_static_depth_reuses_deeper_completed_pv() {
     searcher.search_config.search_mode = SearchMode::StaticDepth(3);
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
     let deeper = root_pv(&searcher);
+    let nodes = searcher.search_data[0].cumul_positions_searched;
 
-    searcher.search_config.search_mode = SearchMode::StaticDepth(2);
-    searcher.start_search(&engine.move_gen, &engine.zobrist, None);
-
-    assert_eq!(root_pv(&searcher), deeper);
+    for depth in [3, 2] {
+        searcher.search_config.search_mode = SearchMode::StaticDepth(depth);
+        searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+        assert_eq!(root_pv(&searcher), deeper);
+        assert_eq!(searcher.search_data[0].completed_depth, 3);
+        assert_eq!(searcher.search_data[0].cumul_positions_searched, nodes);
+    }
 }
 
 #[test]
