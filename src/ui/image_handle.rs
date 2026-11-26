@@ -1,27 +1,31 @@
 use iced::widget::image::Handle;
 
-macro_rules! embedded_handle {
-    ($path:expr) => {
-        Handle::from_bytes(include_bytes!($path).as_slice())
-    };
+macro_rules! piece_handle {
+    ($path:expr) => {{
+        // RGBA handles are ready for the first board layout.
+        let sprite =
+            image::load_from_memory_with_format(include_bytes!($path), image::ImageFormat::Png)
+                .expect(concat!("invalid embedded piece sprite: ", $path))
+                .into_rgba8();
+        Handle::from_rgba(sprite.width(), sprite.height(), sprite.into_raw())
+    }};
 }
 
 macro_rules! make_handles {
     ($w:literal, $b:literal) => {
         [
-            embedded_handle!(concat!($w, "plt.png")),
-            embedded_handle!(concat!($w, "nlt.png")),
-            embedded_handle!(concat!($w, "blt.png")),
-            embedded_handle!(concat!($w, "rlt.png")),
-            embedded_handle!(concat!($w, "qlt.png")),
-            embedded_handle!(concat!($w, "klt.png")),
-
-            embedded_handle!(concat!($b, "pdt.png")),
-            embedded_handle!(concat!($b, "ndt.png")),
-            embedded_handle!(concat!($b, "bdt.png")),
-            embedded_handle!(concat!($b, "rdt.png")),
-            embedded_handle!(concat!($b, "qdt.png")),
-            embedded_handle!(concat!($b, "kdt.png")),
+            piece_handle!(concat!($w, "plt.png")),
+            piece_handle!(concat!($w, "nlt.png")),
+            piece_handle!(concat!($w, "blt.png")),
+            piece_handle!(concat!($w, "rlt.png")),
+            piece_handle!(concat!($w, "qlt.png")),
+            piece_handle!(concat!($w, "klt.png")),
+            piece_handle!(concat!($b, "pdt.png")),
+            piece_handle!(concat!($b, "ndt.png")),
+            piece_handle!(concat!($b, "bdt.png")),
+            piece_handle!(concat!($b, "rdt.png")),
+            piece_handle!(concat!($b, "qdt.png")),
+            piece_handle!(concat!($b, "kdt.png")),
         ]
     };
 }
@@ -38,8 +42,10 @@ impl Default for ImageHandle {
             "../../assets/default_piece_set/white_pieces/",
             "../../assets/default_piece_set/black_pieces/"
         );
-        let target_ball_handle: Handle = embedded_handle!("../../assets/target_ball.png");
-        let target_circle_handle: Handle = embedded_handle!("../../assets/target_circle.png");
+        let target_ball_handle: Handle =
+            Handle::from_bytes(include_bytes!("../../assets/target_ball.png").as_slice());
+        let target_circle_handle: Handle =
+            Handle::from_bytes(include_bytes!("../../assets/target_circle.png").as_slice());
 
         return Self {
             img_handles: handles,

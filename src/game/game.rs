@@ -4,23 +4,39 @@ use crate::{
     search::searcher::Searcher,
     utils::zobrist::Zobrist,
 };
-use std::fmt::Error;
+use std::{fmt::Error, sync::Arc};
+
+/// Keeps an engine in step with the played game, including repetition history.
+pub trait GameSearcher {
+    fn set_position(&mut self, position: &Position);
+    fn move_played(&mut self, position: &Position, mov: u32);
+}
+
+impl GameSearcher for Searcher {
+    fn set_position(&mut self, position: &Position) {
+        self.import_position(position, None);
+    }
+
+    fn move_played(&mut self, position: &Position, mov: u32) {
+        self.sync_new_move(position, Some(mov));
+    }
+}
 
 ///Game object that is also compatible for UI on-board-games
-pub struct Game {
+pub struct Game<S = Searcher> {
     pub position: Position,
-    pub searcher: Searcher,
-    pub move_gen: MoveGen,
-    pub zobrist: Zobrist,
+    pub searcher: S,
+    pub move_gen: Arc<MoveGen>,
+    pub zobrist: Arc<Zobrist>,
     pub game_state: GameState,
     pub board_history: Vec<Board>,
     repetition_relevant_history_idx: usize, // board_history[this..] are relevant for checking repetition
 }
 
-impl Game {
+impl<S: GameSearcher> Game<S> {
     ///also imports to searcher to stay in sync
     pub fn import_position(&mut self, position: Position) {
-        self.searcher.import_position(&position, None);
+        self.searcher.set_position(&position);
         self.position = position;
         self.board_history.clear();
         self.board_history.push(self.position.board.clone());
@@ -41,7 +57,7 @@ impl Game {
                 //println!("Successfully moved: {}", _move::to_string(m, true));
                 self.position
                     .make_move(m, false, false, false, &self.move_gen, &self.zobrist);
-                self.searcher.sync_new_move(&self.position, Some(m));
+                self.searcher.move_played(&self.position, m);
                 if _move::is_unrepeatable(m) {
                     self.repetition_relevant_history_idx = self.board_history.len();
                 }
@@ -49,17 +65,6 @@ impl Game {
                 self.game_state = self.current_game_state();
                 println!("Game state: {}", self.game_state.to_string());
                 return Ok(m);
-            }
-            None => return Err(Error::default()),
-        }
-    }
-
-    pub fn play_cpu_move(&mut self) -> Result<u32, Error> {
-        self.searcher.start_search(&self.move_gen, &self.zobrist, None);
-        let mov: Option<u32> = self.searcher.collect_best_move();
-        match mov {
-            Some(m) => {
-                return self.try_make_move(_move::get_init(m), _move::get_target(m), _move::lift_promotion_piece(m));
             }
             None => return Err(Error::default()),
         }
@@ -121,12 +126,12 @@ impl Game {
     } */
 }
 
-impl Default for Game {
-    fn default() -> Self {
-        let move_gen: MoveGen = MoveGen::init();
-        let zobrist: Zobrist = Zobrist::default();
+impl<S> Game<S> {
+    pub(crate) fn with_searcher(create: impl FnOnce(&Position, Arc<MoveGen>, Arc<Zobrist>) -> S) -> Self {
+        let move_gen = Arc::new(MoveGen::init());
+        let zobrist = Arc::new(Zobrist::default());
         let position: Position = Position::default(&move_gen, &zobrist);
-        let searcher: Searcher = Searcher::from(&position, false);
+        let searcher = create(&position, move_gen.clone(), zobrist.clone());
         let board_history: Vec<Board> = vec![position.board.clone()];
 
         return Self {
@@ -138,5 +143,24 @@ impl Default for Game {
             board_history,
             repetition_relevant_history_idx: 0,
         };
+    }
+}
+
+impl Game {
+    pub fn play_cpu_move(&mut self) -> Result<u32, Error> {
+        self.searcher.start_search(&self.move_gen, &self.zobrist, None);
+        let mov: Option<u32> = self.searcher.collect_best_move();
+        match mov {
+            Some(m) => {
+                return self.try_make_move(_move::get_init(m), _move::get_target(m), _move::lift_promotion_piece(m));
+            }
+            None => return Err(Error::default()),
+        }
+    }
+}
+
+impl Default for Game {
+    fn default() -> Self {
+        Self::with_searcher(|pos, _, _| Searcher::from(pos, false))
     }
 }

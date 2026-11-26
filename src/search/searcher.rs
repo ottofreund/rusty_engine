@@ -162,7 +162,8 @@ impl Searcher {
         };
     }
 
-    pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<Arc<AtomicBool>>) {
+    /// Returns the root score from the last iteration completed by this search.
+    pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<Arc<AtomicBool>>) -> Option<i16> {
         self.tt.generation = self.tt.generation.wrapping_add(1);
         if self.multithreaded {
             panic!("multithreaded search");
@@ -171,11 +172,11 @@ impl Searcher {
                 self.start_search_node(i, move_gen, zobrist, kill_switch.clone());
             } */
         } else {
-            self.start_search_node(0, move_gen, zobrist, kill_switch.as_deref());
+            self.start_search_node(0, move_gen, zobrist, kill_switch.as_deref())
         }
     }
 
-    fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<&AtomicBool>) {
+    fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<&AtomicBool>) -> Option<i16> {
         self.search_data[idx].age_history();
         let (target_depth, target_time) = match self.search_config.search_mode {
             SearchMode::StaticDepth(d) => {
@@ -194,7 +195,7 @@ impl Searcher {
             move_gen,
             zobrist,
             kill_switch,
-        );
+        )
     }
  
     ///alpha-beta pruned negamax algorithm with iterative deepening
@@ -206,7 +207,7 @@ impl Searcher {
         move_gen: &MoveGen,
         zobrist: &Zobrist,
         kill_switch: Option<&AtomicBool>,
-    ) {
+    ) -> Option<i16> {
         let control = SearchControl::new(target_time, kill_switch);
 
         fn inner(
@@ -537,6 +538,7 @@ impl Searcher {
         let log_uci_diagnostics = self.search_config.log_uci_diagnostics;
         let pos: &mut Position = &mut self.positions[idx];
         let search_data: &mut SearchData = &mut self.search_data[idx];
+        let mut completed_score = None;
         for td in (search_data.completed_depth + 1)..=target_depth {
             let mut prev_pv = vec![NULL_MOVE; td];
             let ordering_pv_len = pv_len.min(td);
@@ -571,6 +573,7 @@ impl Searcher {
                 break;
             }
 
+            completed_score = Some(eval);
             search_data.completed_depth = td;
             pv_len = search_data.pv[..td]
                 .iter()
@@ -591,6 +594,7 @@ impl Searcher {
             }
             search_data.reset_temp_performance_data();
         }
+        completed_score
     }
 
     fn quiescence(
