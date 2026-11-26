@@ -230,7 +230,7 @@ impl Searcher {
         ) -> i16 {
             if d <= 0 && use_quiescence {
                 return Searcher::quiescence(
-                    ply, alpha, beta, is_pv_node, pos, evaluator, search_data, move_gen, zobrist,
+                    ply, alpha, beta, is_pv_node, None, pos, evaluator, search_data, move_gen, zobrist,
                     control, tt,
                 );
             }
@@ -291,15 +291,41 @@ impl Searcher {
                 }
             }
 
-            if !is_pv_node
+            let in_check = pos.board.nof_checkers != 0;
+            let razor_allowed = use_quiescence && ply > 0 && !in_check && alpha < MATE_BOUND;
+            let null_move_allowed = !is_pv_node
                 && d > 1 + NULL_MOVE_REDUCTION
-                && pos.board.nof_checkers == 0
+                && !in_check
                 && pos.last_target != NULL_MOVE
                 && beta.abs() < MATE_BOUND
                 && pos.board.half_move_clock < 96
-                && pos.board.has_non_pawn_material()
-                && evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase) >= beta
-            {
+                && pos.board.has_non_pawn_material();
+            let can_prune_quiets = ply > 0 && !in_check && alpha >= 0 && beta < MATE_BOUND;
+            let static_eval = if razor_allowed || null_move_allowed || can_prune_quiets {
+                evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
+            } else {
+                0
+            };
+
+            if razor_allowed {
+                let depth = i32::from(d);
+                let margin = 245 + 140 * depth * depth;
+                if i32::from(static_eval) < i32::from(alpha) - margin {
+                    let value = Searcher::quiescence(
+                        ply, alpha - 1, alpha, false, Some(static_eval), pos, evaluator,
+                        search_data, move_gen, zobrist, control, tt,
+                    );
+                    if value == EVAL_QUIT || (value < alpha && value.abs() < MATE_BOUND) {
+                        return value;
+                    }
+                    // clear move flags if didn't razor
+                    for mov in &mut pos.move_arr[s..e] {
+                        *mov = with_see_cleared(*mov);
+                    }
+                }
+            }
+
+            if null_move_allowed && static_eval >= beta {
                 pos.make_null_move(move_gen, zobrist);
                 // A repetition must stay within the real moves after the pass.
                 let repetition_start = search_data.repetition_start;
@@ -335,12 +361,8 @@ impl Searcher {
                 }
             }
 
-            let futility_pruning = ply > 0
-                && pos.board.nof_checkers == 0
-                && alpha >= 0
-                && beta < MATE_BOUND
-                && evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
-                    <= alpha - (FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * (d - 1));
+            let futility_pruning = can_prune_quiets
+                && static_eval <= alpha - (FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * (d - 1));
             let mut check_info = None;
             let (old_alpha, old_beta) = (alpha, beta);
             let root_relative_d = target_d - ply.min(target_d); // LMR can change d
@@ -598,6 +620,7 @@ impl Searcher {
         mut alpha: i16,
         mut beta: i16,
         is_pv_node: bool,
+        razor_eval: Option<i16>,
         pos: &mut Position,
         evaluator: &Evaluator,
         search_data: &mut SearchData,
@@ -646,7 +669,9 @@ impl Searcher {
         let (old_alpha, old_beta) = (alpha, beta);
         let mut eval = EVAL_INIT;
         if !in_check {
-            eval = evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase);
+            eval = razor_eval.unwrap_or_else(|| {
+                evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
+            });
             if s == e {
                 return eval;
             }
@@ -659,6 +684,26 @@ impl Searcher {
 
         let mut best_move = NULL_MOVE;
         let mut primary_selection = tte.map_or(NULL_MOVE, |entry| entry.best_move);
+        // Razoring starts with a full move list and keeps its bounds for the main search.
+        let e = if razor_eval.is_some() {
+            let mut noisy_end = s;
+            for i in s..e {
+                let mov = pos.move_arr[i];
+                if is_eating(mov) || is_promotion(mov) {
+                    pos.move_arr.swap(i, noisy_end);
+                    noisy_end += 1;
+                }
+            }
+            if !is_eating(primary_selection) && !is_promotion(primary_selection) {
+                primary_selection = NULL_MOVE;
+            }
+            if noisy_end == s {
+                return eval;
+            }
+            noisy_end
+        } else {
+            e
+        };
         let mut only_bad_captures_left = None;
         for i in s..e {
             let mov = Self::partial_selection_sort(
@@ -680,6 +725,7 @@ impl Searcher {
                 -beta,
                 -alpha,
                 is_pv_node,
+                None,
                 pos,
                 evaluator,
                 search_data,
