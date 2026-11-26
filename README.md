@@ -29,6 +29,10 @@ principal-variation search, and a UCI command-line interface.
   generation when the side to move is in check
 - Logarithmic late-move reductions (LMR), with a full-depth re-search when a
   reduced move improves alpha
+- Null-move pruning at eligible non-PV nodes, using a fixed three-ply reduction
+  to test whether passing the turn still reaches beta
+- Depth-scaled futility pruning for later quiet moves when static evaluation is
+  below alpha by at least a margin that grows with remaining depth
 
 ### Search enhancements and move ordering
 
@@ -133,7 +137,6 @@ are printed afterward.
 
 ## Remaining Work
 
-Planned work includes multithreaded search; search extensions; futility and
-reverse-futility pruning; incremental evaluation and richer positional terms;
-large-page allocation for the transposition table; draw detection for
-insufficient material; and full UCI pondering with `go ponder` and `ponderhit`.
+Planned work includes multithreaded search, search extensions, reverse-futility
+pruning, incremental evaluation and richer positional terms, large-page
+allocation for the transposition table, and full UCI pondering with `go ponder` and `ponderhit`.
