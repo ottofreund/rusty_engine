@@ -3,6 +3,7 @@ mod common;
 use common::TestEngine;
 use rusty_engine::repr::move_gen::*;
 use rusty_engine::repr::*;
+use rusty_engine::utils::fen_tool::{board_to_fen, DEFAULT_FEN};
 
 fn generate_legal(engine: &TestEngine, fen: &str, noisy_only: bool) -> Vec<u32> {
     let board = engine.board(fen);
@@ -35,6 +36,107 @@ fn sorted_encoded(moves: &[u32]) -> Vec<u32> {
     let mut moves = moves.to_vec();
     moves.sort_unstable();
     moves
+}
+
+fn compare_gives_check(
+    engine: &TestEngine,
+    pos: &mut position::Position,
+    depth: usize,
+    expected: &[(&str, u32)],
+) {
+    let info = engine.move_gen.check_info(&pos.board);
+    let mut matched = 0;
+    let (start, end) = pos.search_move_bounds();
+    for i in start..end {
+        let mov = pos.move_arr[i];
+        let gives_check = engine.move_gen.gives_check(&pos.board, &info, mov);
+        pos.make_move(mov, true, true, false, &engine.move_gen, &engine.zobrist);
+        let checkers = pos.board.nof_checkers;
+        assert_eq!(
+            gives_check,
+            checkers > 0,
+            "{} leaves {}",
+            _move::to_string(mov, true),
+            board_to_fen(&pos.board),
+        );
+
+        if !expected.is_empty() {
+            let uci = _move::to_string(mov, true);
+            if let Some(&(_, count)) = expected.iter().find(|&&(name, _)| name == uci) {
+                assert_eq!(checkers, count, "{uci} leaves {}", board_to_fen(&pos.board));
+                matched += 1;
+            }
+        }
+        if depth > 1 {
+            compare_gives_check(engine, pos, depth - 1, &[]);
+        }
+        engine.unmake_move(pos, mov);
+    }
+    assert_eq!(
+        matched,
+        expected.len(),
+        "missing expected moves in {}",
+        board_to_fen(&pos.board)
+    );
+}
+
+#[test]
+fn gives_check_handles_direct_discovered_and_special_moves() {
+    let engine = TestEngine::new();
+    let cases: &[(&str, &[(&str, u32)])] = &[
+        (
+            "8/8/8/5k2/8/8/4P3/K7 w - - 0 1",
+            &[("e2e4", 1), ("e2e3", 0)],
+        ),
+        ("k7/8/8/4p3/8/5K2/8/8 b - - 0 1", &[("e5e4", 1)]),
+        ("5k2/8/6P1/8/8/8/8/K7 w - - 0 1", &[("g6g7", 1)]),
+        ("7k/8/8/8/8/6p1/8/5K2 b - - 0 1", &[("g3g2", 1)]),
+        (
+            "4k3/8/8/8/4N3/8/8/K3R3 w - - 0 1",
+            &[("e4c3", 1), ("e4f6", 2)],
+        ),
+        ("8/1b6/8/3r4/8/8/6K1/k7 b - - 0 1", &[("d5d4", 1)]),
+        ("4k3/8/8/8/8/4P3/8/K3R3 w - - 0 1", &[("e3e4", 0)]),
+        (
+            "4k3/8/8/8/8/4K3/8/4R3 w - - 0 1",
+            &[("e3d3", 1), ("e3e4", 0)],
+        ),
+        (
+            "4k3/6P1/8/8/8/8/8/K7 w - - 0 1",
+            &[("g7g8q", 1), ("g7g8r", 1), ("g7g8b", 0), ("g7g8n", 0)],
+        ),
+        (
+            "k7/8/8/8/8/8/6p1/4K2R b - - 0 1",
+            &[("g2h1q", 1), ("g2h1r", 1), ("g2h1b", 0), ("g2h1n", 0)],
+        ),
+        (
+            "8/4k1P1/8/8/8/8/8/K7 w - - 0 1",
+            &[("g7g8n", 1), ("g7g8q", 0)],
+        ),
+        ("3B4/2P5/8/k7/8/8/8/7K w - - 0 1", &[("c7c8n", 1)]),
+        (
+            "5k2/8/8/8/8/8/8/R3K2R w KQ - 0 1",
+            &[("e1g1", 1), ("e1c1", 0)],
+        ),
+        (
+            "r3k2r/8/8/8/8/8/8/3K4 b kq - 0 1",
+            &[("e8c8", 1), ("e8g8", 0)],
+        ),
+        ("8/8/8/RPp4k/8/8/8/K7 w - c6 0 1", &[("b5c6", 1)]),
+        ("7k/8/8/4b3/3Pp3/2K5/8/8 b - d3 0 1", &[("e4d3", 1)]),
+        ("8/4k3/8/5pP1/8/8/8/K7 w - f6 0 1", &[("g5f6", 1)]),
+        ("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", &[("e5d6", 0)]),
+    ];
+
+    for &(fen, expected) in cases {
+        compare_gives_check(&engine, &mut engine.position(fen), 1, expected);
+    }
+}
+
+#[test]
+fn gives_check_matches_make_move_in_start_position_tree() {
+    let engine = TestEngine::new();
+    compare_gives_check(&engine, &mut engine.position(DEFAULT_FEN), 3, &[]);
 }
 
 #[test]
