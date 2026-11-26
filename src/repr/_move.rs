@@ -265,6 +265,10 @@ pub fn with_see_cleared(mov: u32) -> u32 {
     return mov & 0xFFF3FFFF; //clear bits 18 and 19
 }
 
+#[inline]
+pub fn move_eq(a: u32, b: u32) -> bool {
+    with_see_cleared(a ^ b) == 0
+}
 
 #[inline]
 pub fn promotion_matches(mov: u32, promotion: Option<u32>) -> bool {
