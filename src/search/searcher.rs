@@ -15,6 +15,8 @@ const ALPHA_INIT: i16 = -i16::MAX;
 const BETA_INIT: i16 = i16::MAX;
 const EVAL_INIT: i16 = -i16::MAX;
 const EVAL_QUIT: i16 = 31111;
+const FUTILITY_BASE_MARGIN: i16 = 60;
+const FUTILITY_MARGIN_PER_DEPTH: i16 = 40;
 
 const PROMOTION_SCORE: i32 = 1_000;
 const EATING_MULTIPLIER: i32 = 7;
@@ -288,6 +290,13 @@ impl Searcher {
                 }
             }
 
+            let futility_pruning = ply > 0
+                && pos.board.nof_checkers == 0
+                && alpha >= 0
+                && beta < MATE_BOUND
+                && evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
+                    <= alpha - (FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * (d - 1));
+            let mut check_info = None;
             let (old_alpha, old_beta) = (alpha, beta);
             let root_relative_d = target_d - ply.min(target_d); // LMR can change d
             let mut eval = EVAL_INIT;
@@ -306,9 +315,29 @@ impl Searcher {
                 secondary_selection = NULL_MOVE;
             }
 
-            for i in s..e {
+            let mut i = s;
+            let mut end = e;
+            while i < end {
                 let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..e], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+                    Searcher::partial_selection_sort(&mut pos.move_arr[i..end], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
+
+                // EVAL_INIT also keeps the first move in the search.
+                if futility_pruning
+                    && eval > -MATE_BOUND
+                    && mov != primary_selection
+                    && mov != secondary_selection
+                    && !is_eating(mov)
+                    && !is_promotion(mov)
+                    && !is_castle(mov)
+                {
+                    let info = check_info.get_or_insert_with(|| move_gen.check_info(&pos.board));
+                    if !move_gen.gives_check(&pos.board, info, mov) {
+                        // Keep the searched prefix intact for history updates.
+                        end -= 1;
+                        pos.move_arr.swap(i, end);
+                        continue;
+                    }
+                }
 
                 if mov == primary_selection {
                     primary_selection = NULL_MOVE;
@@ -448,6 +477,11 @@ impl Searcher {
                     );
                     break;
                 }
+                i += 1;
+            }
+            if end != e {
+                // Treat skipped moves as failing low against the original alpha.
+                eval = max(eval, old_alpha);
             }
             Searcher::store_tt(tt, key, best_move, depth, eval, ply, old_alpha, old_beta);
             eval
