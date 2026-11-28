@@ -9,12 +9,10 @@ fn startpos_command(moves: &[&str]) -> PositionCommand {
 
 fn assert_same_position(actual: &CpuGame, expected: &CpuGame) {
     assert_eq!(actual.position.zhash, expected.position.zhash);
-    assert!(
-        actual
-            .position
-            .board
-            .eq(&expected.position.board, &actual.move_gen)
-    );
+    assert!(actual
+        .position
+        .board
+        .eq(&expected.position.board, &actual.move_gen));
 }
 
 #[test]
@@ -29,8 +27,7 @@ fn optimally_syncs_every_appended_move() {
         PositionUpdateMethod::Synced
     );
     assert_eq!(
-        game.searcher.search_data[0].history_table[0],
-        HISTORY_MARKER,
+        game.searcher.search_data[0].history_table[0], HISTORY_MARKER,
         "incremental sync should preserve search history"
     );
 
@@ -40,14 +37,16 @@ fn optimally_syncs_every_appended_move() {
         PositionUpdateMethod::Synced
     );
     assert_eq!(
-        game.searcher.search_data[0].history_table[0],
-        HISTORY_MARKER,
+        game.searcher.search_data[0].history_table[0], HISTORY_MARKER,
         "two-ply incremental sync should preserve search history"
     );
 
     let mut imported = CpuGame::default();
     imported
-        .import_position(after_three_plies.fen.as_str(), after_three_plies.moves.clone())
+        .import_position(
+            after_three_plies.fen.as_str(),
+            after_three_plies.moves.clone(),
+        )
         .unwrap();
     assert_same_position(&game, &imported);
 }

@@ -1,54 +1,68 @@
-use std::{cmp::{max, min}, sync::{Arc, atomic::{AtomicBool, Ordering::Relaxed}}, time::Instant};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering::Relaxed},
+        Arc, OnceLock,
+    },
+    time::{Duration, Instant},
+};
 
 use crate::{
     repr::{
-        _move::{self, *}, board::Board, move_gen::MoveGen, position::Position,
-    }, search::{
-        eval::{Evaluator, MATE_BOUND, MATE_EVAL, PIECE_MATERIAL_VALUE}, search_config::*, search_data::{SearchData, get_triang_pv_ply_idx_table}, tt::{TTEntry, TTEntryType, TranspositionTable},
-    }, utils::zobrist::Zobrist,
+        _move::{self, *},
+        move_gen::MoveGen,
+        position::Position,
+        types::{WHITE, W_PAWN},
+    },
+    search::{
+        eval::{Evaluator, MATE_BOUND, MATE_EVAL, PIECE_MATERIAL_VALUE},
+        move_picker::MovePicker,
+        search_config::*,
+        search_data::{get_triang_pv_ply_idx_table, SearchData},
+        tt::{TTEntry, TTEntryType, TranspositionTable},
+    },
+    utils::zobrist::Zobrist,
 };
 
 pub const MAX_SEARCH_DEPTH: usize = 50;
+pub(super) const MAX_PLY: usize = 100;
 const THREAD_COUNT: usize = 4;
-const STOP_CHECK_INTERVAL: u64 = 8192;
-const ALPHA_INIT: i16 = -i16::MAX;
-const BETA_INIT: i16 = i16::MAX;
-const EVAL_INIT: i16 = -i16::MAX;
+const STOP_CHECK_INTERVAL: u64 = 2048;
+const TIMED_STOP_CHECK_INTERVAL: u64 = 256;
+const INFINITY: i16 = MATE_EVAL + 1;
 const EVAL_QUIT: i16 = 31111;
-const NULL_MOVE_REDUCTION: i16 = 3;
-const FUTILITY_BASE_MARGIN: i16 = 60;
-const FUTILITY_MARGIN_PER_DEPTH: i16 = 40;
-
-const PROMOTION_SCORE: i32 = 1_000;
-const EATING_MULTIPLIER: i32 = 7;
-const NON_CAPTURE_BONUS: i32 = 10_000;
-const GOOD_CAPTURE_BONUS: i32 = 100_000;
+const ASPIRATION_DEPTH: usize = 5;
+const ASPIRATION_MARGIN: i16 = 32;
 
 struct SearchControl<'a> {
-    time_limit: Option<(Instant, u64)>,
+    started: Instant,
+    hard_limit: Option<Duration>,
     kill_switch: Option<&'a AtomicBool>,
+    ponder_start: Option<&'a OnceLock<Instant>>,
 }
 
-impl<'a> SearchControl<'a> {
-    fn new(target_time: Option<u64>, kill_switch: Option<&'a AtomicBool>) -> Self {
-        Self {
-            time_limit: target_time.map(|target_time| (Instant::now(), target_time)),
-            kill_switch,
+impl SearchControl<'_> {
+    fn elapsed(&self) -> Option<Duration> {
+        match self.ponder_start {
+            Some(ponder) => ponder.get().map(Instant::elapsed),
+            None => Some(self.started.elapsed()),
         }
     }
 
-    fn should_stop(&self, positions_searched: u64) -> bool {
-        positions_searched != 0
-            && positions_searched % STOP_CHECK_INTERVAL == 0
-            && (self
-                .time_limit
-                .as_ref()
-                .is_some_and(|(start, target_time)| {
-                    start.elapsed().as_millis() as u64 > *target_time
-                })
-                || self
-                    .kill_switch
-                    .is_some_and(|kill_switch| kill_switch.load(Relaxed)))
+    fn deadline_reached(&self) -> bool {
+        self.hard_limit
+            .is_some_and(|limit| self.elapsed().is_some_and(|elapsed| elapsed >= limit))
+    }
+
+    fn should_stop(&self, nodes: u64) -> bool {
+        let interval = if self.hard_limit.is_some() {
+            TIMED_STOP_CHECK_INTERVAL
+        } else {
+            STOP_CHECK_INTERVAL
+        };
+        nodes != 0
+            && nodes & (interval - 1) == 0
+            && (self.deadline_reached()
+                || self.kill_switch.is_some_and(|switch| switch.load(Relaxed)))
     }
 }
 
@@ -65,7 +79,6 @@ pub struct Searcher {
 //minimax with alpha beta pruning, ran by iterative deepening
 //search heuristics in ordering of moves
 impl Searcher {
-
     /// Between games reset
     pub fn reset(&mut self) {
         self.tt.clear();
@@ -97,7 +110,7 @@ impl Searcher {
                 self.search_data[0] = SearchData::new(pos);
             }
         }
-        
+
         self.last_sync_deviates_from_pv = true;
     }
 
@@ -120,9 +133,7 @@ impl Searcher {
             if mov.is_some() && _move::is_unrepeatable(mov.unwrap()) {
                 self.search_data[i].board_hash_history.clear();
             }
-            self.search_data[i]
-                .board_hash_history
-                .push(new_pos.zhash);
+            self.search_data[i].board_hash_history.push(new_pos.zhash);
 
             if self.last_sync_deviates_from_pv || self.search_data[i].pv_ply_indices.len() < 2 {
                 self.search_data[i].pv.fill(NULL_MOVE);
@@ -162,7 +173,12 @@ impl Searcher {
         };
     }
 
-    pub fn start_search(&mut self, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<Arc<AtomicBool>>) {
+    pub fn start_search(
+        &mut self,
+        move_gen: &MoveGen,
+        zobrist: &Zobrist,
+        kill_switch: Option<Arc<AtomicBool>>,
+    ) {
         self.tt.generation = self.tt.generation.wrapping_add(1);
         if self.multithreaded {
             panic!("multithreaded search");
@@ -175,627 +191,158 @@ impl Searcher {
         }
     }
 
-    fn start_search_node(&mut self, idx: usize, move_gen: &MoveGen, zobrist: &Zobrist, kill_switch: Option<&AtomicBool>) {
-        self.search_data[idx].age_history();
-        let (target_depth, target_time) = match self.search_config.search_mode {
-            SearchMode::StaticDepth(d) => {
-                assert!(
-                    d <= MAX_SEARCH_DEPTH,
-                    "static search depth {d} exceeds MAX_SEARCH_DEPTH {MAX_SEARCH_DEPTH}"
-                );
-                (d, None)
-            }
-            SearchMode::StaticTime(t) => (MAX_SEARCH_DEPTH, Some(t)),
-        };
-        self.search(
-            target_depth,
-            target_time,
-            idx,
-            move_gen,
-            zobrist,
-            kill_switch,
-        );
-    }
- 
-    ///alpha-beta pruned negamax algorithm with iterative deepening
-    fn search(
+    fn start_search_node(
         &mut self,
-        target_depth: usize,
-        target_time: Option<u64>, //milliseconds
         idx: usize,
         move_gen: &MoveGen,
         zobrist: &Zobrist,
         kill_switch: Option<&AtomicBool>,
     ) {
-        let control = SearchControl::new(target_time, kill_switch);
-
-        fn inner(
-            d: i16,
-            ply: usize,
-            target_d: usize,
-            mut alpha: i16,
-            mut beta: i16,
-            use_quiescence: bool,
-            follows_prev_pv: bool,
-            is_pv_node: bool,
-            is_null_window: bool,
-            prev_pv: &[u32],
-            pos: &mut Position,
-            evaluator: &Evaluator,
-            search_data: &mut SearchData,
-            move_gen: &MoveGen,
-            zobrist: &Zobrist,
-            control: &SearchControl<'_>,
-            tt: &mut TranspositionTable,
-        ) -> i16 {
-            if d <= 0 && use_quiescence {
-                return Searcher::quiescence(
-                    ply, alpha, beta, is_pv_node, None, pos, evaluator, search_data, move_gen, zobrist,
-                    control, tt,
+        let (target_depth, hard_ms, time_budget) = match self.search_config.search_mode {
+            SearchMode::StaticDepth(depth) => {
+                assert!(
+                    depth <= MAX_SEARCH_DEPTH,
+                    "static search depth {depth} exceeds MAX_SEARCH_DEPTH {MAX_SEARCH_DEPTH}"
                 );
+                (depth, None, None)
             }
+            SearchMode::StaticTime(ms) => (MAX_SEARCH_DEPTH, Some(ms), None),
+            SearchMode::Clock(budget) => (MAX_SEARCH_DEPTH, Some(budget.hard_ms()), Some(budget)),
+            SearchMode::Infinite => (MAX_SEARCH_DEPTH, None, None),
+        };
+        let control = SearchControl {
+            started: Instant::now(),
+            hard_limit: hard_ms.map(Duration::from_millis),
+            kill_switch,
+            ponder_start: self.search_config.ponder_start.as_deref(),
+        };
+        let mut time_manager = time_budget.map(TimeManager::new);
+        let mut pv_len = self.count_pv_moves(idx);
+        let data = &mut self.search_data[idx];
+        data.age_history();
+        let previous_search_nodes = data.cumul_positions_searched;
+        let root_history_index = data.board_hash_history.len().saturating_sub(1);
+        let mut search = Search {
+            pos: &mut self.positions[idx],
+            evaluator: &self.evaluator,
+            data,
+            move_gen,
+            zobrist,
+            tt: &mut self.tt,
+            control: &control,
+            use_quiescence: self.search_config.quiescence,
+            previous_pv: [NULL_MOVE; MAX_SEARCH_DEPTH],
+            static_evals: [None; MAX_PLY],
+            root_history_index,
+            repetition_epoch: 0,
+            best_move_nodes: 0,
+            reductions: reductions(),
+        };
+        let mut last_score: Option<i16> = None;
 
-            if control.should_stop(search_data.positions_searched) {
-                return EVAL_QUIT;
+        for depth in search.data.completed_depth + 1..=target_depth {
+            if control.deadline_reached() {
+                break;
             }
+            let iteration_start = Instant::now();
+            search.previous_pv.fill(NULL_MOVE);
+            let ordering_len = pv_len.min(depth);
+            search.previous_pv[..ordering_len].copy_from_slice(&search.data.pv[..ordering_len]);
+            search.data.pv_ply_indices = get_triang_pv_ply_idx_table(depth);
 
-            if d > 0 { //initialize triangular pv row for this ply
-                let row_start = search_data.pv_ply_indices[ply];
-                search_data.pv[row_start] = NULL_MOVE;
-            }
-
-            search_data.positions_searched += 1;
-            search_data.sel_depth = max(search_data.sel_depth, ply);
-
-            let (s, e) = pos.search_move_bounds();
-            let is_three_fold: bool = search_data.in_three_fold(pos);
-            //terminal conditions
-            if s == e {
-                if pos.board.nof_checkers > 0 {
-                    return -MATE_EVAL + ply as i16;
-                }
-                return 0; // stalemate
-            }
-            if is_three_fold || pos.board.is_fifty_move_draw() || (pos.board.has_insufficient_material() && ply != 0) {
-                return 0;
-            }
-            if d <= 0 {
-                return evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase);
-            }
-
-            let depth = d.max(0) as u8;
-            let key = Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock);
-            let tte = Searcher::probe_tt(tt, key, &pos.move_arr[s..e], ply);
-            if let Some(tt_entry) = tte {
-                if !is_pv_node
-                    && !is_three_fold
-                    && pos.board.half_move_clock < 96
-                    && tt_entry.depth() >= depth
-                {
-                    match tt_entry.bound_type() {
-                        TTEntryType::Exact => {
-                            if d > 0 {
-                                let row_start = search_data.pv_ply_indices[ply];
-                                let row_end = search_data.pv_ply_indices[ply + 1];
-                                search_data.pv[row_start..row_end].fill(NULL_MOVE);
-                                search_data.pv[row_start] = tt_entry.best_move;
-                            }
-                            return tt_entry.score;
-                        }
-                        TTEntryType::LowerBound => alpha = max(alpha, tt_entry.score),
-                        TTEntryType::UpperBound => beta = min(beta, tt_entry.score),
-                    }
-                    if alpha >= beta {
-                        return tt_entry.score;
-                    }
+            let mut alpha = -INFINITY;
+            let mut beta = INFINITY;
+            let mut margin = ASPIRATION_MARGIN;
+            if depth >= ASPIRATION_DEPTH && search.use_quiescence {
+                if let Some(score) = last_score.filter(|score| score.abs() < MATE_BOUND) {
+                    alpha = score - margin;
+                    beta = score + margin;
                 }
             }
 
-            let in_check = pos.board.nof_checkers != 0;
-            let razor_allowed = use_quiescence && ply > 0 && !in_check && alpha < MATE_BOUND;
-            let null_move_allowed = !is_pv_node
-                && d > 1 + NULL_MOVE_REDUCTION
-                && !in_check
-                && pos.last_target != NULL_MOVE
-                && beta.abs() < MATE_BOUND
-                && pos.board.half_move_clock < 96
-                && pos.board.has_non_pawn_material();
-            let can_prune_quiets = ply > 0 && !in_check && alpha >= 0 && beta < MATE_BOUND;
-            let static_eval = if razor_allowed || null_move_allowed || can_prune_quiets {
-                evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
-            } else {
-                0
-            };
-
-            if razor_allowed {
-                let depth = i32::from(d);
-                let margin = 245 + 140 * depth * depth;
-                if i32::from(static_eval) < i32::from(alpha) - margin {
-                    let value = Searcher::quiescence(
-                        ply, alpha - 1, alpha, false, Some(static_eval), pos, evaluator,
-                        search_data, move_gen, zobrist, control, tt,
-                    );
-                    if value == EVAL_QUIT || (value < alpha && value.abs() < MATE_BOUND) {
-                        return value;
-                    }
+            let eval = loop {
+                let eval = search.negamax(depth as i16, 0, alpha, beta, true, true, NULL_MOVE);
+                if eval == EVAL_QUIT || (eval > alpha && eval < beta) {
+                    break eval;
                 }
-            }
-
-            if null_move_allowed && static_eval >= beta {
-                pos.make_null_move(move_gen, zobrist);
-                // A repetition must stay within the real moves after the pass.
-                let repetition_start = search_data.repetition_start;
-                search_data.repetition_start = search_data.board_hash_history.len();
-                let null_eval = -inner(
-                    d - 1 - NULL_MOVE_REDUCTION,
-                    ply + 1,
-                    target_d,
-                    -beta,
-                    1 - beta,
-                    use_quiescence,
-                    false,
-                    false,
-                    true,
-                    prev_pv,
-                    pos,
-                    evaluator,
-                    search_data,
-                    move_gen,
-                    zobrist,
-                    control,
-                    tt,
-                );
-                search_data.repetition_start = repetition_start;
-                pos.unmake_null_move();
-
-                if null_eval.abs() == EVAL_QUIT {
-                    return EVAL_QUIT;
-                }
-                if null_eval >= beta {
-                    search_data.ab_cutoffs += 1;
-                    return beta;
-                }
-            }
-
-            let futility_pruning = can_prune_quiets
-                && static_eval <= alpha - (FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * (d - 1));
-            let mut check_info = None;
-            let (old_alpha, old_beta) = (alpha, beta);
-            let root_relative_d = target_d - ply.min(target_d); // LMR can change d
-            let mut eval = EVAL_INIT;
-            let mut best_move: u32 = NULL_MOVE;
-            let mut only_bad_captures_left: Option<bool> = None;
-
-            let prev_pv_mv: u32 = if follows_prev_pv && ply < prev_pv.len() { prev_pv[ply] } else { NULL_MOVE };
-            let (mut primary_selection, mut secondary_selection) = match tte {
-                Some(entry) if prev_pv_mv == NULL_MOVE || entry.depth() >= depth => {
-                    (entry.best_move, prev_pv_mv)
-                }
-                Some(entry) => (prev_pv_mv, entry.best_move),
-                None => (prev_pv_mv, NULL_MOVE),
-            };
-            if move_eq(primary_selection, secondary_selection) {
-                secondary_selection = NULL_MOVE;
-            }
-
-            let mut i = s;
-            let mut end = e;
-            while i < end {
-                let mov: u32 =
-                    Searcher::partial_selection_sort(&mut pos.move_arr[i..end], primary_selection, secondary_selection, &mut only_bad_captures_left, move_gen, search_data, &pos.board);
-
-                // EVAL_INIT also keeps the first move in the search.
-                if futility_pruning
-                    && eval > -MATE_BOUND
-                    && !move_eq(mov, primary_selection)
-                    && !move_eq(mov, secondary_selection)
-                    && !is_eating(mov)
-                    && !is_promotion(mov)
-                    && !is_castle(mov)
-                {
-                    let info = check_info.get_or_insert_with(|| move_gen.check_info(&pos.board));
-                    if !move_gen.gives_check(&pos.board, info, mov) {
-                        // Keep the searched prefix intact for history updates.
-                        end -= 1;
-                        pos.move_arr.swap(i, end);
-                        continue;
-                    }
+                if control.deadline_reached() {
+                    break EVAL_QUIT;
                 }
 
-                if move_eq(mov, primary_selection) {
-                    primary_selection = NULL_MOVE;
-                } else if move_eq(mov, secondary_selection) {
-                    secondary_selection = NULL_MOVE;
-                }
-
-                let child_follows_prev_pv = follows_prev_pv && move_eq(mov, prev_pv_mv);
-                
-                pos.make_move(mov, true, false, use_quiescence && d == 1, move_gen, zobrist);
-                search_data.board_hash_history.push(pos.zhash);
-
-                let lmr: i16 = if d < 3 || i == s || follows_prev_pv { 
-                    0
+                margin = margin.saturating_mul(2).min(INFINITY);
+                if eval <= alpha {
+                    alpha = eval.saturating_sub(margin).max(-INFINITY);
                 } else {
-                    (0.99 + f32::ln(d as f32) * f32::ln((i - s + 1) as f32) / 3.14) as i16 //from Obsidian
-                }; 
-                let mut new_eval: i16 = EVAL_INIT;
-                if i == s && is_pv_node { //full-window search
-                    new_eval = -inner(
-                        d - 1,
-                        ply + 1,
-                        target_d,
-                        -beta,
-                        -alpha,
-                        use_quiescence,
-                        child_follows_prev_pv,
-                        true,
-                        false,
-                        prev_pv,
-                        pos,
-                        evaluator,
-                        search_data,
-                        move_gen,
-                        zobrist,
-                        control,
-                        tt
-                    );
-                } else { //LMR null-window search ---(raises alpha)--> null-window search ---(raises alpha, doesn't fail-high)--> full-window search
-                    if lmr > 0 {
-                        new_eval = -inner(
-                            d - 1 - lmr,
-                            ply + 1,
-                            target_d,
-                            -alpha - 1,
-                            -alpha,
-                            use_quiescence,
-                            child_follows_prev_pv,
-                            false,
-                            true,
-                            prev_pv,
-                            pos,
-                            evaluator,
-                            search_data,
-                            move_gen,
-                            zobrist,
-                            control,
-                            tt
-                        );
-                    }
-                    
-                    if new_eval.abs() != EVAL_QUIT && (lmr == 0 || new_eval > alpha) { //null-window search
-                        new_eval = -inner(
-                            d - 1,
-                            ply + 1,
-                            target_d,
-                            -alpha - 1,
-                            -alpha,
-                            use_quiescence,
-                            child_follows_prev_pv,
-                            false,
-                            true,
-                            prev_pv,
-                            pos,
-                            evaluator,
-                            search_data,
-                            move_gen,
-                            zobrist,
-                            control,
-                            tt
-                        );
-                        
-                        if new_eval.abs() != EVAL_QUIT && new_eval > alpha && new_eval < beta && is_pv_node { //re-search with full window
-                            new_eval = -inner(
-                                d - 1,
-                                ply + 1,
-                                target_d,
-                                -beta,
-                                -alpha,
-                                use_quiescence,
-                                child_follows_prev_pv,
-                                true,
-                                false,
-                                prev_pv,
-                                pos,
-                                evaluator,
-                                search_data,
-                                move_gen,
-                                zobrist,
-                                control,
-                                tt
-                            );
-                        } //else if new_eval > alpha : let be treated like normal fail-high cutoff
-                    }
+                    beta = eval.saturating_add(margin).min(INFINITY);
                 }
+            };
 
-                search_data.board_hash_history.pop();
-                pos.unmake_move(mov, zobrist);
-
-                if new_eval.abs() == EVAL_QUIT {
-                    return EVAL_QUIT;
-                }
-
-                if new_eval > eval {
-                    eval = new_eval;
-                    best_move = mov;
-                    
-                    if !is_null_window { //child ply's pv appended to this ply's pv
-                        let cur_ply_s_idx: usize = search_data.pv_ply_indices[ply];
-                        let child_ply_s_idx: usize = cur_ply_s_idx + root_relative_d;
-                        let child_ply_e_idx: usize = child_ply_s_idx + root_relative_d - 1;
-                        search_data.pv.copy_within(child_ply_s_idx..child_ply_e_idx, cur_ply_s_idx + 1);
-                        search_data.pv[cur_ply_s_idx] = mov;
-                    }
-                }
-
-                alpha = max(alpha, new_eval);
-
-                if alpha >= beta {
-                    search_data.ab_cutoffs += 1;
-                    Searcher::update_quiet_history_after_cutoff(
-                        search_data,
-                        pos.board.turn,
-                        mov,
-                        &pos.move_arr[s..i],
-                        d as usize,
-                    );
-                    break;
-                }
-                i += 1;
-            }
-            if end != e {
-                // Treat skipped moves as failing low against the original alpha.
-                eval = max(eval, old_alpha);
-            }
-            Searcher::store_tt(tt, key, best_move, depth, eval, ply, old_alpha, old_beta);
-            eval
-        }
-        //iterative deepening:
-        let mut pv_len: usize = self.count_pv_moves(idx);
-        let use_quiescence = self.search_config.quiescence;
-        let log_uci_diagnostics = self.search_config.log_uci_diagnostics;
-        let pos: &mut Position = &mut self.positions[idx];
-        let search_data: &mut SearchData = &mut self.search_data[idx];
-        for td in (search_data.completed_depth + 1)..=target_depth {
-            let mut prev_pv = vec![NULL_MOVE; td];
-            let ordering_pv_len = pv_len.min(td);
-            prev_pv[..ordering_pv_len]
-                .copy_from_slice(&search_data.pv[..ordering_pv_len]);
-            search_data.pv_ply_indices = get_triang_pv_ply_idx_table(td);
-            let eval: i16 = inner(
-                td as i16,
-                0,
-                td,
-                ALPHA_INIT,
-                BETA_INIT,
-                use_quiescence,
-                true,
-                true,
-                false,
-                &prev_pv,
-                pos,
-                &self.evaluator,
-                search_data,
-                move_gen,
-                zobrist,
-                &control,
-                &mut self.tt
-            );
-            search_data.cumul_positions_searched += search_data.positions_searched;
+            search.data.cumul_positions_searched += search.data.positions_searched;
             if eval == EVAL_QUIT {
-                search_data.reset_temp_performance_data();
-                if search_data.pv[0] == NULL_MOVE { //didn't finish any root move before stopping
-                    search_data.pv[..td].copy_from_slice(&prev_pv);
+                if ordering_len != 0 {
+                    search.data.pv[..depth].copy_from_slice(&search.previous_pv[..depth]);
                 }
+                search.data.reset_temp_performance_data();
                 break;
             }
 
-            search_data.completed_depth = td;
-            pv_len = search_data.pv[..td]
+            last_score = Some(eval);
+            search.data.completed_depth = depth;
+            pv_len = search.data.pv[..depth]
                 .iter()
-                .position(|mov| *mov == NULL_MOVE)
-                .unwrap_or(td);
+                .position(|&mov| mov == NULL_MOVE)
+                .unwrap_or(depth);
 
-            if log_uci_diagnostics {
+            if self.search_config.log_uci_diagnostics {
                 let (score_kind, score) = if eval.abs() >= MATE_BOUND {
                     let mate_plies = MATE_EVAL - eval.abs();
                     ("mate", ((mate_plies + 1) / 2) * eval.signum())
                 } else {
                     ("cp", eval)
                 };
+                let pv = search.data.pv[..pv_len]
+                    .iter()
+                    .map(|&mov| _move::to_string(mov, true))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let elapsed_ms = control.started.elapsed().as_millis();
+                let nodes = search.data.cumul_positions_searched - previous_search_nodes;
+                let nps = u128::from(nodes) * 1000 / elapsed_ms.max(1);
                 println!(
-                    "info depth {td} seldepth {} score {score_kind} {score} nodes {} ab-cutoffs {} stand-pat-cutoffs {} pv {}",
-                    search_data.sel_depth, search_data.positions_searched, search_data.ab_cutoffs, search_data.stand_pat_cutoffs, search_data.pv[0..pv_len].iter().map(|m| _move::to_string(*m, true)).collect::<Vec<String>>().join(" ")
+                    "info depth {depth} seldepth {} score {score_kind} {score} nodes {nodes} nps {nps} time {elapsed_ms} pv {pv}",
+                    search.data.sel_depth,
                 );
             }
-            search_data.reset_temp_performance_data();
-        }
-    }
 
-    fn quiescence(
-        ply: usize,
-        mut alpha: i16,
-        mut beta: i16,
-        is_pv_node: bool,
-        razor_eval: Option<i16>,
-        pos: &mut Position,
-        evaluator: &Evaluator,
-        search_data: &mut SearchData,
-        move_gen: &MoveGen,
-        zobrist: &Zobrist,
-        control: &SearchControl<'_>,
-        tt: &mut TranspositionTable,
-    ) -> i16 {
-        if control.should_stop(search_data.positions_searched) {
-            return EVAL_QUIT;
-        }
+            let nodes = search.data.positions_searched;
+            let best_move = with_see_cleared(search.data.pv[0]);
+            let root_nodes_pct = (nodes != 0).then(|| (search.best_move_nodes * 100 / nodes) as u8);
+            search.data.reset_temp_performance_data();
 
-        search_data.positions_searched += 1;
-        search_data.sel_depth = max(search_data.sel_depth, ply);
-
-        if pos.board.has_insufficient_material() {
-            return 0;
-        }
-
-        let is_three_fold = search_data.in_three_fold(pos);
-        // A reduced search can enter with a full move list.
-        let (s, e) = pos.search_move_bounds();
-        let key = Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock);
-        let tte = Self::probe_tt(tt, key, &pos.move_arr[s..e], ply);
-        if let Some(tt_entry) = tte {
-            if !is_pv_node && !is_three_fold && pos.board.half_move_clock < 96 {
-                match tt_entry.bound_type() {
-                    TTEntryType::Exact => return tt_entry.score,
-                    TTEntryType::LowerBound => alpha = max(alpha, tt_entry.score),
-                    TTEntryType::UpperBound => beta = min(beta, tt_entry.score),
+            if let Some(elapsed) = control.elapsed() {
+                let (start, end) = search.pos.search_move_bounds();
+                if time_manager.is_some() && end - start == 1 {
+                    break;
                 }
-                if alpha >= beta {
-                    return tt_entry.score;
+                if hard_ms.is_some()
+                    && (pv_len == 0
+                        || (eval.abs() >= MATE_BOUND && (MATE_EVAL - eval.abs()) as usize <= depth))
+                {
+                    break;
+                }
+                if time_manager.as_mut().is_some_and(|manager| {
+                    !manager.should_start_iteration(
+                        elapsed,
+                        iteration_start.elapsed(),
+                        best_move,
+                        eval,
+                        root_nodes_pct,
+                    )
+                }) {
+                    break;
                 }
             }
         }
-
-        let in_check = pos.board.nof_checkers > 0;
-        if s == e && in_check {
-            return -MATE_EVAL + ply as i16;
-        }
-        if is_three_fold || pos.board.is_fifty_move_draw() {
-            return 0;
-        }
-
-        let (old_alpha, old_beta) = (alpha, beta);
-        let mut eval = EVAL_INIT;
-        if !in_check {
-            eval = razor_eval.unwrap_or_else(|| {
-                evaluator.eval(pos.board.pieces, pos.board.turn, pos.board.late_game_phase)
-            });
-            if s == e {
-                return eval;
-            }
-            if eval >= beta {
-                search_data.stand_pat_cutoffs += 1;
-                return eval;
-            }
-            alpha = max(alpha, eval);
-        }
-
-        let mut best_move = NULL_MOVE;
-        let mut primary_selection = tte.map_or(NULL_MOVE, |entry| entry.best_move);
-        // Razoring starts with a full move list and keeps its bounds for the main search.
-        let e = if razor_eval.is_some() {
-            let noisy_end = s + Self::partition_noisy_moves(&mut pos.move_arr[s..e]);
-            if !is_eating(primary_selection) && !is_promotion(primary_selection) {
-                primary_selection = NULL_MOVE;
-            }
-            if noisy_end == s {
-                return eval;
-            }
-            noisy_end
-        } else {
-            e
-        };
-        let mut only_bad_captures_left = None;
-        for i in s..e {
-            let mov = Self::partial_selection_sort(
-                &mut pos.move_arr[i..e],
-                primary_selection,
-                NULL_MOVE,
-                &mut only_bad_captures_left,
-                move_gen,
-                search_data,
-                &pos.board,
-            );
-            primary_selection = NULL_MOVE;
-
-            pos.make_move(mov, true, false, true, move_gen, zobrist);
-            search_data.board_hash_history.push(pos.zhash);
-
-            let new_eval = -Self::quiescence(
-                ply + 1,
-                -beta,
-                -alpha,
-                is_pv_node,
-                None,
-                pos,
-                evaluator,
-                search_data,
-                move_gen,
-                zobrist,
-                control,
-                tt,
-            );
-
-            search_data.board_hash_history.pop();
-            pos.unmake_move(mov, zobrist);
-
-            if new_eval.abs() == EVAL_QUIT {
-                return EVAL_QUIT;
-            }
-            if new_eval > eval {
-                eval = new_eval;
-                best_move = mov;
-            }
-            alpha = max(alpha, new_eval);
-            if alpha >= beta {
-                search_data.ab_cutoffs += 1;
-                break;
-            }
-        }
-        Self::store_tt(tt, key, best_move, 0, eval, ply, old_alpha, old_beta);
-        eval
-    }
-
-    #[inline]
-    fn partition_noisy_moves(moves: &mut [u32]) -> usize {
-        let mut noisy_count = 0;
-        for i in 0..moves.len() {
-            let mov = moves[i];
-            if is_eating(mov) || is_promotion(mov) {
-                moves.swap(i, noisy_count);
-                noisy_count += 1;
-            }
-        }
-        noisy_count
-    }
-
-    #[inline]
-    fn probe_tt(tt: &TranspositionTable, key: u64, moves: &[u32], ply: usize) -> Option<TTEntry> {
-        tt.probe(key)
-            .filter(|entry| {
-                (entry.best_move != NULL_MOVE || entry.depth() == 0)
-                    && moves.iter().any(|&mov| move_eq(mov, entry.best_move))
-            })
-            .map(|entry| TTEntry {
-                score: TranspositionTable::score_from_tt(entry.score, ply as i16),
-                ..entry
-            })
-    }
-
-    #[inline]
-    fn store_tt(
-        tt: &mut TranspositionTable,
-        key: u64,
-        best_move: u32,
-        depth: u8,
-        eval: i16,
-        ply: usize,
-        old_alpha: i16,
-        old_beta: i16,
-    ) {
-        let bound = if eval <= old_alpha {
-            TTEntryType::UpperBound
-        } else if eval >= old_beta {
-            TTEntryType::LowerBound
-        } else {
-            TTEntryType::Exact
-        };
-        tt.store(TTEntry::new_packed(
-            key,
-            best_move,
-            depth,
-            bound,
-            TranspositionTable::score_to_tt(eval, ply as i16),
-            tt.generation,
-        ));
     }
 
     pub fn collect_best_move(&self) -> Option<u32> {
@@ -821,7 +368,6 @@ impl Searcher {
             } else {
                 return None;
             }
-            
         }
     }
 
@@ -842,130 +388,688 @@ impl Searcher {
         }
         return i;
     }
+}
+
+struct Search<'a> {
+    pos: &'a mut Position,
+    evaluator: &'a Evaluator,
+    data: &'a mut SearchData,
+    move_gen: &'a MoveGen,
+    zobrist: &'a Zobrist,
+    tt: &'a mut TranspositionTable,
+    control: &'a SearchControl<'a>,
+    use_quiescence: bool,
+    previous_pv: [u32; MAX_SEARCH_DEPTH],
+    static_evals: [Option<i16>; MAX_PLY],
+    root_history_index: usize,
+    repetition_epoch: u64,
+    best_move_nodes: u64,
+    reductions: &'static [[i16; 64]; MAX_SEARCH_DEPTH + 1],
+}
+
+impl Search<'_> {
+    fn negamax(
+        &mut self,
+        mut depth: i16,
+        ply: usize,
+        mut alpha: i16,
+        mut beta: i16,
+        pv: bool,
+        follows_previous_pv: bool,
+        skip: u32,
+    ) -> i16 {
+        self.clear_pv(ply);
+        if depth <= 0 && self.use_quiescence {
+            return self.quiescence(ply, alpha, beta, pv, None);
+        }
+        if !self.visit_node(ply) {
+            return EVAL_QUIT;
+        }
+
+        let (start, end) = self.pos.search_move_bounds();
+        let root = ply == 0;
+        let in_check = self.pos.board.nof_checkers != 0;
+        if start == end {
+            return if in_check { -MATE_EVAL + ply as i16 } else { 0 };
+        }
+        if self.rule_draw(ply) || (!root && self.pos.board.has_insufficient_material()) {
+            return 0;
+        }
+        if depth <= 0 || ply == MAX_PLY {
+            return self.raw_eval();
+        }
+
+        if !root {
+            alpha = alpha.max(-MATE_EVAL + ply as i16);
+            beta = beta.min(MATE_EVAL - ply as i16 - 1);
+            if alpha >= beta {
+                return alpha;
+            }
+        }
+
+        let key = self.tt_key();
+        let excluded = skip != NULL_MOVE;
+        let entry = if excluded { None } else { self.probe(key, ply) };
+        let safe_clock = self.pos.board.half_move_clock < 90;
+        if !pv && safe_clock {
+            if let Some(score) = cutoff(entry, depth as u8, alpha, beta) {
+                return score;
+            }
+        }
+
+        self.static_evals[ply] = None;
+        let mut raw_eval = 0;
+        let mut static_eval = 0;
+        let mut improving = false;
+        let selective = self.use_quiescence && !root && !in_check && !excluded && safe_clock;
+        let non_pawn_material = self.pos.board.has_non_pawn_material();
+        let stable_window = alpha.abs() < MATE_BOUND && beta.abs() < MATE_BOUND;
+
+        if !in_check && self.use_quiescence {
+            raw_eval = self.raw_eval();
+            static_eval = self.correct_eval(raw_eval);
+            self.static_evals[ply] = Some(static_eval);
+            improving = ply >= 2 && self.static_evals[ply - 2].is_some_and(|old| static_eval > old);
+        }
+
+        let epoch = self.repetition_epoch;
+        if selective && !pv && stable_window {
+            let margin = (if improving { 75 } else { 95 }) * depth;
+            if depth <= 6 && non_pawn_material && static_eval >= beta + margin {
+                return beta + (static_eval - beta) / 2;
+            }
+
+            if depth <= 3 && static_eval < alpha - (245 + 140 * depth * depth) {
+                let score = self.quiescence(ply, alpha - 1, alpha, false, Some(static_eval));
+                if score == EVAL_QUIT || (score < alpha && score.abs() < MATE_BOUND) {
+                    return score;
+                }
+            }
+
+            if depth >= 3
+                && non_pawn_material
+                && self.pos.last_target != NULL_MOVE
+                && static_eval >= beta
+                && !entry.is_some_and(|entry| {
+                    entry.bound_type() == TTEntryType::UpperBound && entry.score < beta
+                })
+            {
+                let reduction = 3 + depth / 4 + ((static_eval - beta) / 180).min(2);
+                self.pos.make_null_move(self.move_gen, self.zobrist);
+                let repetition_start = self.data.repetition_start;
+                self.data.repetition_start = self.data.board_hash_history.len();
+                let score = -self.negamax(
+                    (depth - reduction).max(1),
+                    ply + 1,
+                    -beta,
+                    1 - beta,
+                    false,
+                    false,
+                    NULL_MOVE,
+                );
+                self.data.repetition_start = repetition_start;
+                self.pos.unmake_null_move();
+                if score.abs() == EVAL_QUIT {
+                    return EVAL_QUIT;
+                }
+                if score >= beta && score < MATE_BOUND {
+                    return score;
+                }
+            }
+        }
+
+        let tt_move = entry.map_or(NULL_MOVE, |hit| hit.best_move);
+        if selective && depth >= 6 && tt_move == NULL_MOVE && !follows_previous_pv {
+            depth -= 1;
+        }
+        let can_extend = self.use_quiescence
+            && !root
+            && !excluded
+            && ply + (depth as usize) < self.data.pv_ply_indices.len() + 7
+            && depth < MAX_SEARCH_DEPTH as i16;
+        if can_extend && in_check && (pv || end - start == 1) {
+            depth += 1;
+        }
+        let mut singular_move = NULL_MOVE;
+        if can_extend && selective && depth >= 8 && end - start > 1 {
+            if let Some(hit) = entry.filter(|hit| {
+                hit.depth() + 3 >= depth as u8
+                    && hit.bound_type() != TTEntryType::UpperBound
+                    && hit.score.abs() < MATE_BOUND
+                    && tt_move != NULL_MOVE
+                    && self.pos.move_arr[start..end]
+                        .iter()
+                        .any(|&mov| move_eq(mov, tt_move))
+            }) {
+                // Give the TT move extra depth only if every alternative fails low.
+                let singular_beta = hit.score - 3 * depth;
+                let alternatives = self.negamax(
+                    (depth - 1) / 2,
+                    ply,
+                    singular_beta - 1,
+                    singular_beta,
+                    false,
+                    false,
+                    tt_move,
+                );
+                if alternatives == EVAL_QUIT {
+                    return EVAL_QUIT;
+                }
+                if alternatives < singular_beta {
+                    singular_move = tt_move;
+                }
+            }
+        }
+
+        let previous_move = if follows_previous_pv {
+            self.previous_pv.get(ply).copied().unwrap_or(NULL_MOVE)
+        } else {
+            NULL_MOVE
+        };
+        let (primary, secondary) = if entry.is_some_and(|hit| hit.depth() >= depth as u8) {
+            (tt_move, previous_move)
+        } else {
+            (previous_move, tt_move)
+        };
+        let mut picker = MovePicker::new(ply, primary, secondary, &self.pos.played_moves_stack);
+        let old_alpha = alpha;
+        let mut best_score = -INFINITY;
+        let mut best_move = NULL_MOVE;
+        let mut check_info = None;
+        let mut i = start;
+        let mut limit = end;
+        let side = self.pos.board.turn;
+        let futility_margin = 75 + 55 * depth;
+        if root {
+            self.best_move_nodes = 0;
+        }
+
+        while i < limit {
+            let mov = picker.next(
+                &mut self.pos.move_arr[start..limit],
+                i - start,
+                self.move_gen,
+                self.data,
+                &self.pos.board,
+            );
+            if move_eq(mov, skip) {
+                limit -= 1;
+                self.pos.move_arr.swap(i, limit);
+                picker.swap_scores(i - start, limit - start);
+                continue;
+            }
+            let quiet = !is_eating(mov) && !is_promotion(mov);
+            let priority = move_eq(mov, previous_move) || move_eq(mov, tt_move);
+            let advanced_pawn = get_moved_piece(mov) % 6 == W_PAWN
+                && if side == WHITE {
+                    get_target(mov) >= 40
+                } else {
+                    get_target(mov) < 24
+                };
+            let history = if quiet {
+                picker.quiet_history(self.data, side, mov)
+            } else {
+                0
+            };
+            let played = i - start;
+            if selective
+                && stable_window
+                && !pv
+                && played > 0
+                && best_score > -MATE_BOUND
+                && quiet
+                && !priority
+                && !advanced_pawn
+                && !is_castle(mov)
+            {
+                let late_limit = (3 + usize::from(improving))
+                    + (depth * depth) as usize * if improving { 2 } else { 1 };
+                let late = depth <= 5 && played >= late_limit && history <= 0;
+                let futile =
+                    depth <= 4 && static_eval + futility_margin <= alpha && history < 2_500;
+                if late || futile {
+                    let info =
+                        check_info.get_or_insert_with(|| self.move_gen.check_info(&self.pos.board));
+                    if !self.move_gen.gives_check(&self.pos.board, info, mov) {
+                        limit -= 1;
+                        self.pos.move_arr.swap(i, limit);
+                        picker.swap_scores(played, limit - start);
+                        continue;
+                    }
+                }
+            }
+
+            let child_depth = depth - 1 + i16::from(move_eq(mov, singular_move));
+            let follows = follows_previous_pv && move_eq(mov, previous_move);
+            let nodes_before_move = self.data.positions_searched;
+            let epoch_before_move = self.repetition_epoch;
+            self.make_move(mov, self.use_quiescence && child_depth == 0);
+            let reduction = if depth >= 3
+                && quiet
+                && played >= if pv || root { 3 } else { 1 }
+                && !in_check
+                && self.pos.board.nof_checkers == 0
+                && !priority
+                && !advanced_pawn
+            {
+                (self.reductions[depth as usize][played.min(63)] + i16::from(!pv && !improving)
+                    - i16::from(pv)
+                    - (history / 6_000).clamp(-1, 1) as i16)
+                    .clamp(0, child_depth - 1)
+            } else {
+                0
+            };
+
+            let score = if pv && played == 0 {
+                -self.negamax(
+                    child_depth,
+                    ply + 1,
+                    -beta,
+                    -alpha,
+                    true,
+                    follows,
+                    NULL_MOVE,
+                )
+            } else {
+                let mut score = -self.negamax(
+                    child_depth - reduction,
+                    ply + 1,
+                    -alpha - 1,
+                    -alpha,
+                    false,
+                    follows,
+                    NULL_MOVE,
+                );
+                if reduction > 0 && score > alpha && score.abs() != EVAL_QUIT {
+                    score = -self.negamax(
+                        child_depth,
+                        ply + 1,
+                        -alpha - 1,
+                        -alpha,
+                        false,
+                        follows,
+                        NULL_MOVE,
+                    );
+                }
+                if pv && score > alpha && score < beta && score.abs() != EVAL_QUIT {
+                    score = -self.negamax(
+                        child_depth,
+                        ply + 1,
+                        -beta,
+                        -alpha,
+                        true,
+                        follows,
+                        NULL_MOVE,
+                    );
+                }
+                score
+            };
+            self.unmake_move(mov);
+            if score.abs() == EVAL_QUIT {
+                return EVAL_QUIT;
+            }
+
+            if score > best_score {
+                best_score = score;
+                best_move = mov;
+                if pv {
+                    self.update_pv(ply, mov);
+                }
+                if root {
+                    self.best_move_nodes = self.data.positions_searched - nodes_before_move;
+                }
+            }
+            alpha = alpha.max(score);
+            if alpha >= beta {
+                self.data.ab_cutoffs += 1;
+                if excluded {
+                    return score;
+                }
+                self.data.update_cutoff_history(
+                    ply,
+                    side,
+                    &self.pos.played_moves_stack,
+                    mov,
+                    &self.pos.move_arr[start..i],
+                    depth as usize,
+                );
+                if self.repetition_epoch == epoch_before_move {
+                    self.store(key, mov, depth as u8, score, ply, TTEntryType::LowerBound);
+                    if selective && quiet && depth >= 2 && score > static_eval {
+                        self.learn_correction(raw_eval, score, depth);
+                    }
+                }
+                return score;
+            }
+            i += 1;
+        }
+
+        if limit != end {
+            best_score = best_score.max(old_alpha);
+        }
+        if !excluded && self.repetition_epoch == epoch {
+            let bound = if best_score > old_alpha {
+                TTEntryType::Exact
+            } else {
+                TTEntryType::UpperBound
+            };
+            self.store(key, best_move, depth as u8, best_score, ply, bound);
+            if selective
+                && depth >= 2
+                && !is_eating(best_move)
+                && !is_promotion(best_move)
+                && (bound == TTEntryType::Exact || best_score < static_eval)
+            {
+                self.learn_correction(raw_eval, best_score, depth);
+            }
+        }
+        best_score
+    }
+
+    fn quiescence(
+        &mut self,
+        ply: usize,
+        mut alpha: i16,
+        beta: i16,
+        pv: bool,
+        razor_eval: Option<i16>,
+    ) -> i16 {
+        if !self.visit_node(ply) {
+            return EVAL_QUIT;
+        }
+
+        let (start, mut end) = self.pos.search_move_bounds();
+        let in_check = self.pos.board.nof_checkers != 0;
+        if start == end && in_check {
+            return -MATE_EVAL + ply as i16;
+        }
+        if self.rule_draw(ply) || self.pos.board.has_insufficient_material() {
+            return 0;
+        }
+
+        let key = self.tt_key();
+        let entry = self.probe(key, ply);
+        if !pv && self.pos.board.half_move_clock < 90 {
+            if let Some(score) = cutoff(entry, 0, alpha, beta) {
+                return score;
+            }
+        }
+
+        let old_alpha = alpha;
+        let mut best_score = -INFINITY;
+        if !in_check {
+            if start == end
+                && !self
+                    .move_gen
+                    .has_legal_quiet(&self.pos.board, &mut self.pos.move_generation_temp_arr)
+            {
+                return 0;
+            }
+            best_score = razor_eval.unwrap_or_else(|| {
+                let raw = self.raw_eval();
+                self.correct_eval(raw)
+            });
+            if best_score >= beta {
+                self.data.stand_pat_cutoffs += 1;
+                self.store(key, NULL_MOVE, 0, best_score, ply, TTEntryType::LowerBound);
+                return best_score;
+            }
+            alpha = alpha.max(best_score);
+        }
+        if ply == MAX_PLY {
+            return self.raw_eval();
+        }
+
+        if razor_eval.is_some() {
+            // Preserve full bounds for the main search after a failed razor attempt.
+            end = start + partition_noisy(&mut self.pos.move_arr[start..end]);
+        }
+        if start == end {
+            return best_score;
+        }
+
+        let tt_move = entry.map_or(NULL_MOVE, |hit| hit.best_move);
+        let mut picker = MovePicker::new(ply, tt_move, NULL_MOVE, &self.pos.played_moves_stack);
+        let mut best_move = NULL_MOVE;
+        let mut check_info = None;
+        let epoch = self.repetition_epoch;
+        let stand_pat = best_score;
+        for i in start..end {
+            let mov = picker.next(
+                &mut self.pos.move_arr[start..end],
+                i - start,
+                self.move_gen,
+                self.data,
+                &self.pos.board,
+            );
+            if !in_check && !is_promotion(mov) && !is_en_passant(mov) && alpha.abs() < MATE_BOUND {
+                let victim = PIECE_MATERIAL_VALUE[eaten_piece(mov).unwrap() as usize];
+                let futile =
+                    !pv && self.pos.board.major_minor_count > 4 && stand_pat + victim + 220 < alpha;
+                if is_negative_see(mov) || futile {
+                    let info =
+                        check_info.get_or_insert_with(|| self.move_gen.check_info(&self.pos.board));
+                    if !self.move_gen.gives_check(&self.pos.board, info, mov) {
+                        if futile {
+                            best_score = best_score.max(stand_pat + victim + 220);
+                        }
+                        continue;
+                    }
+                }
+            }
+            let epoch_before_move = self.repetition_epoch;
+            self.make_move(mov, true);
+            let score = -self.quiescence(ply + 1, -beta, -alpha, pv, None);
+            self.unmake_move(mov);
+            if score.abs() == EVAL_QUIT {
+                return EVAL_QUIT;
+            }
+            if score > best_score {
+                best_score = score;
+                best_move = mov;
+            }
+            alpha = alpha.max(score);
+            if alpha >= beta {
+                self.data.ab_cutoffs += 1;
+                if self.repetition_epoch == epoch_before_move {
+                    self.store(key, mov, 0, score, ply, TTEntryType::LowerBound);
+                }
+                return score;
+            }
+        }
+
+        if self.repetition_epoch == epoch {
+            let bound = if best_score > old_alpha {
+                TTEntryType::Exact
+            } else {
+                TTEntryType::UpperBound
+            };
+            self.store(key, best_move, 0, best_score, ply, bound);
+        }
+        best_score
+    }
+
+    fn visit_node(&mut self, ply: usize) -> bool {
+        if self.control.should_stop(self.data.positions_searched) {
+            return false;
+        }
+        self.data.positions_searched += 1;
+        self.data.sel_depth = self.data.sel_depth.max(ply);
+        true
+    }
+
+    fn rule_draw(&mut self, ply: usize) -> bool {
+        if self
+            .data
+            .is_search_repetition(self.pos, self.root_history_index, ply != 0)
+        {
+            self.repetition_epoch += 1;
+            return true;
+        }
+        self.pos.board.is_fifty_move_draw()
+    }
 
     #[inline]
-    fn update_quiet_history_after_cutoff(
-        search_data: &mut SearchData,
-        side: u32,
-        cutoff_move: u32,
-        previously_searched_moves: &[u32],
-        remaining_depth: usize,
-    ) {
-        if _move::is_eating(cutoff_move) || _move::is_promotion(cutoff_move) {
-            return;
-        }
+    fn make_move(&mut self, mov: u32, quiescence: bool) {
+        self.pos
+            .make_move(mov, true, false, quiescence, self.move_gen, self.zobrist);
+        self.data.board_hash_history.push(self.pos.zhash);
+    }
 
-        let bonus = remaining_depth as i32;
-        search_data.update_history_entry(
-            side,
-            _move::get_init(cutoff_move),
-            _move::get_target(cutoff_move),
-            bonus,
+    #[inline]
+    fn unmake_move(&mut self, mov: u32) {
+        self.data.board_hash_history.pop();
+        self.pos.unmake_move(mov, self.zobrist);
+    }
+
+    #[inline]
+    fn raw_eval(&self) -> i16 {
+        self.evaluator
+            .evaluate_position(&self.pos.board, self.move_gen)
+    }
+
+    #[inline]
+    fn correct_eval(&self, raw: i16) -> i16 {
+        if self.pos.board.major_minor_count == 0 {
+            raw
+        } else {
+            self.data.correct_static_eval(&self.pos.board, raw)
+        }
+    }
+
+    fn learn_correction(&mut self, raw: i16, score: i16, depth: i16) {
+        if self.pos.board.major_minor_count > 0 && score.abs() < MATE_BOUND {
+            self.data
+                .update_eval_correction(&self.pos.board, raw, score, depth as usize);
+        }
+    }
+
+    fn clear_pv(&mut self, ply: usize) {
+        if ply + 1 < self.data.pv_ply_indices.len() {
+            self.data.pv[self.data.pv_ply_indices[ply]] = NULL_MOVE;
+        }
+    }
+
+    fn update_pv(&mut self, ply: usize, mov: u32) {
+        let indices = &self.data.pv_ply_indices;
+        if ply + 1 < indices.len() {
+            let row_start = indices[ply];
+            self.data.pv[row_start] = mov;
+            if ply + 2 < indices.len() {
+                self.data
+                    .pv
+                    .copy_within(indices[ply + 1]..indices[ply + 2], row_start + 1);
+            }
+        }
+    }
+
+    #[inline]
+    fn tt_key(&self) -> u64 {
+        Zobrist::zkey50_adjusted(self.pos.zhash, self.pos.board.half_move_clock)
+    }
+
+    #[inline]
+    fn probe(&mut self, key: u64, ply: usize) -> Option<TTEntry> {
+        self.tt.probe_refresh(key).map(|entry| TTEntry {
+            score: TranspositionTable::score_from_tt(entry.score, ply as i16),
+            ..entry
+        })
+    }
+
+    #[inline]
+    fn store(&mut self, key: u64, mov: u32, depth: u8, score: i16, ply: usize, bound: TTEntryType) {
+        self.tt.store(TTEntry::new_packed(
+            key,
+            mov,
+            depth,
+            bound,
+            TranspositionTable::score_to_tt(score, ply as i16),
+            self.tt.generation,
+        ));
+    }
+}
+
+fn cutoff(entry: Option<TTEntry>, depth: u8, alpha: i16, beta: i16) -> Option<i16> {
+    let entry = entry.filter(|entry| entry.depth() >= depth)?;
+    let score = entry.score;
+    match entry.bound_type() {
+        TTEntryType::Exact => Some(score),
+        TTEntryType::LowerBound if score >= beta => Some(score),
+        TTEntryType::UpperBound if score <= alpha => Some(score),
+        _ => None,
+    }
+}
+
+fn partition_noisy(moves: &mut [u32]) -> usize {
+    let mut count = 0;
+    for i in 0..moves.len() {
+        if is_eating(moves[i]) || is_promotion(moves[i]) {
+            moves.swap(i, count);
+            count += 1;
+        }
+    }
+    count
+}
+
+fn reductions() -> &'static [[i16; 64]; MAX_SEARCH_DEPTH + 1] {
+    static TABLE: OnceLock<[[i16; 64]; MAX_SEARCH_DEPTH + 1]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        std::array::from_fn(|depth| {
+            std::array::from_fn(|played| {
+                (0.55 + (depth.max(1) as f32).ln() * ((played + 1) as f32).ln() / 2.4) as i16
+            })
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quiesce(fen: &str, razor_eval: Option<i16>) -> (i16, u64) {
+        let move_gen = MoveGen::init();
+        let zobrist = Zobrist::default();
+        let mut pos = Position::from(fen, &move_gen, &zobrist).unwrap();
+        let mut data = SearchData::new(&pos);
+        let mut search = Search {
+            pos: &mut pos,
+            evaluator: &Evaluator::default(),
+            data: &mut data,
+            move_gen: &move_gen,
+            zobrist: &zobrist,
+            tt: &mut TranspositionTable::default(),
+            control: &SearchControl {
+                started: Instant::now(),
+                hard_limit: None,
+                kill_switch: None,
+                ponder_start: None,
+            },
+            use_quiescence: true,
+            previous_pv: [NULL_MOVE; MAX_SEARCH_DEPTH],
+            static_evals: [None; MAX_PLY],
+            root_history_index: 0,
+            repetition_epoch: 0,
+            best_move_nodes: 0,
+            reductions: reductions(),
+        };
+        let bounds = search.pos.search_move_bounds();
+        let score = search.quiescence(0, -1, 0, false, razor_eval);
+        assert_eq!(search.pos.search_move_bounds(), bounds);
+        (score, data.positions_searched)
+    }
+
+    #[test]
+    fn razor_probe_searches_captures_and_keeps_full_move_bounds() {
+        assert_eq!(
+            quiesce("4k3/8/8/8/8/8/1q6/R3K3 w - - 0 1", Some(-500)),
+            (-500, 1)
         );
-
-        for &previous_move in previously_searched_moves {
-            if !_move::is_eating(previous_move) && !_move::is_promotion(previous_move) {
-                search_data.update_history_entry(
-                    side,
-                    _move::get_init(previous_move),
-                    _move::get_target(previous_move),
-                    -bonus,
-                );
-            }
-        }
+        let (score, nodes) = quiesce("4k3/q7/8/8/8/8/8/R3K3 w - - 0 1", Some(-500));
+        assert!(score > 0 && nodes > 1);
     }
 
-    ///k == 1, so "selection pick", in place <br>
-    ///primary selection and secondary selection are for possible prev pv move and tt move, order depending on tt move depth
-    fn partial_selection_sort(
-        move_arr_s: &mut [u32],
-        primary_selection: u32,
-        secondary_selection: u32,
-        only_bad_captures_left: &mut Option<bool>,
-        move_gen: &MoveGen,
-        search_data: &mut SearchData,
-        board: &Board
-    ) -> u32 {
-        let mut best_i: usize = usize::MAX;
-        if primary_selection != NULL_MOVE {
-            best_i = move_arr_s
-                .iter()
-                .position(|&mov| move_eq(mov, primary_selection))
-                .expect("primary selection was some but not generated");
-        } else if secondary_selection != NULL_MOVE {
-            best_i = move_arr_s
-                .iter()
-                .position(|&mov| move_eq(mov, secondary_selection))
-                .expect("secondary selection was some but not generated");
-        } else { //no priority move available
-            //non-dominating is non-captures if !*only_bad_captures_left, else if *only_bad_captures_left then only bad captures.
-            //If only_bad_captures_left == None, then non-dominating are both non-captures and bad captures
-            let mut best_v: i32 = i32::MIN;
-            let mut found_dominating: bool = false;
-            let mut non_capture_count: usize = 0;
-
-            for i in 0..move_arr_s.len() {
-                let mov: u32 = move_arr_s[i];
-                let mut cur_v: i32 = 0;
-                if _move::is_eating(mov) {
-                    if _move::is_negative_see(mov) {
-                        if let Some(only_bad_left) = only_bad_captures_left {
-                            if *only_bad_left {
-                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
-                            } //else quiets left so ignore bad capture
-                        } else { //quiets may remain but we don't know yet
-                            cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
-                        }
-                    } else if _move::is_positive_see(mov) {
-                        cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
-                        found_dominating = true;
-                    } else { //unevaluated capture
-                        let is_good_capture: bool =
-                            search_data.see_helper.see_positive(mov, board, move_gen);
-
-                        if is_good_capture {
-                            move_arr_s[i] = _move::with_positive_see(mov);
-                            cur_v = GOOD_CAPTURE_BONUS + EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
-                            found_dominating = true;
-                        } else {
-                            move_arr_s[i] = _move::with_negative_see(mov);
-                            if let Some(only_bad_left) = only_bad_captures_left {
-                                if *only_bad_left {
-                                    cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
-                                } //else quiets left so ignore bad capture
-                            } else { //quiets may remain but we don't know yet
-                                cur_v = EATING_MULTIPLIER * PIECE_MATERIAL_VALUE[_move::eaten_piece(mov).unwrap() as usize] as i32;
-                            }
-                        }
-                    }
-                    if _move::is_promotion(mov) {
-                        cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
-                    }
-                } else if !found_dominating { //non-capture still candidate
-                    if _move::is_promotion(mov) {
-                        cur_v += PROMOTION_SCORE + _move::get_promotion_piece(mov) as i32;
-                    } else {
-                        cur_v += search_data.get_history_entry(board.turn, mov)
-                    }
-                    cur_v += NON_CAPTURE_BONUS; //give edge over bad captures
-                    non_capture_count += 1;
-                } else {
-                    non_capture_count += 1;
-                }
-
-                if cur_v > best_v {
-                    best_v = cur_v;
-                    best_i = i;
-                }
-            }
-
-            if non_capture_count == 0 {
-                *only_bad_captures_left = Some(true);
-            }
-        }
-
-        move_arr_s.swap(0, best_i);
-        return move_arr_s[0];
+    #[test]
+    fn quiescence_recognizes_stalemate_with_no_noisy_moves() {
+        assert_eq!(quiesce("7k/5K2/6Q1/8/8/8/8/8 b - - 0 1", None), (0, 1));
     }
-
 }

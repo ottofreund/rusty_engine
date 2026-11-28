@@ -3,7 +3,6 @@ use crate::repr::_move::*;
 use crate::repr::bitboard;
 use crate::repr::board::*;
 use crate::repr::magic_bb_loader::MagicBitboard;
-use crate::repr::position::MOVE_ARR_SIZE;
 use crate::repr::types::*;
 use crate::utils::fen_tool;
 
@@ -258,7 +257,7 @@ impl MoveGen {
         &self,
         board: &Board,
         mover: u32,
-        move_arr: &mut [u32; MOVE_ARR_SIZE],
+        move_arr: &mut [u32],
         pseudo_move_arr: &mut [u32],
         move_arr_s_idx: usize,
         in_search: bool,
@@ -302,6 +301,35 @@ impl MoveGen {
             }
         }
         return (generated, ep_take_available);
+    }
+
+    /// Called after noisy generation yielded no moves at a non-check node.
+    pub(crate) fn has_legal_quiet(&self, board: &Board, scratch: &mut [u32]) -> bool {
+        debug_assert_eq!(board.nof_checkers, 0);
+        let side = board.turn;
+        let (friendly, attacked) = if side == WHITE {
+            (board.white_occupation, board.black_attacks)
+        } else {
+            (board.black_occupation, board.white_attacks)
+        };
+        let king = board.get_king_sqr_idx(side) as usize;
+        if self.attack_bbs[W_KING_U][king] & !(friendly | attacked | board.meta_attacks) != 0 {
+            return true;
+        }
+        let offset = side as usize * NOF_PIECE_TYPES_U;
+        for piece in offset..offset + W_KING_U {
+            let mut occupied = board.pieces[piece];
+            while occupied != 0 {
+                let square = bitboard::pop_lsb(&mut occupied);
+                let count = self.pseudolegal_for(
+                    square, piece as u32, side, board, scratch, 0, false, false, true, false, false,
+                ) as usize;
+                if scratch[..count].iter().any(|&mov| self.pseudolegal_is_legal(mov, board)) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     ///Edge cases: For en passant check pin edge case, for king check not moving to attacked squares
@@ -1046,8 +1074,8 @@ pub fn pseudolegal_pawn(
     move_gen: &MoveGen,
     move_arr: &mut [u32],
     move_arr_s_idx: usize,
-    in_search: bool,
-    in_perft_debug: bool,
+    _in_search: bool,
+    _in_perft_debug: bool,
     noisy_only: bool,
 ) -> u64 {
     let mut added: usize = 0;
@@ -1082,27 +1110,8 @@ pub fn pseudolegal_pawn(
         if bitboard::contains_square(enemy_occupied, attack_sqr) {
             //is pseudolegal
             if is_promotion {
-                if in_search && !in_perft_debug {
-                    add_search_promotions(
-                        from,
-                        attack_sqr,
-                        true,
-                        mover,
-                        move_arr,
-                        move_arr_s_idx + added,
-                    );
-                    added += 2;
-                } else {
-                    add_all_promotions(
-                        from,
-                        attack_sqr,
-                        true,
-                        mover,
-                        move_arr,
-                        move_arr_s_idx + added,
-                    );
-                    added += 4;
-                }
+                add_all_promotions(from, attack_sqr, true, mover, move_arr, move_arr_s_idx + added);
+                added += 4;
             } else {
                 move_arr[move_arr_s_idx + added] =
                     _move::create(from, attack_sqr, true, mover, pawn_piece_idx as u32);
@@ -1117,27 +1126,8 @@ pub fn pseudolegal_pawn(
     //can go forward 1 if no piece there
     if !board.is_occupied(forward) {
         if is_promotion {
-            if in_search && !in_perft_debug {
-                add_search_promotions(
-                    from,
-                    forward,
-                    false,
-                    mover,
-                    move_arr,
-                    move_arr_s_idx + added,
-                );
-                added += 2;
-            } else {
-                add_all_promotions(
-                    from,
-                    forward,
-                    false,
-                    mover,
-                    move_arr,
-                    move_arr_s_idx + added,
-                );
-                added += 4;
-            }
+            add_all_promotions(from, forward, false, mover, move_arr, move_arr_s_idx + added);
+            added += 4;
         } else {
             move_arr[move_arr_s_idx + added] =
                 _move::create(from, forward, false, mover, pawn_piece_idx as u32);

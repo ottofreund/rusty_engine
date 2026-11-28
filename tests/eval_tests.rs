@@ -212,6 +212,48 @@ fn eval_with_both_sides_pieces_is_consistent_for_each_mover() {
     assert_eq!(eval_from_white, -eval_from_black);
 }
 
+#[test]
+fn positional_evaluation_is_symmetric_under_rank_and_color_flip() {
+    let engine = TestEngine::new();
+    let evaluator = Evaluator::default();
+    let position = engine.board("r4rk1/pp3p1p/2n1p1p1/2Pp4/3P2b1/2P1BN2/P3QPPP/R4RK1 w - - 0 1");
+    let mirror = engine.board("r4rk1/p3qppp/2p1bn2/3p2B1/2pP4/2N1P1P1/PP3P1P/R4RK1 b - - 0 1");
+    assert_eq!(
+        evaluator.evaluate_position(&position, &engine.move_gen),
+        evaluator.evaluate_position(&mirror, &engine.move_gen)
+    );
+}
+
+#[test]
+fn bishop_and_knight_evaluation_drives_king_to_matching_corner() {
+    let engine = TestEngine::new();
+    let evaluator = Evaluator::default();
+    let correct_corner = engine.board("7k/8/8/8/3K4/2N5/8/2B5 w - - 0 1");
+    let wrong_corner = engine.board("k7/8/8/8/3K4/2N5/8/2B5 w - - 0 1");
+    assert!(
+        evaluator.evaluate_position(&correct_corner, &engine.move_gen)
+            > evaluator.evaluate_position(&wrong_corner, &engine.move_gen)
+    );
+}
+
+#[test]
+fn king_and_pawn_bitbase_distinguishes_wins_from_rook_pawn_draws() {
+    let engine = TestEngine::new();
+    let evaluator = Evaluator::default();
+    let winning = engine.board("8/k1P5/2K5/8/8/8/8/8 w - - 0 1");
+    let defender_turn = engine.board("8/k1P5/2K5/8/8/8/8/8 b - - 0 1");
+    let reflected = engine.board("8/8/8/8/8/5k2/5p1K/8 b - - 0 1");
+    let blocked = engine.board("k7/P7/2K5/8/8/8/8/8 w - - 0 1");
+    let stalemate = engine.board("k7/P7/1K6/8/8/8/8/8 b - - 0 1");
+    let evaluate = |board| evaluator.evaluate_position(board, &engine.move_gen);
+
+    assert!(evaluate(&winning) > 400);
+    assert!(evaluate(&defender_turn) < -400);
+    assert_eq!(evaluate(&winning), evaluate(&reflected));
+    assert_eq!(evaluate(&blocked), 0);
+    assert_eq!(evaluate(&stalemate), 0);
+}
+
 fn reference_passers(friendly: u64, enemy: u64, white: bool) -> u64 {
     let mut result = 0;
     for square in 0i32..64 {

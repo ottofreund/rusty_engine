@@ -2,7 +2,9 @@ use std::fmt;
 
 use crate::{
     repr::_move,
-    search::{searcher::MAX_SEARCH_DEPTH, tt::DEFAULT_TT_SIZE_MB},
+    search::{
+        search_config::DEFAULT_MOVE_OVERHEAD_MS, searcher::MAX_SEARCH_DEPTH, tt::DEFAULT_TT_SIZE_MB,
+    },
     utils::fen_tool::DEFAULT_FEN,
 };
 
@@ -49,11 +51,14 @@ pub struct SetOptionCommand {
 pub(super) enum UciOptionId {
     Hash,
     Threads,
+    MoveOverhead,
+    Ponder,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UciOptionKind {
     Spin { default: i64, min: i64, max: i64 },
+    Check { default: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +71,7 @@ pub(super) struct UciOptionSpec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UciOptionValue {
     Spin(i64),
+    Check,
 }
 
 pub(super) const UCI_OPTIONS: &[UciOptionSpec] = &[
@@ -86,7 +92,21 @@ pub(super) const UCI_OPTIONS: &[UciOptionSpec] = &[
             min: 1,
             max: 1,
         },
-    }
+    },
+    UciOptionSpec {
+        id: UciOptionId::MoveOverhead,
+        name: "Move Overhead",
+        kind: UciOptionKind::Spin {
+            default: DEFAULT_MOVE_OVERHEAD_MS as i64,
+            min: 0,
+            max: 5000,
+        },
+    },
+    UciOptionSpec {
+        id: UciOptionId::Ponder,
+        name: "Ponder",
+        kind: UciOptionKind::Check { default: false },
+    },
 ];
 
 impl fmt::Display for UciOptionSpec {
@@ -97,6 +117,7 @@ impl fmt::Display for UciOptionSpec {
                 formatter,
                 " type spin default {default} min {min} max {max}"
             ),
+            UciOptionKind::Check { default } => write!(formatter, " type check default {default}"),
         }
     }
 }
@@ -115,6 +136,15 @@ pub(super) fn resolve_uci_option(
                 .contains(&value)
                 .then_some((option.id, UciOptionValue::Spin(value)))
         }
+        UciOptionKind::Check { .. } => {
+            command
+                .value
+                .as_deref()?
+                .to_ascii_lowercase()
+                .parse::<bool>()
+                .ok()?;
+            Some((option.id, UciOptionValue::Check))
+        }
     }
 }
 
@@ -127,20 +157,23 @@ pub struct GoCommand {
     pub binc: Option<u64>,
     pub movetime: Option<u64>,
     pub depth: Option<usize>,
+    pub moves_to_go: Option<u64>,
+    pub infinite: bool,
 }
 
 impl GoCommand {
     pub fn is_valid(&self) -> bool {
         let has_clock = self.wtime.is_some() && self.btime.is_some();
         let has_partial_clock = self.wtime.is_some() != self.btime.is_some();
-        let mode_count =
-            has_clock as u8 + self.movetime.is_some() as u8 + self.depth.is_some() as u8;
+        let mode_count = has_clock as u8
+            + self.movetime.is_some() as u8
+            + self.depth.is_some() as u8
+            + self.infinite as u8;
 
         !has_partial_clock
             && mode_count == 1
-            && self
-                .depth
-                .map_or(true, |depth| depth <= MAX_SEARCH_DEPTH)
+            && self.moves_to_go.is_none_or(|moves| has_clock && moves > 0)
+            && self.depth.map_or(true, |depth| depth <= MAX_SEARCH_DEPTH)
     }
 
     pub fn new_clock_tc(ponder: bool, wtime: u64, btime: u64, winc: u64, binc: u64) -> Self {
@@ -152,6 +185,8 @@ impl GoCommand {
             binc: Some(binc),
             movetime: None,
             depth: None,
+            moves_to_go: None,
+            infinite: false,
         }
     }
 
@@ -164,6 +199,8 @@ impl GoCommand {
             binc: None,
             movetime: Some(movetime),
             depth: None,
+            moves_to_go: None,
+            infinite: false,
         }
     }
 
@@ -176,6 +213,8 @@ impl GoCommand {
             binc: None,
             movetime: None,
             depth: Some(depth),
+            moves_to_go: None,
+            infinite: false,
         }
     }
 }
@@ -209,5 +248,4 @@ impl PositionCommand {
         }
         return (true, other.moves.len() - self.moves.len());
     }
-
 }

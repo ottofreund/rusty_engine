@@ -15,12 +15,12 @@ use crate::{
 
 use crate::utils::fen_tool::fen_to_board;
 
-pub const MOVE_ARR_SIZE: usize = AVG_BRANCH_FAC * MAX_SEARCH_DEPTH; //supports 40 ply deep search
+pub const MOVE_ARR_SIZE: usize = AVG_BRANCH_FAC * MAX_SEARCH_DEPTH;
 
 #[derive(Clone)]
 pub struct Position {
     pub board: Board,
-    pub move_arr: [u32; MOVE_ARR_SIZE],
+    pub move_arr: Vec<u32>,
     pub move_arr_idx: Vec<usize>, //move_arr end idx by ply, so e.g. 0..move_arr_idx[0] is first ply idx range (idx is exclusive)
     pub board_state_info_stack: Vec<BoardStateInfo>, //previous board states, allows efficient unmaking of moves
     pub played_moves_stack: Vec<u32>,
@@ -34,7 +34,7 @@ impl Position {
     pub fn default(move_gen: &MoveGen, zobrist: &Zobrist) -> Position {
         let board: Board = Board::default_board(move_gen);
         let turn: u32 = board.turn;
-        let mut move_arr: [u32; MOVE_ARR_SIZE] = [NULL_MOVE; MOVE_ARR_SIZE];
+        let mut move_arr = vec![NULL_MOVE; MOVE_ARR_SIZE];
         let mut move_generation_temp_arr: Vec<u32> = vec![NULL_MOVE; MAX_PSEUDO_MOVES_IN_POS];
         let (generated, has_ep_take) = move_gen.generate_legal(
             &board,
@@ -59,7 +59,7 @@ impl Position {
             move_arr_idx,
             last_target,
             zhash,
-            has_ep_take: false,
+            has_ep_take,
             move_generation_temp_arr,
         };
     }
@@ -70,7 +70,7 @@ impl Position {
             Ok(b) => board = b,
             Err(_) => return Err("Fen error"),
         }
-        let mut move_arr: [u32; MOVE_ARR_SIZE] = [NULL_MOVE; MOVE_ARR_SIZE];
+        let mut move_arr = vec![NULL_MOVE; MOVE_ARR_SIZE];
         let mut move_generation_temp_arr: Vec<u32> = vec![NULL_MOVE; MAX_PSEUDO_MOVES_IN_POS];
         let (generated, has_ep_take) = move_gen.generate_legal(
             &board,
@@ -391,6 +391,9 @@ impl Position {
             move_arr_s_idx = 0;
             self.move_arr_idx.clear();
             self.move_arr_idx.push(0); // 0 ply ends at 0 (exclusive)
+        }
+        if move_arr_s_idx + MAX_PSEUDO_MOVES_IN_POS > self.move_arr.len() {
+            self.move_arr.resize(self.move_arr.len() * 2, NULL_MOVE);
         }
         let (generated, ep_take_available) = move_gen.generate_legal(
             &self.board,

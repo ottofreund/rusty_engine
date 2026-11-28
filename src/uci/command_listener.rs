@@ -3,18 +3,26 @@ use std::{
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering::Relaxed},
-        Arc,
+        Arc, OnceLock,
     },
+    thread::{self, JoinHandle},
+    time::Instant,
 };
 
 use std::sync::Mutex;
 
 use crate::{
-    game::cpu_game::CpuGame, repr::{
-        _move::{self, NULL_MOVE}, types::{VERSION, WHITE},
-    }, search::search_config::SearchMode, uci::uci_command::{
-        ArbiterCommand, GoCommand, PositionCommand, SetOptionCommand, UCI_OPTIONS, UciOptionId, UciOptionValue, resolve_uci_option,
-    }, utils::fen_tool::is_valid_fen,
+    game::cpu_game::CpuGame,
+    repr::{
+        _move::{self, NULL_MOVE},
+        types::{VERSION, WHITE},
+    },
+    search::search_config::{SearchMode, TimeBudget},
+    uci::uci_command::{
+        resolve_uci_option, ArbiterCommand, GoCommand, PositionCommand, SetOptionCommand,
+        UciOptionId, UciOptionValue, UCI_OPTIONS,
+    },
+    utils::fen_tool::is_valid_fen,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -75,12 +83,97 @@ fn apply_resolved_option(cpu_game: &mut CpuGame, option: (UciOptionId, UciOption
                 println!("info string Rusty only supports 1 thread, ignoring Threads option");
             }
         }
+        (UciOptionId::MoveOverhead, UciOptionValue::Spin(overhead)) => {
+            cpu_game.searcher.search_config.move_overhead_ms = overhead as u64;
+        }
+        (UciOptionId::Ponder, UciOptionValue::Check) => {
+            // The GUI enables pondering per move with `go ponder`.
+        }
+        _ => unreachable!("validated UCI option type"),
+    }
+}
+
+#[derive(Clone)]
+enum SearchSignal {
+    Normal,
+    Infinite,
+    Ponder(Arc<OnceLock<Instant>>),
+}
+
+impl SearchSignal {
+    fn withhold_bestmove(&self) -> bool {
+        match self {
+            Self::Normal => false,
+            Self::Infinite => true,
+            Self::Ponder(start) => start.get().is_none(),
+        }
+    }
+}
+
+fn start_uci_search(
+    mut game: Box<CpuGame>,
+    command: &GoCommand,
+    kill_switch: Arc<AtomicBool>,
+) -> (JoinHandle<Box<CpuGame>>, SearchSignal) {
+    let config = &mut game.searcher.search_config;
+    let white_to_move = game.searcher.positions[0].board.turn == WHITE;
+    config.search_mode = search_mode(command, white_to_move, config.move_overhead_ms);
+    let signal = if command.ponder {
+        SearchSignal::Ponder(Arc::new(OnceLock::new()))
+    } else if command.infinite {
+        SearchSignal::Infinite
+    } else {
+        SearchSignal::Normal
+    };
+    config.ponder_start = match &signal {
+        SearchSignal::Ponder(start) => Some(start.clone()),
+        _ => None,
+    };
+
+    let worker_signal = signal.clone();
+    kill_switch.store(false, Relaxed);
+    let handle = thread::Builder::new()
+        .name("uci-search-thread".into())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            game.searcher
+                .start_search(&game.move_gen, &game.zobrist, Some(kill_switch.clone()));
+            while worker_signal.withhold_bestmove() && !kill_switch.load(Relaxed) {
+                thread::park();
+            }
+
+            let best_move = game.searcher.collect_best_move().unwrap_or_else(|| {
+                game.searcher.positions[0]
+                    .legal_moves()
+                    .first()
+                    .copied()
+                    .unwrap_or(NULL_MOVE)
+            });
+            let best_move = _move::to_string(best_move, true);
+            if let Some(ponder_move) = game.searcher.collect_ponder_move() {
+                println!(
+                    "bestmove {best_move} ponder {}",
+                    _move::to_string(ponder_move, true)
+                );
+            } else {
+                println!("bestmove {best_move}");
+            }
+            game
+        })
+        .unwrap();
+    (handle, signal)
+}
+
+fn stop_search(kill_switch: &AtomicBool, active_search: Option<&JoinHandle<Box<CpuGame>>>) {
+    if let Some(handle) = active_search {
+        kill_switch.store(true, Relaxed);
+        handle.thread().unpark();
     }
 }
 
 fn reclaim_cpu_game(
     cpu_game: &mut Option<Box<CpuGame>>,
-    active_search_thread: &mut Option<std::thread::JoinHandle<Box<CpuGame>>>,
+    active_search_thread: &mut Option<JoinHandle<Box<CpuGame>>>,
 ) {
     if let Some(handle) = active_search_thread.take() {
         *cpu_game = Some(handle.join().unwrap());
@@ -90,7 +183,7 @@ fn reclaim_cpu_game(
 pub(super) fn apply_set_option_to_engine(
     command: &SetOptionCommand,
     cpu_game: &mut Option<Box<CpuGame>>,
-    active_search_thread: &mut Option<std::thread::JoinHandle<Box<CpuGame>>>,
+    active_search_thread: &mut Option<JoinHandle<Box<CpuGame>>>,
 ) {
     let Some(option) = resolve_uci_option(command) else {
         return;
@@ -105,11 +198,13 @@ pub(super) fn apply_set_option_to_engine(
 pub async fn listen(cpu_game: CpuGame) {
     let stdin = std::io::stdin();
     let mut display_board = cpu_game.position.board.clone();
-    let mut active_search_thread: Option<std::thread::JoinHandle<Box<CpuGame>>> = None;
+    let mut active_search_thread = None;
+    let mut search_signal = SearchSignal::Normal;
     let mut cpu_game: Option<Box<CpuGame>> = Some(Box::new(cpu_game));
     let search_kill_switch: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    let last_pos_command: Arc<Mutex<PositionCommand>> = Arc::new(Mutex::new(PositionCommand::new(None, vec![])));
-  
+    let last_pos_command: Arc<Mutex<PositionCommand>> =
+        Arc::new(Mutex::new(PositionCommand::new(None, vec![])));
+
     for line in stdin.lock().lines() {
         let line = line.unwrap();
         let command = parse_command(&line);
@@ -128,76 +223,40 @@ pub async fn listen(cpu_game: CpuGame) {
                         println!("readyok");
                     }
                     ArbiterCommand::SetOption(command) => {
-                        apply_set_option_to_engine(
-                            &command,
-                            &mut cpu_game,
-                            &mut active_search_thread,
-                        );
+                        if search_signal.withhold_bestmove() && resolve_uci_option(&command).is_some() {
+                            stop_search(&search_kill_switch, active_search_thread.as_ref());
+                        }
+                        apply_set_option_to_engine(&command, &mut cpu_game, &mut active_search_thread);
                     }
                     ArbiterCommand::UCINewGame => {
-                        if active_search_thread.is_some() {
-                            search_kill_switch.store(true, Relaxed);
-                            reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
-                        }
+                        stop_search(&search_kill_switch, active_search_thread.as_ref());
+                        reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
                         let cpu_g: &mut Box<CpuGame> = cpu_game.as_mut().unwrap();
                         cpu_g.searcher.reset();
                     }
                     ArbiterCommand::Go(gc) if gc.is_valid() => {
-                        //TODO add ponder case
-                        //join possible previous search thread before starting a new one
+                        stop_search(&search_kill_switch, active_search_thread.as_ref());
                         reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
 
-                        let mut game: Box<CpuGame> = cpu_game.take().unwrap();
-                        let kill_switch_clone = search_kill_switch.clone();
-                        kill_switch_clone.store(false, Relaxed);
-                        active_search_thread = Some(std::thread::Builder::new()
-                                .name("uci-search-thread".into())
-                                .stack_size(32 * 1024 * 1024)
-                                .spawn(move || {
-                            if let Some(movetime) = gc.movetime {
-                                game.searcher.search_config.search_mode =
-                                    SearchMode::static_time_with_margin(movetime);
-                            } else if let (Some(wtime), Some(btime)) = (gc.wtime, gc.btime) {
-                                game.searcher.search_config.search_mode =
-                                    SearchMode::time_control_with_margin(
-                                        wtime,
-                                        btime,
-                                        gc.winc.unwrap_or(0),
-                                        gc.binc.unwrap_or(0),
-                                        game.searcher.positions[0].board.turn == WHITE,
-                                    );
-                            } else if let Some(depth) = gc.depth {
-                                game.searcher.search_config.search_mode =
-                                    SearchMode::StaticDepth(depth);
-                            }
-                            game.searcher.start_search(
-                                &game.move_gen,
-                                &game.zobrist,
-                                Some(kill_switch_clone),
-                            );
-                            let best_move: u32 = game.searcher.collect_best_move().unwrap_or(NULL_MOVE);
-                            match game.searcher.collect_ponder_move() {
-                                Some(pm) => {
-                                    println!("bestmove {} ponder {}", _move::to_string(best_move, true), _move::to_string(pm, true))
-                                }
-                                None => {
-                                    println!("bestmove {}", _move::to_string(best_move, true))
-                                }
-                            }
-                            return game;
-                        }).unwrap());
+                        let (handle, signal) =
+                            start_uci_search(cpu_game.take().unwrap(), &gc, search_kill_switch.clone());
+                        active_search_thread = Some(handle);
+                        search_signal = signal;
                     }
                     ArbiterCommand::Go(_) => {
                         println!("info string Invalid go command");
                     }
                     ArbiterCommand::PonderHit => {
-                        //TODO
+                        if let (SearchSignal::Ponder(start), Some(handle)) =
+                            (&search_signal, active_search_thread.as_ref())
+                        {
+                            let _ = start.set(Instant::now());
+                            handle.thread().unpark();
+                        }
                     }
                     ArbiterCommand::Position(pc) => {
-                        if active_search_thread.is_some() {
-                            search_kill_switch.store(true, Relaxed);
-                            reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
-                        }
+                        stop_search(&search_kill_switch, active_search_thread.as_ref());
+                        reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
 
                         let cpu_g: &mut CpuGame = cpu_game.as_mut().unwrap();
                         match last_pos_command.try_lock() {
@@ -216,19 +275,15 @@ pub async fn listen(cpu_game: CpuGame) {
                             Err(_) => {
                                 println!("info string Multiple position commands active, aborting");
                             }
-                        }                        
+                        }
                     }
                     ArbiterCommand::Quit => {
-                        let kill_switch_clone = search_kill_switch.clone();
-                        kill_switch_clone.store(true, Relaxed);
-                        active_search_thread
-                            .take()
-                            .map(|handle| handle.join().unwrap());
+                        stop_search(&search_kill_switch, active_search_thread.as_ref());
+                        reclaim_cpu_game(&mut cpu_game, &mut active_search_thread);
                         return;
                     }
                     ArbiterCommand::Stop => {
-                        let kill_switch_clone = search_kill_switch.clone();
-                        kill_switch_clone.store(true, Relaxed);
+                        stop_search(&search_kill_switch, active_search_thread.as_ref());
                     }
                 }
             }
@@ -238,6 +293,28 @@ pub async fn listen(cpu_game: CpuGame) {
                 _ => println!("info string Invalid command: {}", line),
             },
         }
+    }
+}
+
+pub(super) fn search_mode(command: &GoCommand, white_to_move: bool, overhead: u64) -> SearchMode {
+    if let Some(movetime) = command.movetime {
+        SearchMode::StaticTime(movetime.saturating_sub(overhead))
+    } else if let Some(depth) = command.depth {
+        SearchMode::StaticDepth(depth)
+    } else if let (Some(white_time), Some(black_time)) = (command.wtime, command.btime) {
+        let (remaining, increment) = if white_to_move {
+            (white_time, command.winc.unwrap_or(0))
+        } else {
+            (black_time, command.binc.unwrap_or(0))
+        };
+        SearchMode::Clock(TimeBudget::new(
+            remaining,
+            increment,
+            command.moves_to_go,
+            overhead,
+        ))
+    } else {
+        SearchMode::Infinite
     }
 }
 
@@ -284,6 +361,7 @@ pub(super) fn parse_command(line: &str) -> Option<ArbiterCommand> {
         }
         "go" => parse_go_command(&parts).map(ArbiterCommand::Go),
         "ucinewgame" => Some(ArbiterCommand::UCINewGame),
+        "ponderhit" => Some(ArbiterCommand::PonderHit),
         "stop" => Some(ArbiterCommand::Stop),
         "quit" => Some(ArbiterCommand::Quit),
         _ => None,
@@ -329,6 +407,8 @@ fn parse_go_command(parts: &[&str]) -> Option<GoCommand> {
         binc: parse_go_value(parts, "binc")?,
         movetime: None,
         depth: None,
+        moves_to_go: parse_go_value(parts, "movestogo")?,
+        infinite: parts.contains(&"infinite") || parts.len() == 1 || (ponder && parts.len() == 2),
     })
 }
 

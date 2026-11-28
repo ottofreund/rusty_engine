@@ -25,35 +25,65 @@ fn promoting_recaptures_use_promoted_value_and_gain() {
         let board = fen_tool::fen_to_board(fen.to_owned(), &move_gen)
             .expect("valid promotion-recapture position");
 
-        assert!(!SeeWorker::default().see_positive(initiating_move, &board, &move_gen,));
+        assert!(!SeeWorker.see_positive(initiating_move, &board, &move_gen));
     }
 }
 
 #[test]
-fn black_discovered_attackers_preserve_value_groups_and_lvp() {
-    let mut worker = SeeWorker::default();
-    worker.piece_s_indices_black = [NO_ENTRIES_IDX; NOF_PIECE_TYPES_U];
+fn black_rook_reveals_a_second_attacker_after_recapturing() {
+    let move_gen = MoveGen::init();
+    let mov = _move::with_eaten_piece(_move::create(3, 35, true, WHITE, W_ROOK), B_PAWN);
+    for (fen, expected) in [
+        ("6k1/8/3r4/3p4/5N2/8/8/3R2K1 w - - 0 1", true),
+        ("6k1/3r4/3r4/3p4/5N2/8/8/3R2K1 w - - 0 1", false),
+    ] {
+        let board = fen_tool::fen_to_board(fen.to_owned(), &move_gen).unwrap();
+        assert_eq!(SeeWorker.see_positive(mov, &board, &move_gen), expected);
+    }
+}
 
-    worker.add_discovered_attacker(16, B_QUEEN_U);
-    worker.add_discovered_attacker(8, B_PAWN_U);
-    worker.add_discovered_attacker(24, B_ROOK_U);
-    worker.add_discovered_attacker(32, B_PAWN_U);
+#[test]
+fn pinned_defenders_cannot_recapture_off_the_pin_ray() {
+    let move_gen = MoveGen::init();
+    let mov = _move::with_eaten_piece(_move::create(3, 35, true, WHITE, W_QUEEN), B_PAWN);
+    for (fen, expected) in [
+        ("5k2/8/5n2/3p4/8/8/8/3Q2K1 w - - 0 1", false),
+        ("5k2/8/5n2/3p4/8/8/8/3Q1RK1 w - - 0 1", true),
+    ] {
+        let board = fen_tool::fen_to_board(fen.to_owned(), &move_gen).unwrap();
+        assert_eq!(SeeWorker.see_positive(mov, &board, &move_gen), expected);
+    }
+}
 
-    assert_eq!(worker.attackers_black, vec![16, 24, 8, 32]);
-    assert_eq!(worker.lvp_black, Some(B_PAWN_U));
-    assert_eq!(worker.piece_s_indices_black[W_QUEEN_U], 0);
-    assert_eq!(worker.piece_s_indices_black[W_ROOK_U], 1);
-    assert_eq!(worker.piece_s_indices_black[W_PAWN_U], 2);
-    assert_eq!(worker.piece_s_indices_black[W_KNIGHT_U], NO_ENTRIES_IDX);
-    assert_eq!(worker.piece_s_indices_black[W_BISHOP_U], NO_ENTRIES_IDX);
+#[test]
+fn king_cannot_recapture_on_a_defended_square() {
+    let move_gen = MoveGen::init();
+    let mov = _move::with_eaten_piece(_move::create(24, 28, true, WHITE, W_QUEEN), B_PAWN);
+    for (fen, expected) in [
+        ("8/8/8/5k2/Q3p3/8/8/6K1 w - - 0 1", false),
+        ("8/8/8/5k2/Q3p3/8/8/4R1K1 w - - 0 1", true),
+    ] {
+        let board = fen_tool::fen_to_board(fen.to_owned(), &move_gen).unwrap();
+        assert_eq!(SeeWorker.see_positive(mov, &board, &move_gen), expected);
+    }
+}
 
-    assert_eq!(worker.pop_lvp(BLACK), (32, W_PAWN_U));
-    assert_eq!(worker.lvp_black, Some(B_PAWN_U));
-    assert_eq!(worker.pop_lvp(BLACK), (8, W_PAWN_U));
-    assert_eq!(worker.lvp_black, Some(B_ROOK_U));
-    assert_eq!(worker.pop_lvp(BLACK), (24, W_ROOK_U));
-    assert_eq!(worker.lvp_black, Some(B_QUEEN_U));
-    assert_eq!(worker.pop_lvp(BLACK), (16, W_QUEEN_U));
-    assert_eq!(worker.lvp_black, None);
-    assert_eq!(worker.total_attackers, 0);
+#[test]
+fn en_passant_removes_the_victim_before_rook_xrays() {
+    let move_gen = MoveGen::init();
+    let mov = _move::with_eaten_piece(_move::create_en_passant(36, 43, WHITE, W_PAWN), B_PAWN);
+    let board = fen_tool::fen_to_board("6k1/8/8/3pP3/8/8/8/3r2K1 w - d6 0 1".to_owned(), &move_gen)
+        .unwrap();
+    assert!(SeeWorker.see_ge(mov, 0, &board, &move_gen));
+    assert!(!SeeWorker.see_ge(mov, 1, &board, &move_gen));
+}
+
+#[test]
+fn quiet_promotion_accounts_for_an_immediate_capture() {
+    let move_gen = MoveGen::init();
+    let mov = _move::create_promotion(48, 56, false, W_QUEEN, WHITE, W_PAWN);
+    let board =
+        fen_tool::fen_to_board("1r4k1/P7/8/8/8/8/8/6K1 w - - 0 1".to_owned(), &move_gen).unwrap();
+    assert!(!SeeWorker.see_positive(mov, &board, &move_gen));
+    assert!(SeeWorker.see_ge(mov, -100, &board, &move_gen));
 }

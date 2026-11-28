@@ -1,9 +1,10 @@
 //* Stockfish inspired implementation *//
 
-use crate::{search::eval::MATE_BOUND};
+use crate::{repr::_move::NULL_MOVE, search::eval::MATE_BOUND};
 
 const CLUSTER_SIZE: usize = 4;
 const REPLACE_V_AGE_COEFFICIENT: u16 = 4;
+const EXACT_REPLACEMENT_BONUS: i16 = 3;
 pub const DEFAULT_TT_SIZE_MB: u32 = 16;
 pub const DEFAULT_TT_SIZE: usize = DEFAULT_TT_SIZE_MB as usize * 1024 * 1024;
 
@@ -33,16 +34,22 @@ pub struct TTEntry {
     pub generation: u8,
 }
 impl TTEntry {
-
-    pub fn new_packed(key: u64, best_move: u32, depth: u8, bound_type: TTEntryType, score: i16, generation: u8) -> Self {
-        let depth_and_bound_type: u8 = (depth & 0b111111) | ((bound_type as u8) << 6);
+    pub fn new_packed(
+        key: u64,
+        best_move: u32,
+        depth: u8,
+        bound_type: TTEntryType,
+        score: i16,
+        generation: u8,
+    ) -> Self {
+        let depth_and_bound_type: u8 = depth.min(0b111111) | ((bound_type as u8) << 6);
         return Self {
             key,
             best_move,
             depth_and_bound_type,
             score,
             generation,
-        }
+        };
     }
 
     #[inline]
@@ -64,9 +71,7 @@ impl TTEntry {
             _ => unreachable!(),
         }
     }
-
 }
-
 
 #[repr(align(64))]
 #[derive(Clone, Copy)]
@@ -86,13 +91,15 @@ pub struct TranspositionTable {
 }
 
 impl TranspositionTable {
-
     pub fn resize(&mut self, size_mb: u32) {
         let new_nof_clusters = (size_mb as usize * 1024 * 1024) / std::mem::size_of::<TTCluster>();
         if new_nof_clusters != self.nof_clusters {
-            self.clusters = vec![TTCluster {
-                entries: [NULL_ENTRY ; CLUSTER_SIZE],
-            }; new_nof_clusters]
+            self.clusters = vec![
+                TTCluster {
+                    entries: [NULL_ENTRY; CLUSTER_SIZE],
+                };
+                new_nof_clusters
+            ]
             .into_boxed_slice();
             self.nof_clusters = new_nof_clusters;
         }
@@ -107,7 +114,6 @@ impl TranspositionTable {
         self.generation = 0;
     }
 
-    /// If hit, returns (true, entry) else returns (false, entry_to_replace)
     pub fn probe(&self, key: u64) -> Option<TTEntry> {
         let cluster_index: usize = self.get_cluster_idx(key);
         let cluster: &TTCluster = &self.clusters[cluster_index];
@@ -121,16 +127,35 @@ impl TranspositionTable {
         return None;
     }
 
-    pub fn store(&mut self, tte: TTEntry) {
+    /// Keep frequently reused entries in the current generation even when the
+    /// search cuts off from the stored bound without writing a new entry.
+    pub(super) fn probe_refresh(&mut self, key: u64) -> Option<TTEntry> {
+        let index = self.get_cluster_idx(key);
+        let entry = self.clusters[index]
+            .entries
+            .iter_mut()
+            .find(|entry| entry.key == key && entry.is_occupied())?;
+        if entry.generation != self.generation {
+            entry.generation = self.generation;
+        }
+        Some(*entry)
+    }
+
+    pub fn store(&mut self, mut tte: TTEntry) {
         let cluster_index: usize = self.get_cluster_idx(tte.key);
         let cluster: &mut TTCluster = &mut self.clusters[cluster_index];
 
-        //find least valuable / existing same key entry to replace 
+        //find least valuable / existing same key entry to replace
         let mut replace_i: usize = 0;
         let mut replace_entry_v = i16::MAX;
         for i in 0..CLUSTER_SIZE {
             if cluster.entries[i].key == tte.key && cluster.entries[i].is_occupied() {
                 let existing = &mut cluster.entries[i];
+                if tte.best_move == NULL_MOVE {
+                    tte.best_move = existing.best_move;
+                } else if existing.best_move == NULL_MOVE {
+                    existing.best_move = tte.best_move;
+                }
                 let existing_depth = existing.depth();
                 let incoming_depth = tte.depth();
                 if incoming_depth > existing_depth {
@@ -172,9 +197,13 @@ impl TranspositionTable {
             return NULL_ENTRY_VALUE;
         } else {
             let age: i16 = cur_gen.wrapping_sub(entry.generation) as i16;
-            return entry.depth() as i16 - REPLACE_V_AGE_COEFFICIENT as i16 * age;
+            let exact = if entry.bound_type() == TTEntryType::Exact {
+                EXACT_REPLACEMENT_BONUS
+            } else {
+                0
+            };
+            return entry.depth() as i16 + exact - REPLACE_V_AGE_COEFFICIENT as i16 * age;
         }
-        
     }
 
     #[inline]
@@ -202,21 +231,74 @@ impl TranspositionTable {
             return score;
         }
     }
-
 }
 
 impl Default for TranspositionTable {
     fn default() -> Self {
         let nof_clusters: usize = DEFAULT_TT_SIZE / std::mem::size_of::<TTCluster>();
-        let clusters: Box<[TTCluster]> = vec![TTCluster {
-            entries: [NULL_ENTRY ; CLUSTER_SIZE],
-        }; nof_clusters]
+        let clusters: Box<[TTCluster]> = vec![
+            TTCluster {
+                entries: [NULL_ENTRY; CLUSTER_SIZE],
+            };
+            nof_clusters
+        ]
         .into_boxed_slice();
 
         return Self {
             clusters,
             nof_clusters,
             generation: 0,
+        };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refreshed_entries_survive_cluster_replacement() {
+        let mut table = TranspositionTable {
+            clusters: vec![TTCluster {
+                entries: [NULL_ENTRY; CLUSTER_SIZE],
+            }]
+            .into_boxed_slice(),
+            nof_clusters: 1,
+            generation: 255,
+        };
+        for key in 1..=4 {
+            table.store(TTEntry::new_packed(
+                key,
+                4,
+                7,
+                TTEntryType::LowerBound,
+                0,
+                255,
+            ));
         }
+
+        table.generation = 0;
+        assert_eq!(table.probe_refresh(1).unwrap().generation, 0);
+        table.store(TTEntry::new_packed(5, 4, 7, TTEntryType::LowerBound, 0, 0));
+
+        assert!(table.probe(1).is_some());
+        assert!(table.probe(2).is_none());
+    }
+
+    #[test]
+    fn score_only_write_preserves_move_hint() {
+        let mut table = TranspositionTable::default();
+        table.store(TTEntry::new_packed(1, 5, 0, TTEntryType::UpperBound, 0, 0));
+        table.store(TTEntry::new_packed(
+            1,
+            NULL_MOVE,
+            0,
+            TTEntryType::Exact,
+            -5,
+            0,
+        ));
+        let entry = table.probe(1).unwrap();
+        assert_eq!(entry.score, -5);
+        assert_eq!(entry.best_move, 5);
     }
 }

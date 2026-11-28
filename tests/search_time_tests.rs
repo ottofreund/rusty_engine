@@ -86,7 +86,7 @@ fn timed_searcher(
 fn static_search_budget(time_limit_ms: u64) -> Duration {
     match SearchMode::static_time_with_margin(time_limit_ms) {
         SearchMode::StaticTime(search_time_ms) => Duration::from_millis(search_time_ms),
-        SearchMode::StaticDepth(_) => unreachable!("static time constructor returned a depth"),
+        _ => unreachable!("static time constructor returned a different search mode"),
     }
 }
 

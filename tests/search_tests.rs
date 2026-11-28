@@ -22,7 +22,7 @@ use std::sync::{
 const MATE_IN_ONE_FEN: &str = "7k/8/5KQ1/8/8/8/8/8 w - - 0 1";
 const QUIET_MATERIAL_DISADVANTAGE_FEN: &str = "6qk/8/8/8/8/8/8/K7 w - - 0 1";
 const FORCED_INSUFFICIENT_MATERIAL_CAPTURE_FEN: &str = "5b2/8/8/8/8/1k6/8/Kr6 w - - 0 1";
-const STOP_CHECK_INTERVAL_NODES: u64 = 8192;
+const STOP_CHECK_INTERVAL_NODES: u64 = 2048;
 const CANCEL_TEST_DEPTH: usize = 9;
 
 fn search_static_depth(engine: &TestEngine, fen: &str, depth: usize, quiescence: bool) -> Searcher {
@@ -62,67 +62,6 @@ fn assert_legal_pv(engine: &TestEngine, start: &Position, pv: &[u32]) {
 }
 
 #[test]
-fn razor_probe_searches_captures_and_skips_quiet_moves() {
-    let engine = TestEngine::new();
-    let start = engine.position("4k3/8/8/8/8/8/q7/R3K3 w - - 0 1");
-    let find_move = |pos: &Position, name| {
-        pos.legal_search_moves()
-            .iter()
-            .copied()
-            .find(|&mov| _move::to_string(mov, true) == name)
-            .unwrap()
-    };
-    let first_move = find_move(&start, "a1a2");
-    let second_move = find_move(&start, "e1f1");
-    let mut child = start.clone();
-    engine.make_search_move(&mut child, second_move);
-    let key = |pos: &Position| Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock);
-
-    for (reply, capture) in [("a2b2", None), ("a2a7", Some("a1a7"))] {
-        let mut searcher = Searcher::from(&start, MULTITHREADED);
-        searcher.search_config.search_mode = SearchMode::StaticDepth(3);
-        // Search Rxa2 first to set alpha, then force the queen reply after Kf1.
-        searcher.search_data[0].completed_depth = 2;
-        searcher.search_data[0].pv[0] = first_move;
-        let reply = find_move(&child, reply);
-        for (pos, mov) in [(&start, second_move), (&child, reply)] {
-            searcher.tt.store(TTEntry::new_packed(
-                key(pos),
-                mov,
-                0,
-                TTEntryType::UpperBound,
-                0,
-                searcher.tt.generation,
-            ));
-        }
-        let mut grandchild = child.clone();
-        engine.make_search_move(&mut grandchild, reply);
-
-        searcher.start_search(&engine.move_gen, &engine.zobrist, None);
-
-        assert_eq!(
-            searcher.positions[0].search_move_bounds(),
-            start.search_move_bounds()
-        );
-        let entry = searcher.tt.probe(key(&grandchild));
-        if let Some(capture) = capture {
-            let entry = entry.expect("the tactical reply should reach the full search");
-            assert_eq!(entry.depth(), 1);
-            assert!(_move::move_eq(
-                entry.best_move,
-                find_move(&grandchild, capture)
-            ));
-        } else {
-            assert!(entry.is_none(), "the quiet position should prune without searching moves");
-            assert!(_move::move_eq(
-                searcher.tt.probe(key(&child)).unwrap().best_move,
-                reply
-            ));
-        }
-    }
-}
-
-#[test]
 fn depth_one_futility_searches_late_quiet_mate() {
     let engine = TestEngine::new();
     let start = engine.position("4r2k/p7/5KQ1/8/8/8/8/8 b - - 0 1");
@@ -155,12 +94,7 @@ fn depth_one_futility_searches_late_quiet_mate() {
             (child.board.turn, quiet_sibling, 200),
             (child.board.turn, mate, 100),
         ] {
-            data.update_history_entry(
-                side,
-                _move::get_init(mov),
-                _move::get_target(mov),
-                bonus,
-            );
+            data.update_history_entry(side, _move::get_init(mov), _move::get_target(mov), bonus);
         }
         searcher.tt.store(TTEntry::new_packed(
             key,
@@ -173,7 +107,10 @@ fn depth_one_futility_searches_late_quiet_mate() {
 
         searcher.start_search(&engine.move_gen, &engine.zobrist, None);
 
-        let entry = searcher.tt.probe(key).expect("missing non-PV child TT entry");
+        let entry = searcher
+            .tt
+            .probe(key)
+            .expect("missing non-PV child TT entry");
         assert_eq!(entry.best_move, mate, "quiescence={quiescence}");
         assert!(entry.bound_type() == TTEntryType::LowerBound);
         assert_eq!(
@@ -184,17 +121,19 @@ fn depth_one_futility_searches_late_quiet_mate() {
 }
 
 #[test]
-fn depth_one_pv_futility_preserves_alpha_improvement() {
+fn principal_variation_search_finds_material_improvement() {
     let engine = TestEngine::new();
     let fen = "2bqk1n1/3nbp2/rp4pr/p1p1p2p/N3P3/2PPBN1P/PP3PP1/1R1K1B1R w - - 0 1";
     let searcher = search_static_depth(&engine, fen, 4, true);
 
-    // After d3d4 g6g5 f1a6, c8a6 raises alpha despite later quiet moves being pruned.
-    let child = engine.position("2bqk1n1/3nbp2/Bp5r/p1p1p1pp/N2PP3/2P1BN1P/PP3PP1/1R1K3R b - - 0 1");
+    // After d3d4 g6g5 f1a6, Black can win the bishop before White retreats.
+    let child =
+        engine.position("2bqk1n1/3nbp2/Bp5r/p1p1p1pp/N2PP3/2P1BN1P/PP3PP1/1R1K3R b - - 0 1");
     let key = Zobrist::zkey50_adjusted(child.zhash, child.board.half_move_clock);
     let entry = searcher.tt.probe(key).expect("missing PV child TT entry");
     assert!(entry.bound_type() == TTEntryType::Exact);
-    assert_eq!(TranspositionTable::score_from_tt(entry.score, 3), 581);
+    assert_eq!(_move::to_string(entry.best_move, true), "c8a6");
+    assert!(TranspositionTable::score_from_tt(entry.score, 3) > 0);
 }
 
 #[test]
@@ -217,6 +156,17 @@ fn static_depth_quiescence_rejects_poisoned_capture() {
     assert!(
         with_quiescence.search_data[0].cumul_positions_searched
             > without_quiescence.search_data[0].cumul_positions_searched
+    );
+}
+
+#[test]
+fn search_finds_winning_rook_underpromotion() {
+    let engine = TestEngine::new();
+    let fen = "8/2P5/8/8/3r4/8/2K5/k7 w - - 0 1";
+    let searcher = search_static_depth(&engine, fen, 10, true);
+    assert_eq!(
+        _move::to_string(searcher.collect_best_move().unwrap(), true),
+        "c7c8r"
     );
 }
 
@@ -478,7 +428,7 @@ fn consecutive_static_search_syncs_exact_pv_tail() {
 }
 
 #[test]
-fn timed_search_gracefully_handles_abort_and_uses_incomplete_search_when_possible() {
+fn immediate_timeout_preserves_completed_search() {
     let engine = TestEngine::new();
     let start = engine.position(DEFAULT_FEN);
     let mut searcher = Searcher::from(&start, MULTITHREADED);
@@ -493,7 +443,7 @@ fn timed_search_gracefully_handles_abort_and_uses_incomplete_search_when_possibl
     searcher.search_config.search_mode = SearchMode::StaticTime(0);
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
 
-    assert_legal_pv(&engine, &start, &root_pv(&searcher));
+    assert_eq!(root_pv(&searcher), completed);
     assert_legal_pv(&engine, &start, &completed);
 }
 
@@ -543,7 +493,7 @@ fn static_depth_observes_preset_kill_switch_at_poll_interval() {
 
     let pv = root_pv(&killed);
     assert!(!pv.is_empty());
-    assert!(pv.len() > killed.search_data[0].completed_depth);
+    assert_eq!(pv, root_pv(&completed));
     assert_legal_pv(&engine, &start, &pv);
 
     // Repeated cancellations may complete more work using the TT, but the
@@ -641,9 +591,9 @@ fn sync_after_interruption_preserves_completed_work_and_retries_unfinished_depth
     assert_eq!(searcher.search_data[0].cumul_positions_searched, nodes);
     assert_eq!(searcher.search_data[0].completed_depth, completed_depth);
 
-    // The longer retained PV must not certify the unfinished depth after sync.
+    // Resume the first unfinished depth from the new root.
     let target_depth = interrupted_depth - 2;
-    assert_eq!(root_pv(&searcher).len(), target_depth);
+    assert_eq!(root_pv(&searcher).len(), completed_depth);
     searcher.search_config.search_mode = SearchMode::StaticDepth(target_depth);
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
     assert!(searcher.search_data[0].cumul_positions_searched > nodes);

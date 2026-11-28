@@ -1,10 +1,12 @@
 use super::{
-    command_listener::{apply_set_option_to_engine, parse_command, uci_identification_lines},
+    command_listener::{
+        apply_set_option_to_engine, parse_command, search_mode, uci_identification_lines,
+    },
     uci_command::{ArbiterCommand, GoCommand, SetOptionCommand},
 };
 use crate::{
     game::cpu_game::CpuGame,
-    search::{searcher::MAX_SEARCH_DEPTH, tt::TTCluster},
+    search::{search_config::SearchMode, searcher::MAX_SEARCH_DEPTH, tt::TTCluster},
 };
 
 const HASH_OPTION_LINE: &str = "option name Hash type spin default 16 min 1 max 32768";
@@ -167,4 +169,42 @@ fn rejects_depth_above_search_capacity() {
         .expect("syntactically valid go command");
 
     assert!(!command.is_valid());
+}
+
+#[test]
+fn clock_search_observes_side_period_and_overhead() {
+    let command = parse_go("go wtime 1200 btime 900 winc 400 binc 200 movestogo 1")
+        .expect("valid clock command");
+    assert!(command.is_valid());
+    assert_eq!(command.moves_to_go, Some(1));
+    for (white_to_move, remaining) in [(true, 1200), (false, 900)] {
+        let SearchMode::Clock(budget) = search_mode(&command, white_to_move, 50) else {
+            panic!("expected a clock search");
+        };
+        assert_eq!(budget.hard_ms(), remaining - 50);
+    }
+
+    let mut cpu_game = Some(Box::new(CpuGame::default()));
+    apply_set_option(&mut cpu_game, &set_option("Move Overhead", Some("50")));
+    let overhead = cpu_game.unwrap().searcher.search_config.move_overhead_ms;
+    assert_eq!(overhead, 50);
+    assert!(matches!(
+        search_mode(&parse_go("go movetime 200").unwrap(), true, overhead),
+        SearchMode::StaticTime(150)
+    ));
+}
+
+#[test]
+fn parses_infinite_and_ponderhit_commands() {
+    for command in ["go", "go infinite"] {
+        let go = parse_go(command).unwrap();
+        assert!(go.infinite && go.is_valid());
+    }
+    assert!(matches!(
+        parse_command("ponderhit"),
+        Some(ArbiterCommand::PonderHit)
+    ));
+    assert!(!parse_go("go wtime 100 btime 100 movestogo 0")
+        .unwrap()
+        .is_valid());
 }

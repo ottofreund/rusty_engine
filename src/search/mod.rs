@@ -1,4 +1,5 @@
 pub mod eval;
+mod move_picker;
 pub mod search_config;
 pub mod search_data;
 pub mod searcher;

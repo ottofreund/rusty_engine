@@ -19,39 +19,40 @@ principal-variation search, and a UCI command-line interface.
 ### Search
 
 - Fixed-depth or timed iterative-deepening negamax with principal variation
-  search (PVS) and alpha-beta pruning
+  search (PVS), aspiration windows, and mate-distance pruning
 - Cooperative cancellation and UCI diagnostics for depth, selective depth,
-  score, node and cutoff counts, and the principal variation
+  score, elapsed time, node count, NPS, and the principal variation
 
 ### Selectivity
 
 - Capture-and-promotion quiescence search with stand-pat pruning and full move
-  generation when the side to move is in check
-- Logarithmic late-move reductions (LMR), with a full-depth re-search when a
-  reduced move improves alpha
-- Null-move pruning at eligible non-PV nodes, using a fixed three-ply reduction
-  to test whether passing the turn still reaches beta
-- Depth-scaled futility pruning for later quiet moves when static evaluation is
-  below alpha by at least a margin that grows with remaining depth
+  generation in check, with stalemate detection and guarded capture pruning
+- Late-move reductions adjusted for move history, checks, and principal variation,
+  with a full-depth re-search when a reduced move improves alpha
+- Adaptive null-move pruning, razoring, reverse futility, and late quiet move pruning
+- Check extensions for principal variations and forced evasions, plus singular
+  extensions for verified transposition-table moves
 
 ### Search enhancements and move ordering
 
-- Previous-principal-variation and transposition-table move priority, static
-  exchange evaluation for captures, and an aged history heuristic for quiet moves
+- Principal-variation and transposition-table move priority, threshold-based static
+  exchange evaluation, killer moves, and capture, quiet, and continuation history
 - A configurable 16 MB-by-default, cache-line-aligned, clustered transposition
   table with depth-, bound-, and generation-aware replacement and search cutoffs
 
 ### Evaluation
 
-- Material and piece-square evaluation, with game-phase interpolation between
-  opening and endgame pawn and king tables
-- Bonuses for passed pawns and the bishop pair
+- Game-phase-aware material, piece-square, pawn structure, mobility, king safety,
+  outpost, rook activity, and threat evaluation
+- Endgame scaling, guidance for mating a bare king, and a built-in king-and-pawn
+  versus king bitbase
+- Pawn-structure correction history that adjusts static evaluation using search results
 
 ### Interfaces
 
-- A UCI front end for position import, `ucinewgame`, clock-based, fixed-time, or
-  fixed-depth search, Hash configuration, `stop`, board display with `d`, and
-  `bestmove` output with a principal-variation-derived `ponder` move
+- A UCI front end with adaptive clock management, fixed-time and fixed-depth
+  search, infinite search, pondering, configurable Hash and Move Overhead, and
+  board display with `d`
 - An `iced` board for player-versus-engine games and FEN loading, with its image
   and evaluation assets embedded in the binary
 
@@ -86,13 +87,16 @@ go depth 6
 quit
 ```
 
-Supported search modes are `go depth <plies>`, `go movetime <milliseconds>`, or
-clock-based `go` commands using `wtime`, `btime`, `winc`, and `binc`. Positions
+Supported search modes include `go depth <plies>`, `go movetime <milliseconds>`,
+`go infinite`, and clock-based `go` commands using `wtime`, `btime`, optional
+`winc` and `binc`, and optional `movestogo`. `go ponder` starts a pondering search,
+and `ponderhit` starts its clock. Positions
 may use `startpos` or a FEN followed by optional UCI moves. `ucinewgame` clears
 search state between games, while `stop` cooperatively cancels an active search.
 The non-standard `d` command prints the current board. The UCI `Hash` spin option
 configures the transposition table in MB, with a default of 16 and an accepted
-range of 1–32768.
+range of 1–32768. `Move Overhead` reserves time for communication and scheduling,
+with a default of 15 ms and a range of 0–5000 ms.
 
 The desktop GUI is available at the with-gui branch. The GUI supports player-side selection, player-versus-engine play,
 promotion selection, FEN loading, legal-move highlighting, and game-over dialogs.
@@ -137,6 +141,6 @@ are printed afterward.
 
 ## Remaining Work
 
-Planned work includes multithreaded search, search extensions, reverse-futility
-pruning, incremental evaluation and richer positional terms, large-page
-allocation for the transposition table, and full UCI pondering with `go ponder` and `ponderhit`.
+Planned work includes incremental evaluation, further search and evaluation
+tuning, large-page allocation for the transposition table, and multithreaded
+search.
