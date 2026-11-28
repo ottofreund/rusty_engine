@@ -62,6 +62,67 @@ fn assert_legal_pv(engine: &TestEngine, start: &Position, pv: &[u32]) {
 }
 
 #[test]
+fn razor_probe_searches_captures_and_skips_quiet_moves() {
+    let engine = TestEngine::new();
+    let start = engine.position("4k3/8/8/8/8/8/q7/R3K3 w - - 0 1");
+    let find_move = |pos: &Position, name| {
+        pos.legal_search_moves()
+            .iter()
+            .copied()
+            .find(|&mov| _move::to_string(mov, true) == name)
+            .unwrap()
+    };
+    let first_move = find_move(&start, "a1a2");
+    let second_move = find_move(&start, "e1f1");
+    let mut child = start.clone();
+    engine.make_search_move(&mut child, second_move);
+    let key = |pos: &Position| Zobrist::zkey50_adjusted(pos.zhash, pos.board.half_move_clock);
+
+    for (reply, capture) in [("a2b2", None), ("a2a7", Some("a1a7"))] {
+        let mut searcher = Searcher::from(&start, MULTITHREADED);
+        searcher.search_config.search_mode = SearchMode::StaticDepth(3);
+        // Search Rxa2 first to set alpha, then force the queen reply after Kf1.
+        searcher.search_data[0].completed_depth = 2;
+        searcher.search_data[0].pv[0] = first_move;
+        let reply = find_move(&child, reply);
+        for (pos, mov) in [(&start, second_move), (&child, reply)] {
+            searcher.tt.store(TTEntry::new_packed(
+                key(pos),
+                mov,
+                0,
+                TTEntryType::UpperBound,
+                0,
+                searcher.tt.generation,
+            ));
+        }
+        let mut grandchild = child.clone();
+        engine.make_search_move(&mut grandchild, reply);
+
+        searcher.start_search(&engine.move_gen, &engine.zobrist, None);
+
+        assert_eq!(
+            searcher.positions[0].search_move_bounds(),
+            start.search_move_bounds()
+        );
+        let entry = searcher.tt.probe(key(&grandchild));
+        if let Some(capture) = capture {
+            let entry = entry.expect("the tactical reply should reach the full search");
+            assert_eq!(entry.depth(), 1);
+            assert!(_move::move_eq(
+                entry.best_move,
+                find_move(&grandchild, capture)
+            ));
+        } else {
+            assert!(entry.is_none(), "the quiet position should prune without searching moves");
+            assert!(_move::move_eq(
+                searcher.tt.probe(key(&child)).unwrap().best_move,
+                reply
+            ));
+        }
+    }
+}
+
+#[test]
 fn depth_one_futility_searches_late_quiet_mate() {
     let engine = TestEngine::new();
     let start = engine.position("4r2k/p7/5KQ1/8/8/8/8/8 b - - 0 1");
