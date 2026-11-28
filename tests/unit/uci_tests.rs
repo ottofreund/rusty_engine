@@ -172,16 +172,16 @@ fn rejects_depth_above_search_capacity() {
 }
 
 #[test]
-fn clock_search_observes_side_period_and_overhead() {
+fn clock_search_uses_fixed_budget_for_side_to_move() {
     let command = parse_go("go wtime 1200 btime 900 winc 400 binc 200 movestogo 1")
         .expect("valid clock command");
     assert!(command.is_valid());
     assert_eq!(command.moves_to_go, Some(1));
-    for (white_to_move, remaining) in [(true, 1200), (false, 900)] {
+    for (white_to_move, expected_ms) in [(true, 410), (false, 195)] {
         let SearchMode::Clock(budget) = search_mode(&command, white_to_move, 50) else {
             panic!("expected a clock search");
         };
-        assert_eq!(budget.hard_ms(), remaining - 50);
+        assert_eq!(budget.hard_ms(), expected_ms);
     }
 
     let mut cpu_game = Some(Box::new(CpuGame::default()));

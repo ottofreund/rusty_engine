@@ -198,17 +198,17 @@ impl Searcher {
         zobrist: &Zobrist,
         kill_switch: Option<&AtomicBool>,
     ) {
-        let (target_depth, hard_ms, time_budget) = match self.search_config.search_mode {
+        let (target_depth, hard_ms) = match self.search_config.search_mode {
             SearchMode::StaticDepth(depth) => {
                 assert!(
                     depth <= MAX_SEARCH_DEPTH,
                     "static search depth {depth} exceeds MAX_SEARCH_DEPTH {MAX_SEARCH_DEPTH}"
                 );
-                (depth, None, None)
+                (depth, None)
             }
-            SearchMode::StaticTime(ms) => (MAX_SEARCH_DEPTH, Some(ms), None),
-            SearchMode::Clock(budget) => (MAX_SEARCH_DEPTH, Some(budget.hard_ms()), Some(budget)),
-            SearchMode::Infinite => (MAX_SEARCH_DEPTH, None, None),
+            SearchMode::StaticTime(ms) => (MAX_SEARCH_DEPTH, Some(ms)),
+            SearchMode::Clock(budget) => (MAX_SEARCH_DEPTH, Some(budget.hard_ms())),
+            SearchMode::Infinite => (MAX_SEARCH_DEPTH, None),
         };
         let control = SearchControl {
             started: Instant::now(),
@@ -216,7 +216,6 @@ impl Searcher {
             kill_switch,
             ponder_start: self.search_config.ponder_start.as_deref(),
         };
-        let mut time_manager = time_budget.map(TimeManager::new);
         let mut pv_len = self.count_pv_moves(idx);
         let data = &mut self.search_data[idx];
         data.age_history();
@@ -235,7 +234,6 @@ impl Searcher {
             static_evals: [None; MAX_PLY],
             root_history_index,
             repetition_epoch: 0,
-            best_move_nodes: 0,
             reductions: reductions(),
         };
         let mut last_score: Option<i16> = None;
@@ -244,7 +242,6 @@ impl Searcher {
             if control.deadline_reached() {
                 break;
             }
-            let iteration_start = Instant::now();
             search.previous_pv.fill(NULL_MOVE);
             let ordering_len = pv_len.min(depth);
             search.previous_pv[..ordering_len].copy_from_slice(&search.data.pv[..ordering_len]);
@@ -314,33 +311,14 @@ impl Searcher {
                 );
             }
 
-            let nodes = search.data.positions_searched;
-            let best_move = with_see_cleared(search.data.pv[0]);
-            let root_nodes_pct = (nodes != 0).then(|| (search.best_move_nodes * 100 / nodes) as u8);
             search.data.reset_temp_performance_data();
 
-            if let Some(elapsed) = control.elapsed() {
-                let (start, end) = search.pos.search_move_bounds();
-                if time_manager.is_some() && end - start == 1 {
-                    break;
-                }
-                if hard_ms.is_some()
-                    && (pv_len == 0
-                        || (eval.abs() >= MATE_BOUND && (MATE_EVAL - eval.abs()) as usize <= depth))
-                {
-                    break;
-                }
-                if time_manager.as_mut().is_some_and(|manager| {
-                    !manager.should_start_iteration(
-                        elapsed,
-                        iteration_start.elapsed(),
-                        best_move,
-                        eval,
-                        root_nodes_pct,
-                    )
-                }) {
-                    break;
-                }
+            if hard_ms.is_some()
+                && control.elapsed().is_some()
+                && (pv_len == 0
+                    || (eval.abs() >= MATE_BOUND && (MATE_EVAL - eval.abs()) as usize <= depth))
+            {
+                break;
             }
         }
     }
@@ -403,7 +381,6 @@ struct Search<'a> {
     static_evals: [Option<i16>; MAX_PLY],
     root_history_index: usize,
     repetition_epoch: u64,
-    best_move_nodes: u64,
     reductions: &'static [[i16; 64]; MAX_SEARCH_DEPTH + 1],
 }
 
@@ -580,9 +557,6 @@ impl Search<'_> {
         let mut limit = end;
         let side = self.pos.board.turn;
         let futility_margin = 75 + 55 * depth;
-        if root {
-            self.best_move_nodes = 0;
-        }
 
         while i < limit {
             let mov = picker.next(
@@ -641,7 +615,6 @@ impl Search<'_> {
 
             let child_depth = depth - 1 + i16::from(move_eq(mov, singular_move));
             let follows = follows_previous_pv && move_eq(mov, previous_move);
-            let nodes_before_move = self.data.positions_searched;
             let epoch_before_move = self.repetition_epoch;
             self.make_move(mov, self.use_quiescence && child_depth == 0);
             let reduction = if depth >= 3
@@ -714,9 +687,6 @@ impl Search<'_> {
                 best_move = mov;
                 if pv {
                     self.update_pv(ply, mov);
-                }
-                if root {
-                    self.best_move_nodes = self.data.positions_searched - nodes_before_move;
                 }
             }
             alpha = alpha.max(score);
@@ -1049,7 +1019,6 @@ mod tests {
             static_evals: [None; MAX_PLY],
             root_history_index: 0,
             repetition_epoch: 0,
-            best_move_nodes: 0,
             reductions: reductions(),
         };
         let bounds = search.pos.search_move_bounds();
