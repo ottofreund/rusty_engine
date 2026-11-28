@@ -3,12 +3,10 @@ use crate::{
         _move::{self, NULL_MOVE},
         board::Board,
         position::Position,
-        types::{B_PAWN_U, NOF_PIECE_TYPES_U, W_PAWN_U},
+        types::{B_PAWN_U, W_PAWN_U},
     },
     search::{
-        eval::MATE_BOUND,
-        searcher::{MAX_PLY, MAX_SEARCH_DEPTH},
-        see::SeeWorker,
+        eval::MATE_BOUND, legacy_see::LegacySeeWorker, searcher::MAX_SEARCH_DEPTH, see::SeeWorker,
     },
 };
 
@@ -17,7 +15,6 @@ const MAX_HISTORY_VAL: i32 = 7183; //from stockfish
 const BONUS_MULTIPLIER: i32 = 7;
 const HISTORY_AGING_NUMERATOR: i32 = 3;
 const HISTORY_AGING_DENOMINATOR: i32 = 4;
-const PIECE_SQUARES: usize = 2 * NOF_PIECE_TYPES_U * 64;
 const CORRECTION_BITS: u32 = 13;
 const CORRECTION_ENTRIES: usize = 1 << CORRECTION_BITS;
 const CORRECTION_SCALE: i32 = 64;
@@ -36,10 +33,8 @@ pub struct SearchData {
     pub board_hash_history: Vec<u64>, //only relevant, i.e. since last non-reversible move
     pub(super) repetition_start: usize,
     pub history_table: [i16; 2 * 64 * 64], //history_table[side * 4096 + from_sq * 64 + to_sq]
-    capture_history: [i16; PIECE_SQUARES * NOF_PIECE_TYPES_U],
-    continuation_history: Box<[i16]>,
     correction_history: Box<[i16]>,
-    pub(super) killers: [[u32; 2]; MAX_PLY + 1],
+    pub(super) legacy_see: LegacySeeWorker,
     pub see_helper: SeeWorker,
     //per search data
     pub positions_searched: u64,
@@ -57,10 +52,7 @@ impl SearchData {
         self.completed_depth = 0;
         self.pv_ply_indices = get_triang_pv_ply_idx_table(1);
         self.history_table.fill(0);
-        self.capture_history.fill(0);
-        self.continuation_history.fill(0);
         self.correction_history.fill(0);
-        self.killers.fill([NULL_MOVE; 2]);
         self.mate_in = None;
         self.repetition_start = 0;
         self.reset_temp_performance_data();
@@ -78,10 +70,8 @@ impl SearchData {
             board_hash_history: board_hash_history,
             repetition_start: 0,
             history_table: [0; 2 * 64 * 64],
-            capture_history: [0; PIECE_SQUARES * NOF_PIECE_TYPES_U],
-            continuation_history: vec![0; PIECE_SQUARES * PIECE_SQUARES].into_boxed_slice(),
             correction_history: vec![0; 2 * CORRECTION_ENTRIES].into_boxed_slice(),
-            killers: [[NULL_MOVE; 2]; MAX_PLY + 1],
+            legacy_see: LegacySeeWorker::default(),
             see_helper: SeeWorker,
             positions_searched: 0,
             stand_pat_cutoffs: 0,
@@ -150,14 +140,9 @@ impl SearchData {
     }
 
     pub(crate) fn age_history(&mut self) {
-        for entry in self
-            .history_table
-            .iter_mut()
-            .chain(self.capture_history.iter_mut())
-        {
+        for entry in &mut self.history_table {
             *entry = (*entry as i32 * HISTORY_AGING_NUMERATOR / HISTORY_AGING_DENOMINATOR) as i16;
         }
-        self.killers.fill([NULL_MOVE; 2]);
     }
 
     #[inline]
@@ -175,60 +160,31 @@ impl SearchData {
 
     pub(super) fn update_cutoff_history(
         &mut self,
-        ply: usize,
         side: u32,
-        played_moves: &[u32],
         cutoff_move: u32,
         tried_moves: &[u32],
         depth: usize,
     ) {
-        let depth = depth as i32;
-        let bonus = ((depth * depth + 8 * depth) / 3).clamp(1, 200);
-        let malus = -((3 * bonus / 4).max(1));
-        if let Some(victim) = Self::capture_index(cutoff_move) {
-            Self::update_history_value(&mut self.capture_history[victim], bonus);
-            for index in tried_moves.iter().copied().filter_map(Self::capture_index) {
-                Self::update_history_value(&mut self.capture_history[index], malus);
-            }
-        } else if !_move::is_promotion(cutoff_move) {
-            if let Some(killers) = self.killers.get_mut(ply) {
-                if killers[0] != cutoff_move {
-                    *killers = [cutoff_move, killers[0]];
-                }
-            }
-
-            let context = Self::continuation_context(played_moves);
-            self.update_quiet_history(side, cutoff_move, context, bonus);
-            for &mov in tried_moves {
-                if !_move::is_eating(mov) && !_move::is_promotion(mov) {
-                    self.update_quiet_history(side, mov, context, malus);
-                }
+        if _move::is_eating(cutoff_move) || _move::is_promotion(cutoff_move) {
+            return;
+        }
+        let bonus = depth as i32;
+        self.update_history_entry(
+            side,
+            _move::get_init(cutoff_move),
+            _move::get_target(cutoff_move),
+            bonus,
+        );
+        for &mov in tried_moves {
+            if !_move::is_eating(mov) && !_move::is_promotion(mov) {
+                self.update_history_entry(
+                    side,
+                    _move::get_init(mov),
+                    _move::get_target(mov),
+                    -bonus,
+                );
             }
         }
-    }
-
-    pub(super) fn continuation_context(played_moves: &[u32]) -> [Option<usize>; 2] {
-        let mut context = [None; 2];
-        for (entry, &mov) in context.iter_mut().zip(played_moves.iter().rev()) {
-            if mov == NULL_MOVE {
-                break;
-            }
-            *entry = Some(Self::piece_square_index(mov) * PIECE_SQUARES);
-        }
-        context
-    }
-
-    pub(super) fn quiet_history(&self, side: u32, mov: u32, context: [Option<usize>; 2]) -> i32 {
-        let index = Self::piece_square_index(mov);
-        let mut score = self.get_history_entry(side, mov);
-        for row in context.into_iter().flatten() {
-            score += i32::from(self.continuation_history[row + index]) / 2;
-        }
-        score
-    }
-
-    pub(super) fn capture_history(&self, mov: u32) -> i32 {
-        Self::capture_index(mov).map_or(0, |index| i32::from(self.capture_history[index]))
     }
 
     #[inline]
@@ -263,20 +219,6 @@ impl SearchData {
         (mixed >> (64 - CORRECTION_BITS)) as usize + board.turn as usize * CORRECTION_ENTRIES
     }
 
-    fn update_quiet_history(
-        &mut self,
-        side: u32,
-        mov: u32,
-        context: [Option<usize>; 2],
-        bonus: i32,
-    ) {
-        self.update_history_entry(side, _move::get_init(mov), _move::get_target(mov), bonus);
-        let index = Self::piece_square_index(mov);
-        for row in context.into_iter().flatten() {
-            Self::update_history_value(&mut self.continuation_history[row + index], bonus);
-        }
-    }
-
     #[inline]
     fn update_history_value(entry: &mut i16, bonus: i32) {
         let bonus = bonus
@@ -284,19 +226,6 @@ impl SearchData {
             .clamp(-MAX_HISTORY_VAL, MAX_HISTORY_VAL);
         let value = i32::from(*entry);
         *entry = (value + bonus - value * bonus.abs() / MAX_HISTORY_VAL) as i16;
-    }
-
-    #[inline]
-    fn piece_square_index(mov: u32) -> usize {
-        (_move::get_moved_piece(mov) * 64 + _move::get_target(mov)) as usize
-    }
-
-    #[inline]
-    fn capture_index(mov: u32) -> Option<usize> {
-        _move::eaten_piece(mov).map(|victim| {
-            let kind = victim as usize % NOF_PIECE_TYPES_U;
-            Self::piece_square_index(mov) * NOF_PIECE_TYPES_U + kind
-        })
     }
 }
 

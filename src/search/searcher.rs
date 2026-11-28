@@ -571,7 +571,7 @@ impl Search<'_> {
         } else {
             (previous_move, tt_move)
         };
-        let mut picker = MovePicker::new(ply, primary, secondary, &self.pos.played_moves_stack);
+        let mut picker = MovePicker::new(primary, secondary);
         let old_alpha = alpha;
         let mut best_score = -INFINITY;
         let mut best_move = NULL_MOVE;
@@ -586,8 +586,7 @@ impl Search<'_> {
 
         while i < limit {
             let mov = picker.next(
-                &mut self.pos.move_arr[start..limit],
-                i - start,
+                &mut self.pos.move_arr[i..limit],
                 self.move_gen,
                 self.data,
                 &self.pos.board,
@@ -595,7 +594,6 @@ impl Search<'_> {
             if move_eq(mov, skip) {
                 limit -= 1;
                 self.pos.move_arr.swap(i, limit);
-                picker.swap_scores(i - start, limit - start);
                 continue;
             }
             let quiet = !is_eating(mov) && !is_promotion(mov);
@@ -607,7 +605,7 @@ impl Search<'_> {
                     get_target(mov) < 24
                 };
             let history = if quiet {
-                picker.quiet_history(self.data, side, mov)
+                self.data.get_history_entry(side, mov)
             } else {
                 0
             };
@@ -633,7 +631,6 @@ impl Search<'_> {
                     if !self.move_gen.gives_check(&self.pos.board, info, mov) {
                         limit -= 1;
                         self.pos.move_arr.swap(i, limit);
-                        picker.swap_scores(played, limit - start);
                         continue;
                     }
                 }
@@ -726,9 +723,7 @@ impl Search<'_> {
                     return score;
                 }
                 self.data.update_cutoff_history(
-                    ply,
                     side,
-                    &self.pos.played_moves_stack,
                     mov,
                     &self.pos.move_arr[start..i],
                     depth as usize,
@@ -829,15 +824,14 @@ impl Search<'_> {
         }
 
         let tt_move = entry.map_or(NULL_MOVE, |hit| hit.best_move);
-        let mut picker = MovePicker::new(ply, tt_move, NULL_MOVE, &self.pos.played_moves_stack);
+        let mut picker = MovePicker::new(tt_move, NULL_MOVE);
         let mut best_move = NULL_MOVE;
         let mut check_info = None;
         let epoch = self.repetition_epoch;
         let stand_pat = best_score;
         for i in start..end {
             let mov = picker.next(
-                &mut self.pos.move_arr[start..end],
-                i - start,
+                &mut self.pos.move_arr[i..end],
                 self.move_gen,
                 self.data,
                 &self.pos.board,
@@ -846,7 +840,13 @@ impl Search<'_> {
                 let victim = PIECE_MATERIAL_VALUE[eaten_piece(mov).unwrap() as usize];
                 let futile =
                     !pv && self.pos.board.major_minor_count > 4 && stand_pat + victim + 220 < alpha;
-                if is_negative_see(mov) || futile {
+                // Ordering flags use the legacy exchange evaluator.
+                if futile
+                    || !self
+                        .data
+                        .see_helper
+                        .see_positive(mov, &self.pos.board, self.move_gen)
+                {
                     let info =
                         check_info.get_or_insert_with(|| self.move_gen.check_info(&self.pos.board));
                     if !self.move_gen.gives_check(&self.pos.board, info, mov) {
@@ -1066,6 +1066,27 @@ mod tests {
         );
         let (score, nodes) = quiesce("4k3/q7/8/8/8/8/8/R3K3 w - - 0 1", Some(-500));
         assert!(score > 0 && nodes > 1);
+    }
+
+    #[test]
+    fn quiescence_pruning_ignores_legacy_see_flags() {
+        let fen = "8/6k1/5n2/K3B2r/4p3/8/8/4Q3 w - - 0 1";
+        let move_gen = MoveGen::init();
+        let zobrist = Zobrist::default();
+        let pos = Position::from(fen, &move_gen, &zobrist).unwrap();
+        let mut captures = pos
+            .legal_moves()
+            .iter()
+            .copied()
+            .filter(|&mov| is_eating(mov));
+        let capture = captures.next().unwrap();
+        assert_eq!(_move::to_string(capture, true), "e1e4");
+        assert!(captures.next().is_none());
+
+        let mut data = SearchData::new(&pos);
+        assert!(!data.legacy_see.see_positive(capture, &pos.board, &move_gen));
+        assert!(data.see_helper.see_positive(capture, &pos.board, &move_gen));
+        assert!(quiesce(fen, Some(-500)).1 > 1);
     }
 
     #[test]
