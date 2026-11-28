@@ -536,10 +536,6 @@ impl Search<'_> {
                 hit.depth() + 3 >= depth as u8
                     && hit.bound_type() != TTEntryType::UpperBound
                     && hit.score.abs() < MATE_BOUND
-                    && tt_move != NULL_MOVE
-                    && self.pos.move_arr[start..end]
-                        .iter()
-                        .any(|&mov| move_eq(mov, tt_move))
             }) {
                 // Give the TT move extra depth only if every alternative fails low.
                 let singular_beta = hit.score - 3 * depth;
@@ -811,7 +807,6 @@ impl Search<'_> {
             });
             if best_score >= beta {
                 self.data.stand_pat_cutoffs += 1;
-                self.store(key, NULL_MOVE, 0, best_score, ply, TTEntryType::LowerBound);
                 return best_score;
             }
             alpha = alpha.max(best_score);
@@ -878,7 +873,7 @@ impl Search<'_> {
             }
         }
 
-        if self.repetition_epoch == epoch {
+        if best_move != NULL_MOVE && self.repetition_epoch == epoch {
             let bound = if best_score > old_alpha {
                 TTEntryType::Exact
             } else {
@@ -969,11 +964,21 @@ impl Search<'_> {
     }
 
     #[inline]
-    fn probe(&mut self, key: u64, ply: usize) -> Option<TTEntry> {
-        self.tt.probe_refresh(key).map(|entry| TTEntry {
-            score: TranspositionTable::score_from_tt(entry.score, ply as i16),
-            ..entry
-        })
+    fn probe(&self, key: u64, ply: usize) -> Option<TTEntry> {
+        self.tt
+            .probe(key)
+            .filter(|entry| {
+                entry.best_move != NULL_MOVE
+                    && self
+                        .pos
+                        .legal_search_moves()
+                        .iter()
+                        .any(|&mov| move_eq(mov, entry.best_move))
+            })
+            .map(|entry| TTEntry {
+                score: TranspositionTable::score_from_tt(entry.score, ply as i16),
+                ..entry
+            })
     }
 
     #[inline]
@@ -1026,7 +1031,7 @@ fn reductions() -> &'static [[i16; 64]; MAX_SEARCH_DEPTH + 1] {
 mod tests {
     use super::*;
 
-    fn quiesce(fen: &str, razor_eval: Option<i16>) -> (i16, u64) {
+    fn with_search<T>(fen: &str, run: impl FnOnce(&mut Search<'_>) -> T) -> T {
         let move_gen = MoveGen::init();
         let zobrist = Zobrist::default();
         let mut pos = Position::from(fen, &move_gen, &zobrist).unwrap();
@@ -1052,10 +1057,16 @@ mod tests {
             best_move_nodes: 0,
             reductions: reductions(),
         };
-        let bounds = search.pos.search_move_bounds();
-        let score = search.quiescence(0, -1, 0, false, razor_eval);
-        assert_eq!(search.pos.search_move_bounds(), bounds);
-        (score, data.positions_searched)
+        run(&mut search)
+    }
+
+    fn quiesce(fen: &str, razor_eval: Option<i16>) -> (i16, u64) {
+        with_search(fen, |search| {
+            let bounds = search.pos.search_move_bounds();
+            let score = search.quiescence(0, -1, 0, false, razor_eval);
+            assert_eq!(search.pos.search_move_bounds(), bounds);
+            (score, search.data.positions_searched)
+        })
     }
 
     #[test]
@@ -1071,5 +1082,30 @@ mod tests {
     #[test]
     fn quiescence_recognizes_stalemate_with_no_noisy_moves() {
         assert_eq!(quiesce("7k/5K2/6Q1/8/8/8/8/8 b - - 0 1", None), (0, 1));
+    }
+
+    #[test]
+    fn score_only_stand_pat_leaves_no_tt_entry() {
+        with_search("7k/8/5p2/4p3/3Q4/8/8/4K3 w - - 0 1", |search| {
+            let key = search.tt_key();
+            for beta in [0, INFINITY] {
+                assert_eq!(search.quiescence(0, -1, beta, false, Some(1_000)), 1_000);
+                assert!(search.tt.probe(key).is_none());
+            }
+        });
+    }
+
+    #[test]
+    fn quiescence_reuses_scores_only_with_a_legal_move_hint() {
+        with_search("4k3/q7/8/8/8/8/8/R3K3 w - - 0 1", |search| {
+            let key = search.tt_key();
+            let legal = search.pos.legal_search_moves()[0];
+            for illegal in [NULL_MOVE, BLACK_SHORT] {
+                search.store(key, illegal, 0, 500, 0, TTEntryType::Exact);
+                assert_eq!(search.quiescence(0, -1, 0, false, Some(100)), 100);
+            }
+            search.store(key, legal, 0, 500, 0, TTEntryType::Exact);
+            assert_eq!(search.quiescence(0, -1, 0, false, Some(100)), 500);
+        });
     }
 }

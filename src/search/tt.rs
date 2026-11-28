@@ -1,10 +1,9 @@
 //* Stockfish inspired implementation *//
 
-use crate::{repr::_move::NULL_MOVE, search::eval::MATE_BOUND};
+use crate::search::eval::MATE_BOUND;
 
 const CLUSTER_SIZE: usize = 4;
 const REPLACE_V_AGE_COEFFICIENT: u16 = 4;
-const EXACT_REPLACEMENT_BONUS: i16 = 3;
 pub const DEFAULT_TT_SIZE_MB: u32 = 16;
 pub const DEFAULT_TT_SIZE: usize = DEFAULT_TT_SIZE_MB as usize * 1024 * 1024;
 
@@ -127,21 +126,7 @@ impl TranspositionTable {
         return None;
     }
 
-    /// Keep frequently reused entries in the current generation even when the
-    /// search cuts off from the stored bound without writing a new entry.
-    pub(super) fn probe_refresh(&mut self, key: u64) -> Option<TTEntry> {
-        let index = self.get_cluster_idx(key);
-        let entry = self.clusters[index]
-            .entries
-            .iter_mut()
-            .find(|entry| entry.key == key && entry.is_occupied())?;
-        if entry.generation != self.generation {
-            entry.generation = self.generation;
-        }
-        Some(*entry)
-    }
-
-    pub fn store(&mut self, mut tte: TTEntry) {
+    pub fn store(&mut self, tte: TTEntry) {
         let cluster_index: usize = self.get_cluster_idx(tte.key);
         let cluster: &mut TTCluster = &mut self.clusters[cluster_index];
 
@@ -151,11 +136,6 @@ impl TranspositionTable {
         for i in 0..CLUSTER_SIZE {
             if cluster.entries[i].key == tte.key && cluster.entries[i].is_occupied() {
                 let existing = &mut cluster.entries[i];
-                if tte.best_move == NULL_MOVE {
-                    tte.best_move = existing.best_move;
-                } else if existing.best_move == NULL_MOVE {
-                    existing.best_move = tte.best_move;
-                }
                 let existing_depth = existing.depth();
                 let incoming_depth = tte.depth();
                 if incoming_depth > existing_depth {
@@ -197,12 +177,7 @@ impl TranspositionTable {
             return NULL_ENTRY_VALUE;
         } else {
             let age: i16 = cur_gen.wrapping_sub(entry.generation) as i16;
-            let exact = if entry.bound_type() == TTEntryType::Exact {
-                EXACT_REPLACEMENT_BONUS
-            } else {
-                0
-            };
-            return entry.depth() as i16 + exact - REPLACE_V_AGE_COEFFICIENT as i16 * age;
+            return entry.depth() as i16 - REPLACE_V_AGE_COEFFICIENT as i16 * age;
         }
     }
 
@@ -257,7 +232,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn refreshed_entries_survive_cluster_replacement() {
+    fn probing_an_exact_bound_does_not_protect_it_from_cluster_replacement() {
         let mut table = TranspositionTable {
             clusters: vec![TTCluster {
                 entries: [NULL_ENTRY; CLUSTER_SIZE],
@@ -266,7 +241,8 @@ mod tests {
             nof_clusters: 1,
             generation: 255,
         };
-        for key in 1..=4 {
+        table.store(TTEntry::new_packed(1, 4, 7, TTEntryType::Exact, 0, 255));
+        for key in 2..=4 {
             table.store(TTEntry::new_packed(
                 key,
                 4,
@@ -278,27 +254,10 @@ mod tests {
         }
 
         table.generation = 0;
-        assert_eq!(table.probe_refresh(1).unwrap().generation, 0);
+        assert_eq!(table.probe(1).unwrap().generation, 255);
         table.store(TTEntry::new_packed(5, 4, 7, TTEntryType::LowerBound, 0, 0));
 
-        assert!(table.probe(1).is_some());
-        assert!(table.probe(2).is_none());
-    }
-
-    #[test]
-    fn score_only_write_preserves_move_hint() {
-        let mut table = TranspositionTable::default();
-        table.store(TTEntry::new_packed(1, 5, 0, TTEntryType::UpperBound, 0, 0));
-        table.store(TTEntry::new_packed(
-            1,
-            NULL_MOVE,
-            0,
-            TTEntryType::Exact,
-            -5,
-            0,
-        ));
-        let entry = table.probe(1).unwrap();
-        assert_eq!(entry.score, -5);
-        assert_eq!(entry.best_move, 5);
+        assert!(table.probe(1).is_none());
+        assert!(table.probe(2).is_some());
     }
 }
