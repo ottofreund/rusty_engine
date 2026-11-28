@@ -261,7 +261,7 @@ impl Searcher {
             }
 
             let eval = loop {
-                let eval = search.negamax(depth as i16, 0, alpha, beta, true, true, NULL_MOVE);
+                let eval = search.negamax(depth as i16, 0, alpha, beta, true, true);
                 if eval == EVAL_QUIT || (eval > alpha && eval < beta) {
                     break eval;
                 }
@@ -416,7 +416,6 @@ impl Search<'_> {
         mut beta: i16,
         pv: bool,
         follows_previous_pv: bool,
-        skip: u32,
     ) -> i16 {
         self.clear_pv(ply);
         if depth <= 0 && self.use_quiescence {
@@ -448,8 +447,7 @@ impl Search<'_> {
         }
 
         let key = self.tt_key();
-        let excluded = skip != NULL_MOVE;
-        let entry = if excluded { None } else { self.probe(key, ply) };
+        let entry = self.probe(key, ply);
         let safe_clock = self.pos.board.half_move_clock < 90;
         if !pv && safe_clock {
             if let Some(score) = cutoff(entry, depth as u8, alpha, beta) {
@@ -461,7 +459,7 @@ impl Search<'_> {
         let mut raw_eval = 0;
         let mut static_eval = 0;
         let mut improving = false;
-        let selective = self.use_quiescence && !root && !in_check && !excluded && safe_clock;
+        let selective = self.use_quiescence && !root && !in_check && safe_clock;
         let non_pawn_material = self.pos.board.has_non_pawn_material();
         let stable_window = alpha.abs() < MATE_BOUND && beta.abs() < MATE_BOUND;
 
@@ -505,7 +503,6 @@ impl Search<'_> {
                     1 - beta,
                     false,
                     false,
-                    NULL_MOVE,
                 );
                 self.data.repetition_start = repetition_start;
                 self.pos.unmake_null_move();
@@ -522,45 +519,6 @@ impl Search<'_> {
         if selective && depth >= 6 && tt_move == NULL_MOVE && !follows_previous_pv {
             depth -= 1;
         }
-        let can_extend = self.use_quiescence
-            && !root
-            && !excluded
-            && ply + (depth as usize) < self.data.pv_ply_indices.len() + 7
-            && depth < MAX_SEARCH_DEPTH as i16;
-        if can_extend && in_check && (pv || end - start == 1) {
-            depth += 1;
-        }
-        let mut singular_move = NULL_MOVE;
-        if can_extend && selective && depth >= 8 && end - start > 1 {
-            if let Some(hit) = entry.filter(|hit| {
-                hit.depth() + 3 >= depth as u8
-                    && hit.bound_type() != TTEntryType::UpperBound
-                    && hit.score.abs() < MATE_BOUND
-                    && tt_move != NULL_MOVE
-                    && self.pos.move_arr[start..end]
-                        .iter()
-                        .any(|&mov| move_eq(mov, tt_move))
-            }) {
-                // Give the TT move extra depth only if every alternative fails low.
-                let singular_beta = hit.score - 3 * depth;
-                let alternatives = self.negamax(
-                    (depth - 1) / 2,
-                    ply,
-                    singular_beta - 1,
-                    singular_beta,
-                    false,
-                    false,
-                    tt_move,
-                );
-                if alternatives == EVAL_QUIT {
-                    return EVAL_QUIT;
-                }
-                if alternatives < singular_beta {
-                    singular_move = tt_move;
-                }
-            }
-        }
-
         let previous_move = if follows_previous_pv {
             self.previous_pv.get(ply).copied().unwrap_or(NULL_MOVE)
         } else {
@@ -592,12 +550,6 @@ impl Search<'_> {
                 self.data,
                 &self.pos.board,
             );
-            if move_eq(mov, skip) {
-                limit -= 1;
-                self.pos.move_arr.swap(i, limit);
-                picker.swap_scores(i - start, limit - start);
-                continue;
-            }
             let quiet = !is_eating(mov) && !is_promotion(mov);
             let priority = move_eq(mov, previous_move) || move_eq(mov, tt_move);
             let advanced_pawn = get_moved_piece(mov) % 6 == W_PAWN
@@ -639,7 +591,7 @@ impl Search<'_> {
                 }
             }
 
-            let child_depth = depth - 1 + i16::from(move_eq(mov, singular_move));
+            let child_depth = depth - 1;
             let follows = follows_previous_pv && move_eq(mov, previous_move);
             let nodes_before_move = self.data.positions_searched;
             let epoch_before_move = self.repetition_epoch;
@@ -661,15 +613,7 @@ impl Search<'_> {
             };
 
             let score = if pv && played == 0 {
-                -self.negamax(
-                    child_depth,
-                    ply + 1,
-                    -beta,
-                    -alpha,
-                    true,
-                    follows,
-                    NULL_MOVE,
-                )
+                -self.negamax(child_depth, ply + 1, -beta, -alpha, true, follows)
             } else {
                 let mut score = -self.negamax(
                     child_depth - reduction,
@@ -678,29 +622,12 @@ impl Search<'_> {
                     -alpha,
                     false,
                     follows,
-                    NULL_MOVE,
                 );
                 if reduction > 0 && score > alpha && score.abs() != EVAL_QUIT {
-                    score = -self.negamax(
-                        child_depth,
-                        ply + 1,
-                        -alpha - 1,
-                        -alpha,
-                        false,
-                        follows,
-                        NULL_MOVE,
-                    );
+                    score = -self.negamax(child_depth, ply + 1, -alpha - 1, -alpha, false, follows);
                 }
                 if pv && score > alpha && score < beta && score.abs() != EVAL_QUIT {
-                    score = -self.negamax(
-                        child_depth,
-                        ply + 1,
-                        -beta,
-                        -alpha,
-                        true,
-                        follows,
-                        NULL_MOVE,
-                    );
+                    score = -self.negamax(child_depth, ply + 1, -beta, -alpha, true, follows);
                 }
                 score
             };
@@ -722,9 +649,6 @@ impl Search<'_> {
             alpha = alpha.max(score);
             if alpha >= beta {
                 self.data.ab_cutoffs += 1;
-                if excluded {
-                    return score;
-                }
                 self.data.update_cutoff_history(
                     ply,
                     side,
@@ -747,7 +671,7 @@ impl Search<'_> {
         if limit != end {
             best_score = best_score.max(old_alpha);
         }
-        if !excluded && self.repetition_epoch == epoch {
+        if self.repetition_epoch == epoch {
             let bound = if best_score > old_alpha {
                 TTEntryType::Exact
             } else {
