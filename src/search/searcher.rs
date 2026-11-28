@@ -11,7 +11,7 @@ use crate::{
         _move::{self, *},
         move_gen::MoveGen,
         position::Position,
-        types::{WHITE, W_PAWN},
+        types::MAX_PSEUDO_MOVES_IN_POS,
     },
     search::{
         eval::{Evaluator, MATE_BOUND, MATE_EVAL, PIECE_MATERIAL_VALUE},
@@ -32,6 +32,9 @@ const INFINITY: i16 = MATE_EVAL + 1;
 const EVAL_QUIT: i16 = 31111;
 const ASPIRATION_DEPTH: usize = 5;
 const ASPIRATION_MARGIN: i16 = 32;
+const NULL_MOVE_REDUCTION: i16 = 3;
+const FUTILITY_BASE_MARGIN: i16 = 60;
+const FUTILITY_MARGIN_PER_DEPTH: i16 = 40;
 
 struct SearchControl<'a> {
     started: Instant,
@@ -232,7 +235,6 @@ impl Searcher {
             control: &control,
             use_quiescence: self.search_config.quiescence,
             previous_pv: [NULL_MOVE; MAX_SEARCH_DEPTH],
-            static_evals: [None; MAX_PLY],
             root_history_index,
             repetition_epoch: 0,
             best_move_nodes: 0,
@@ -400,11 +402,10 @@ struct Search<'a> {
     control: &'a SearchControl<'a>,
     use_quiescence: bool,
     previous_pv: [u32; MAX_SEARCH_DEPTH],
-    static_evals: [Option<i16>; MAX_PLY],
     root_history_index: usize,
     repetition_epoch: u64,
     best_move_nodes: u64,
-    reductions: &'static [[i16; 64]; MAX_SEARCH_DEPTH + 1],
+    reductions: &'static [[i16; MAX_PSEUDO_MOVES_IN_POS]; MAX_SEARCH_DEPTH + 1],
 }
 
 impl Search<'_> {
@@ -413,7 +414,7 @@ impl Search<'_> {
         mut depth: i16,
         ply: usize,
         mut alpha: i16,
-        mut beta: i16,
+        beta: i16,
         pv: bool,
         follows_previous_pv: bool,
         skip: u32,
@@ -439,14 +440,6 @@ impl Search<'_> {
             return self.raw_eval();
         }
 
-        if !root {
-            alpha = alpha.max(-MATE_EVAL + ply as i16);
-            beta = beta.min(MATE_EVAL - ply as i16 - 1);
-            if alpha >= beta {
-                return alpha;
-            }
-        }
-
         let key = self.tt_key();
         let excluded = skip != NULL_MOVE;
         let entry = if excluded { None } else { self.probe(key, ply) };
@@ -457,71 +450,67 @@ impl Search<'_> {
             }
         }
 
-        self.static_evals[ply] = None;
-        let mut raw_eval = 0;
-        let mut static_eval = 0;
-        let mut improving = false;
         let selective = self.use_quiescence && !root && !in_check && !excluded && safe_clock;
-        let non_pawn_material = self.pos.board.has_non_pawn_material();
-        let stable_window = alpha.abs() < MATE_BOUND && beta.abs() < MATE_BOUND;
-
-        if !in_check && self.use_quiescence {
-            raw_eval = self.raw_eval();
-            static_eval = self.correct_eval(raw_eval);
-            self.static_evals[ply] = Some(static_eval);
-            improving = ply >= 2 && self.static_evals[ply - 2].is_some_and(|old| static_eval > old);
-        }
+        let razor_allowed =
+            self.use_quiescence && !root && !in_check && !excluded && alpha < MATE_BOUND;
+        let can_prune_quiets = !root && !in_check && !excluded && alpha >= 0 && beta < MATE_BOUND;
+        let raw_eval = if !in_check && (self.use_quiescence || can_prune_quiets) {
+            self.raw_eval()
+        } else {
+            0
+        };
+        let static_eval = if !in_check && self.use_quiescence {
+            self.correct_eval(raw_eval)
+        } else {
+            raw_eval
+        };
 
         let epoch = self.repetition_epoch;
-        if selective && !pv && stable_window {
-            let margin = (if improving { 75 } else { 95 }) * depth;
-            if depth <= 6 && non_pawn_material && static_eval >= beta + margin {
-                return beta + (static_eval - beta) / 2;
+        let razor_depth = i32::from(depth);
+        if razor_allowed
+            && i32::from(static_eval) < i32::from(alpha) - (245 + 140 * razor_depth * razor_depth)
+        {
+            let score = self.quiescence(ply, alpha - 1, alpha, false, Some(static_eval));
+            if score == EVAL_QUIT || (score < alpha && score.abs() < MATE_BOUND) {
+                return score;
             }
+        }
 
-            if depth <= 3 && static_eval < alpha - (245 + 140 * depth * depth) {
-                let score = self.quiescence(ply, alpha - 1, alpha, false, Some(static_eval));
-                if score == EVAL_QUIT || (score < alpha && score.abs() < MATE_BOUND) {
-                    return score;
-                }
+        if selective
+            && !pv
+            && alpha.abs() < MATE_BOUND
+            && beta.abs() < MATE_BOUND
+            && depth > 1 + NULL_MOVE_REDUCTION
+            && self.pos.board.has_non_pawn_material()
+            && self.pos.last_target != NULL_MOVE
+            && static_eval >= beta
+            && !entry.is_some_and(|entry| {
+                entry.bound_type() == TTEntryType::UpperBound && entry.score < beta
+            })
+        {
+            self.pos.make_null_move(self.move_gen, self.zobrist);
+            let repetition_start = self.data.repetition_start;
+            self.data.repetition_start = self.data.board_hash_history.len();
+            let score = -self.negamax(
+                depth - 1 - NULL_MOVE_REDUCTION,
+                ply + 1,
+                -beta,
+                1 - beta,
+                false,
+                false,
+                NULL_MOVE,
+            );
+            self.data.repetition_start = repetition_start;
+            self.pos.unmake_null_move();
+            if score.abs() == EVAL_QUIT {
+                return EVAL_QUIT;
             }
-
-            if depth >= 3
-                && non_pawn_material
-                && self.pos.last_target != NULL_MOVE
-                && static_eval >= beta
-                && !entry.is_some_and(|entry| {
-                    entry.bound_type() == TTEntryType::UpperBound && entry.score < beta
-                })
-            {
-                let reduction = 3 + depth / 4 + ((static_eval - beta) / 180).min(2);
-                self.pos.make_null_move(self.move_gen, self.zobrist);
-                let repetition_start = self.data.repetition_start;
-                self.data.repetition_start = self.data.board_hash_history.len();
-                let score = -self.negamax(
-                    (depth - reduction).max(1),
-                    ply + 1,
-                    -beta,
-                    1 - beta,
-                    false,
-                    false,
-                    NULL_MOVE,
-                );
-                self.data.repetition_start = repetition_start;
-                self.pos.unmake_null_move();
-                if score.abs() == EVAL_QUIT {
-                    return EVAL_QUIT;
-                }
-                if score >= beta && score < MATE_BOUND {
-                    return score;
-                }
+            if score >= beta && score < MATE_BOUND {
+                return score;
             }
         }
 
         let tt_move = entry.map_or(NULL_MOVE, |hit| hit.best_move);
-        if selective && depth >= 6 && tt_move == NULL_MOVE && !follows_previous_pv {
-            depth -= 1;
-        }
         let can_extend = self.use_quiescence
             && !root
             && !excluded
@@ -579,7 +568,9 @@ impl Search<'_> {
         let mut i = start;
         let mut limit = end;
         let side = self.pos.board.turn;
-        let futility_margin = 75 + 55 * depth;
+        let futility_pruning = can_prune_quiets
+            && static_eval
+                <= alpha - (FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * (depth - 1));
         if root {
             self.best_move_nodes = 0;
         }
@@ -600,42 +591,16 @@ impl Search<'_> {
             }
             let quiet = !is_eating(mov) && !is_promotion(mov);
             let priority = move_eq(mov, previous_move) || move_eq(mov, tt_move);
-            let advanced_pawn = get_moved_piece(mov) % 6 == W_PAWN
-                && if side == WHITE {
-                    get_target(mov) >= 40
-                } else {
-                    get_target(mov) < 24
-                };
-            let history = if quiet {
-                picker.quiet_history(self.data, side, mov)
-            } else {
-                0
-            };
             let played = i - start;
-            if selective
-                && stable_window
-                && !pv
-                && played > 0
-                && best_score > -MATE_BOUND
-                && quiet
-                && !priority
-                && !advanced_pawn
-                && !is_castle(mov)
+            if futility_pruning && best_score > -MATE_BOUND && quiet && !priority && !is_castle(mov)
             {
-                let late_limit = (3 + usize::from(improving))
-                    + (depth * depth) as usize * if improving { 2 } else { 1 };
-                let late = depth <= 5 && played >= late_limit && history <= 0;
-                let futile =
-                    depth <= 4 && static_eval + futility_margin <= alpha && history < 2_500;
-                if late || futile {
-                    let info =
-                        check_info.get_or_insert_with(|| self.move_gen.check_info(&self.pos.board));
-                    if !self.move_gen.gives_check(&self.pos.board, info, mov) {
-                        limit -= 1;
-                        self.pos.move_arr.swap(i, limit);
-                        picker.swap_scores(played, limit - start);
-                        continue;
-                    }
+                let info =
+                    check_info.get_or_insert_with(|| self.move_gen.check_info(&self.pos.board));
+                if !self.move_gen.gives_check(&self.pos.board, info, mov) {
+                    limit -= 1;
+                    self.pos.move_arr.swap(i, limit);
+                    picker.swap_scores(played, limit - start);
+                    continue;
                 }
             }
 
@@ -644,18 +609,8 @@ impl Search<'_> {
             let nodes_before_move = self.data.positions_searched;
             let epoch_before_move = self.repetition_epoch;
             self.make_move(mov, self.use_quiescence && child_depth == 0);
-            let reduction = if depth >= 3
-                && quiet
-                && played >= if pv || root { 3 } else { 1 }
-                && !in_check
-                && self.pos.board.nof_checkers == 0
-                && !priority
-                && !advanced_pawn
-            {
-                (self.reductions[depth as usize][played.min(63)] + i16::from(!pv && !improving)
-                    - i16::from(pv)
-                    - (history / 6_000).clamp(-1, 1) as i16)
-                    .clamp(0, child_depth - 1)
+            let reduction = if depth >= 3 && played > 0 && !follows_previous_pv {
+                self.reductions[depth as usize][played].min(child_depth - 1)
             } else {
                 0
             };
@@ -1011,12 +966,13 @@ fn partition_noisy(moves: &mut [u32]) -> usize {
     count
 }
 
-fn reductions() -> &'static [[i16; 64]; MAX_SEARCH_DEPTH + 1] {
-    static TABLE: OnceLock<[[i16; 64]; MAX_SEARCH_DEPTH + 1]> = OnceLock::new();
+fn reductions() -> &'static [[i16; MAX_PSEUDO_MOVES_IN_POS]; MAX_SEARCH_DEPTH + 1] {
+    static TABLE: OnceLock<[[i16; MAX_PSEUDO_MOVES_IN_POS]; MAX_SEARCH_DEPTH + 1]> =
+        OnceLock::new();
     TABLE.get_or_init(|| {
         std::array::from_fn(|depth| {
             std::array::from_fn(|played| {
-                (0.55 + (depth.max(1) as f32).ln() * ((played + 1) as f32).ln() / 2.4) as i16
+                (0.99 + (depth.max(1) as f32).ln() * ((played + 1) as f32).ln() / 3.14) as i16
             })
         })
     })
@@ -1046,7 +1002,6 @@ mod tests {
             },
             use_quiescence: true,
             previous_pv: [NULL_MOVE; MAX_SEARCH_DEPTH],
-            static_evals: [None; MAX_PLY],
             root_history_index: 0,
             repetition_epoch: 0,
             best_move_nodes: 0,

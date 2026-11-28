@@ -121,17 +121,17 @@ fn depth_one_futility_searches_late_quiet_mate() {
 }
 
 #[test]
-fn principal_variation_search_finds_material_improvement() {
+fn principal_variation_search_finds_material_cutoff() {
     let engine = TestEngine::new();
     let fen = "2bqk1n1/3nbp2/rp4pr/p1p1p2p/N3P3/2PPBN1P/PP3PP1/1R1K1B1R w - - 0 1";
     let searcher = search_static_depth(&engine, fen, 4, true);
 
-    // After d3d4 g6g5 f1a6, Black can win the bishop before White retreats.
+    // After d3d4 g6g5 f1a6, Black wins the bishop and cuts off the line.
     let child =
         engine.position("2bqk1n1/3nbp2/Bp5r/p1p1p1pp/N2PP3/2P1BN1P/PP3PP1/1R1K3R b - - 0 1");
     let key = Zobrist::zkey50_adjusted(child.zhash, child.board.half_move_clock);
-    let entry = searcher.tt.probe(key).expect("missing PV child TT entry");
-    assert!(entry.bound_type() == TTEntryType::Exact);
+    let entry = searcher.tt.probe(key).expect("missing child TT entry");
+    assert!(entry.bound_type() == TTEntryType::LowerBound);
     assert_eq!(_move::to_string(entry.best_move, true), "c8a6");
     assert!(TranspositionTable::score_from_tt(entry.score, 3) > 0);
 }
