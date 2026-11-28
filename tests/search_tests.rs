@@ -50,7 +50,10 @@ fn assert_legal_pv(engine: &TestEngine, start: &Position, pv: &[u32]) {
 
     for mov in pv {
         assert!(
-            replay.legal_search_moves().contains(mov),
+            replay
+                .legal_search_moves()
+                .iter()
+                .any(|&legal_move| _move::move_eq(legal_move, *mov)),
             "illegal PV move {}",
             _move::to_string(*mov, true)
         );
@@ -105,10 +108,16 @@ fn razor_probe_searches_captures_and_skips_quiet_moves() {
         if let Some(capture) = capture {
             let entry = entry.expect("the tactical reply should reach the full search");
             assert_eq!(entry.depth(), 1);
-            assert_eq!(entry.best_move, find_move(&grandchild, capture));
+            assert!(_move::move_eq(
+                entry.best_move,
+                find_move(&grandchild, capture)
+            ));
         } else {
             assert!(entry.is_none(), "the quiet position should prune without searching moves");
-            assert_eq!(searcher.tt.probe(key(&child)).unwrap().best_move, reply);
+            assert!(_move::move_eq(
+                searcher.tt.probe(key(&child)).unwrap().best_move,
+                reply
+            ));
         }
     }
 }
@@ -261,7 +270,12 @@ fn forced_capture_ends_search_on_insufficient_material() {
             let entry = searcher.tt.probe(pos.zhash).expect("missing root TT entry");
             let context = format!("depth={depth}, quiescence={quiescence}");
             assert_eq!(entry.score, 0, "{context}");
-            assert_eq!(root_pv(&searcher), [*capture], "{context}");
+            let pv = root_pv(&searcher);
+            assert_eq!(pv.len(), 1, "{context}");
+            assert!(_move::move_eq(pv[0], *capture), "{context}");
+            if depth == 1 {
+                assert_ne!(pv[0], *capture, "SEE result was cleared: {context}");
+            }
             assert_eq!(
                 searcher.search_data[0].cumul_positions_searched,
                 2 * depth as u64,
@@ -285,8 +299,9 @@ fn insufficient_material_root_selects_a_legal_move_after_sync() {
     searcher.start_search(&engine.move_gen, &engine.zobrist, None);
 
     let best_move = searcher.collect_best_move().expect("drawn root has moves");
-    assert!(pos.legal_search_moves().contains(&best_move));
-    assert_eq!(root_pv(&searcher), [best_move]);
+    let pv = root_pv(&searcher);
+    assert_eq!(pv, [best_move]);
+    assert_legal_pv(&engine, &pos, &pv);
     assert_eq!(searcher.tt.probe(pos.zhash).unwrap().score, 0);
 }
 

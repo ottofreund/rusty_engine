@@ -105,7 +105,7 @@ impl Searcher {
     /// In UCI mov is not always defined, may be just position
     pub fn sync_new_move(&mut self, new_pos: &Position, mov: Option<u32>) {
         self.last_sync_deviates_from_pv = match self.collect_best_move() {
-            Some(bm) if mov.is_some() => bm != mov.unwrap(),
+            Some(bm) if mov.is_some() => !move_eq(bm, mov.unwrap()),
             _ => true,
         };
         if self.search_config.log_diagnostics {
@@ -318,10 +318,6 @@ impl Searcher {
                     if value == EVAL_QUIT || (value < alpha && value.abs() < MATE_BOUND) {
                         return value;
                     }
-                    // clear move flags if didn't razor
-                    for mov in &mut pos.move_arr[s..e] {
-                        *mov = with_see_cleared(*mov);
-                    }
                 }
             }
 
@@ -378,7 +374,7 @@ impl Searcher {
                 Some(entry) => (prev_pv_mv, entry.best_move),
                 None => (prev_pv_mv, NULL_MOVE),
             };
-            if primary_selection == secondary_selection {
+            if move_eq(primary_selection, secondary_selection) {
                 secondary_selection = NULL_MOVE;
             }
 
@@ -391,8 +387,8 @@ impl Searcher {
                 // EVAL_INIT also keeps the first move in the search.
                 if futility_pruning
                     && eval > -MATE_BOUND
-                    && mov != primary_selection
-                    && mov != secondary_selection
+                    && !move_eq(mov, primary_selection)
+                    && !move_eq(mov, secondary_selection)
                     && !is_eating(mov)
                     && !is_promotion(mov)
                     && !is_castle(mov)
@@ -406,13 +402,13 @@ impl Searcher {
                     }
                 }
 
-                if mov == primary_selection {
+                if move_eq(mov, primary_selection) {
                     primary_selection = NULL_MOVE;
-                } else if mov == secondary_selection {
+                } else if move_eq(mov, secondary_selection) {
                     secondary_selection = NULL_MOVE;
                 }
 
-                let child_follows_prev_pv = follows_prev_pv && mov == prev_pv_mv;
+                let child_follows_prev_pv = follows_prev_pv && move_eq(mov, prev_pv_mv);
                 
                 pos.make_move(mov, true, false, use_quiescence && d == 1, move_gen, zobrist);
                 search_data.board_hash_history.push(pos.zhash);
@@ -760,7 +756,7 @@ impl Searcher {
         tt.probe(key)
             .filter(|entry| {
                 (entry.best_move != NULL_MOVE || entry.depth() == 0)
-                    && moves.contains(&entry.best_move)
+                    && moves.iter().any(|&mov| move_eq(mov, entry.best_move))
             })
             .map(|entry| TTEntry {
                 score: TranspositionTable::score_from_tt(entry.score, ply as i16),
@@ -886,9 +882,15 @@ impl Searcher {
     ) -> u32 {
         let mut best_i: usize = usize::MAX;
         if primary_selection != NULL_MOVE {
-            best_i = move_arr_s.iter().position(|m| *m == primary_selection).expect("primary selection was some but not generated");
+            best_i = move_arr_s
+                .iter()
+                .position(|&mov| move_eq(mov, primary_selection))
+                .expect("primary selection was some but not generated");
         } else if secondary_selection != NULL_MOVE {
-            best_i = move_arr_s.iter().position(|m| *m == secondary_selection).expect("secondary selection was some but not generated");
+            best_i = move_arr_s
+                .iter()
+                .position(|&mov| move_eq(mov, secondary_selection))
+                .expect("secondary selection was some but not generated");
         } else { //no priority move available
             //non-dominating is non-captures if !*only_bad_captures_left, else if *only_bad_captures_left then only bad captures.
             //If only_bad_captures_left == None, then non-dominating are both non-captures and bad captures
@@ -957,7 +959,6 @@ impl Searcher {
         }
 
         move_arr_s.swap(0, best_i);
-        move_arr_s[0] = _move::with_see_cleared(move_arr_s[0]);
         return move_arr_s[0];
     }
 
