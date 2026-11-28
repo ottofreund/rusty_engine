@@ -30,8 +30,6 @@ const STOP_CHECK_INTERVAL: u64 = 2048;
 const TIMED_STOP_CHECK_INTERVAL: u64 = 256;
 const INFINITY: i16 = MATE_EVAL + 1;
 const EVAL_QUIT: i16 = 31111;
-const ASPIRATION_DEPTH: usize = 5;
-const ASPIRATION_MARGIN: i16 = 32;
 
 struct SearchControl<'a> {
     started: Instant,
@@ -238,7 +236,6 @@ impl Searcher {
             best_move_nodes: 0,
             reductions: reductions(),
         };
-        let mut last_score: Option<i16> = None;
 
         for depth in search.data.completed_depth + 1..=target_depth {
             if control.deadline_reached() {
@@ -250,32 +247,7 @@ impl Searcher {
             search.previous_pv[..ordering_len].copy_from_slice(&search.data.pv[..ordering_len]);
             search.data.pv_ply_indices = get_triang_pv_ply_idx_table(depth);
 
-            let mut alpha = -INFINITY;
-            let mut beta = INFINITY;
-            let mut margin = ASPIRATION_MARGIN;
-            if depth >= ASPIRATION_DEPTH && search.use_quiescence {
-                if let Some(score) = last_score.filter(|score| score.abs() < MATE_BOUND) {
-                    alpha = score - margin;
-                    beta = score + margin;
-                }
-            }
-
-            let eval = loop {
-                let eval = search.negamax(depth as i16, 0, alpha, beta, true, true, NULL_MOVE);
-                if eval == EVAL_QUIT || (eval > alpha && eval < beta) {
-                    break eval;
-                }
-                if control.deadline_reached() {
-                    break EVAL_QUIT;
-                }
-
-                margin = margin.saturating_mul(2).min(INFINITY);
-                if eval <= alpha {
-                    alpha = eval.saturating_sub(margin).max(-INFINITY);
-                } else {
-                    beta = eval.saturating_add(margin).min(INFINITY);
-                }
-            };
+            let eval = search.negamax(depth as i16, 0, -INFINITY, INFINITY, true, true, NULL_MOVE);
 
             search.data.cumul_positions_searched += search.data.positions_searched;
             if eval == EVAL_QUIT {
@@ -286,7 +258,6 @@ impl Searcher {
                 break;
             }
 
-            last_score = Some(eval);
             search.data.completed_depth = depth;
             pv_len = search.data.pv[..depth]
                 .iter()
