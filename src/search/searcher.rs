@@ -14,7 +14,7 @@ use crate::{
         types::{WHITE, W_PAWN},
     },
     search::{
-        eval::{Evaluator, MATE_BOUND, MATE_EVAL, PIECE_MATERIAL_VALUE},
+        eval::{Evaluator, MATE_BOUND, MATE_EVAL},
         move_picker::MovePicker,
         search_config::*,
         search_data::{get_triang_pv_ply_idx_table, SearchData},
@@ -831,9 +831,7 @@ impl Search<'_> {
         let tt_move = entry.map_or(NULL_MOVE, |hit| hit.best_move);
         let mut picker = MovePicker::new(ply, tt_move, NULL_MOVE, &self.pos.played_moves_stack);
         let mut best_move = NULL_MOVE;
-        let mut check_info = None;
         let epoch = self.repetition_epoch;
-        let stand_pat = best_score;
         for i in start..end {
             let mov = picker.next(
                 &mut self.pos.move_arr[start..end],
@@ -842,21 +840,6 @@ impl Search<'_> {
                 self.data,
                 &self.pos.board,
             );
-            if !in_check && !is_promotion(mov) && !is_en_passant(mov) && alpha.abs() < MATE_BOUND {
-                let victim = PIECE_MATERIAL_VALUE[eaten_piece(mov).unwrap() as usize];
-                let futile =
-                    !pv && self.pos.board.major_minor_count > 4 && stand_pat + victim + 220 < alpha;
-                if is_negative_see(mov) || futile {
-                    let info =
-                        check_info.get_or_insert_with(|| self.move_gen.check_info(&self.pos.board));
-                    if !self.move_gen.gives_check(&self.pos.board, info, mov) {
-                        if futile {
-                            best_score = best_score.max(stand_pat + victim + 220);
-                        }
-                        continue;
-                    }
-                }
-            }
             let epoch_before_move = self.repetition_epoch;
             self.make_move(mov, true);
             let score = -self.quiescence(ply + 1, -beta, -alpha, pv, None);
@@ -1066,6 +1049,12 @@ mod tests {
         );
         let (score, nodes) = quiesce("4k3/q7/8/8/8/8/8/R3K3 w - - 0 1", Some(-500));
         assert!(score > 0 && nodes > 1);
+    }
+
+    #[test]
+    fn quiescence_searches_a_losing_capture() {
+        let (_, nodes) = quiesce("4k3/8/8/8/8/1p6/p7/R3K3 w - - 0 1", Some(-500));
+        assert!(nodes > 1);
     }
 
     #[test]
