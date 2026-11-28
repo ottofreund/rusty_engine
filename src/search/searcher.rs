@@ -682,14 +682,7 @@ impl Searcher {
         let mut primary_selection = tte.map_or(NULL_MOVE, |entry| entry.best_move);
         // Razoring starts with a full move list and keeps its bounds for the main search.
         let e = if razor_eval.is_some() {
-            let mut noisy_end = s;
-            for i in s..e {
-                let mov = pos.move_arr[i];
-                if is_eating(mov) || is_promotion(mov) {
-                    pos.move_arr.swap(i, noisy_end);
-                    noisy_end += 1;
-                }
-            }
+            let noisy_end = s + Self::partition_noisy_moves(&mut pos.move_arr[s..e]);
             if !is_eating(primary_selection) && !is_promotion(primary_selection) {
                 primary_selection = NULL_MOVE;
             }
@@ -749,6 +742,19 @@ impl Searcher {
         }
         Self::store_tt(tt, key, best_move, 0, eval, ply, old_alpha, old_beta);
         eval
+    }
+
+    #[inline]
+    fn partition_noisy_moves(moves: &mut [u32]) -> usize {
+        let mut noisy_count = 0;
+        for i in 0..moves.len() {
+            let mov = moves[i];
+            if is_eating(mov) || is_promotion(mov) {
+                moves.swap(i, noisy_count);
+                noisy_count += 1;
+            }
+        }
+        noisy_count
     }
 
     #[inline]
