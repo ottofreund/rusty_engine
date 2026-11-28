@@ -436,7 +436,7 @@ impl Search<'_> {
             return 0;
         }
         if depth <= 0 || ply == MAX_PLY {
-            return self.raw_eval();
+            return self.evaluate();
         }
 
         if !root {
@@ -458,7 +458,6 @@ impl Search<'_> {
         }
 
         self.static_evals[ply] = None;
-        let mut raw_eval = 0;
         let mut static_eval = 0;
         let mut improving = false;
         let selective = self.use_quiescence && !root && !in_check && !excluded && safe_clock;
@@ -466,8 +465,7 @@ impl Search<'_> {
         let stable_window = alpha.abs() < MATE_BOUND && beta.abs() < MATE_BOUND;
 
         if !in_check && self.use_quiescence {
-            raw_eval = self.raw_eval();
-            static_eval = self.correct_eval(raw_eval);
+            static_eval = self.evaluate();
             self.static_evals[ply] = Some(static_eval);
             improving = ply >= 2 && self.static_evals[ply - 2].is_some_and(|old| static_eval > old);
         }
@@ -735,9 +733,6 @@ impl Search<'_> {
                 );
                 if self.repetition_epoch == epoch_before_move {
                     self.store(key, mov, depth as u8, score, ply, TTEntryType::LowerBound);
-                    if selective && quiet && depth >= 2 && score > static_eval {
-                        self.learn_correction(raw_eval, score, depth);
-                    }
                 }
                 return score;
             }
@@ -754,14 +749,6 @@ impl Search<'_> {
                 TTEntryType::UpperBound
             };
             self.store(key, best_move, depth as u8, best_score, ply, bound);
-            if selective
-                && depth >= 2
-                && !is_eating(best_move)
-                && !is_promotion(best_move)
-                && (bound == TTEntryType::Exact || best_score < static_eval)
-            {
-                self.learn_correction(raw_eval, best_score, depth);
-            }
         }
         best_score
     }
@@ -805,10 +792,7 @@ impl Search<'_> {
             {
                 return 0;
             }
-            best_score = razor_eval.unwrap_or_else(|| {
-                let raw = self.raw_eval();
-                self.correct_eval(raw)
-            });
+            best_score = razor_eval.unwrap_or_else(|| self.evaluate());
             if best_score >= beta {
                 self.data.stand_pat_cutoffs += 1;
                 self.store(key, NULL_MOVE, 0, best_score, ply, TTEntryType::LowerBound);
@@ -817,7 +801,7 @@ impl Search<'_> {
             alpha = alpha.max(best_score);
         }
         if ply == MAX_PLY {
-            return self.raw_eval();
+            return self.evaluate();
         }
 
         if razor_eval.is_some() {
@@ -923,25 +907,10 @@ impl Search<'_> {
     }
 
     #[inline]
-    fn raw_eval(&self) -> i16 {
+    fn evaluate(&self) -> i16 {
+        let board = &self.pos.board;
         self.evaluator
-            .evaluate_position(&self.pos.board, self.move_gen)
-    }
-
-    #[inline]
-    fn correct_eval(&self, raw: i16) -> i16 {
-        if self.pos.board.major_minor_count == 0 {
-            raw
-        } else {
-            self.data.correct_static_eval(&self.pos.board, raw)
-        }
-    }
-
-    fn learn_correction(&mut self, raw: i16, score: i16, depth: i16) {
-        if self.pos.board.major_minor_count > 0 && score.abs() < MATE_BOUND {
-            self.data
-                .update_eval_correction(&self.pos.board, raw, score, depth as usize);
-        }
+            .eval(board.pieces, board.turn, board.late_game_phase)
     }
 
     fn clear_pv(&mut self, ply: usize) {
@@ -1071,5 +1040,16 @@ mod tests {
     #[test]
     fn quiescence_recognizes_stalemate_with_no_noisy_moves() {
         assert_eq!(quiesce("7k/5K2/6Q1/8/8/8/8/8 b - - 0 1", None), (0, 1));
+    }
+
+    #[test]
+    fn quiescence_stand_pat_uses_legacy_evaluation() {
+        let fen = "4k3/8/8/8/8/8/1q6/R3K3 b - - 0 1";
+        let board = Position::from(fen, &MoveGen::init(), &Zobrist::default())
+            .unwrap()
+            .board;
+        let expected = Evaluator::default().eval(board.pieces, board.turn, board.late_game_phase);
+        assert!(expected > 0);
+        assert_eq!(quiesce(fen, None), (expected, 1));
     }
 }

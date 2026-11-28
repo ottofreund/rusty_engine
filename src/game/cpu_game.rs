@@ -82,7 +82,6 @@ impl CpuGame {
 impl Default for CpuGame {
     fn default() -> Self {
         let move_gen = MoveGen::init();
-        crate::search::eval::Evaluator::prepare_endgames(&move_gen);
         let zobrist = Zobrist::default();
         let position = Position::default(&move_gen, &zobrist);
         let searcher = Searcher::from(&position, false);

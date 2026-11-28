@@ -1,12 +1,10 @@
 use crate::{
     repr::{
         _move::{self, NULL_MOVE},
-        board::Board,
         position::Position,
-        types::{B_PAWN_U, NOF_PIECE_TYPES_U, W_PAWN_U},
+        types::NOF_PIECE_TYPES_U,
     },
     search::{
-        eval::MATE_BOUND,
         searcher::{MAX_PLY, MAX_SEARCH_DEPTH},
         see::SeeWorker,
     },
@@ -18,10 +16,6 @@ const BONUS_MULTIPLIER: i32 = 7;
 const HISTORY_AGING_NUMERATOR: i32 = 3;
 const HISTORY_AGING_DENOMINATOR: i32 = 4;
 const PIECE_SQUARES: usize = 2 * NOF_PIECE_TYPES_U * 64;
-const CORRECTION_BITS: u32 = 13;
-const CORRECTION_ENTRIES: usize = 1 << CORRECTION_BITS;
-const CORRECTION_SCALE: i32 = 64;
-const MAX_CORRECTION: i32 = 128 * CORRECTION_SCALE;
 
 pub struct SearchData {
     // Triangular scratch/result table. The root PV starts at index 0 and never
@@ -38,7 +32,6 @@ pub struct SearchData {
     pub history_table: [i16; 2 * 64 * 64], //history_table[side * 4096 + from_sq * 64 + to_sq]
     capture_history: [i16; PIECE_SQUARES * NOF_PIECE_TYPES_U],
     continuation_history: Box<[i16]>,
-    correction_history: Box<[i16]>,
     pub(super) killers: [[u32; 2]; MAX_PLY + 1],
     pub see_helper: SeeWorker,
     //per search data
@@ -59,7 +52,6 @@ impl SearchData {
         self.history_table.fill(0);
         self.capture_history.fill(0);
         self.continuation_history.fill(0);
-        self.correction_history.fill(0);
         self.killers.fill([NULL_MOVE; 2]);
         self.mate_in = None;
         self.repetition_start = 0;
@@ -80,7 +72,6 @@ impl SearchData {
             history_table: [0; 2 * 64 * 64],
             capture_history: [0; PIECE_SQUARES * NOF_PIECE_TYPES_U],
             continuation_history: vec![0; PIECE_SQUARES * PIECE_SQUARES].into_boxed_slice(),
-            correction_history: vec![0; 2 * CORRECTION_ENTRIES].into_boxed_slice(),
             killers: [[NULL_MOVE; 2]; MAX_PLY + 1],
             see_helper: SeeWorker,
             positions_searched: 0,
@@ -231,38 +222,6 @@ impl SearchData {
         Self::capture_index(mov).map_or(0, |index| i32::from(self.capture_history[index]))
     }
 
-    #[inline]
-    pub(super) fn correct_static_eval(&self, board: &Board, raw_score: i16) -> i16 {
-        let correction = i32::from(self.correction_history[Self::correction_index(board)]);
-        (i32::from(raw_score) + correction / CORRECTION_SCALE)
-            .clamp(i32::from(-MATE_BOUND + 1), i32::from(MATE_BOUND - 1)) as i16
-    }
-
-    pub(super) fn update_eval_correction(
-        &mut self,
-        board: &Board,
-        raw_score: i16,
-        result: i16,
-        depth: usize,
-    ) {
-        let index = Self::correction_index(board);
-        let entry = i32::from(self.correction_history[index]);
-        let target = ((i32::from(result) - i32::from(raw_score)) * CORRECTION_SCALE)
-            .clamp(-2 * MAX_CORRECTION, 2 * MAX_CORRECTION);
-        let weight = (depth + 1).min(16) as i32;
-        self.correction_history[index] =
-            (entry + (target - entry) * weight / 128).clamp(-MAX_CORRECTION, MAX_CORRECTION) as i16;
-    }
-
-    #[inline]
-    fn correction_index(board: &Board) -> usize {
-        let white = board.pieces[W_PAWN_U].wrapping_mul(0x9e3779b97f4a7c15);
-        let black = board.pieces[B_PAWN_U].wrapping_mul(0xbf58476d1ce4e5b9);
-        let hash = white ^ black.rotate_left(17);
-        let mixed = (hash ^ (hash >> 32)).wrapping_mul(0x94d049bb133111eb);
-        (mixed >> (64 - CORRECTION_BITS)) as usize + board.turn as usize * CORRECTION_ENTRIES
-    }
-
     fn update_quiet_history(
         &mut self,
         side: u32,
@@ -345,25 +304,5 @@ mod tests {
         assert!(!data.in_three_fold(&pos));
         data.board_hash_history.extend([other, hash, other, hash]);
         assert!(data.in_three_fold(&pos));
-    }
-
-    #[test]
-    fn evaluation_correction_is_bounded_and_specific_to_pawns_and_mover() {
-        let pos = Position::default(&MoveGen::init(), &Zobrist::default());
-        let mut data = SearchData::new(&pos);
-        let mut other_pawns = pos.board.clone();
-        other_pawns.pieces[W_PAWN_U] ^= 1 << 52;
-        let mut other_mover = pos.board.clone();
-        other_mover.turn ^= 1;
-
-        for _ in 0..32 {
-            data.update_eval_correction(&pos.board, 0, 1_000, 10);
-        }
-
-        assert_eq!(data.correct_static_eval(&pos.board, 20), 148);
-        assert_eq!(data.correct_static_eval(&other_pawns, 20), 20);
-        assert_eq!(data.correct_static_eval(&other_mover, 20), 20);
-        data.reset();
-        assert_eq!(data.correct_static_eval(&pos.board, 20), 20);
     }
 }

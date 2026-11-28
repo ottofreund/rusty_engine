@@ -219,39 +219,55 @@ fn positional_evaluation_is_symmetric_under_rank_and_color_flip() {
     let position = engine.board("r4rk1/pp3p1p/2n1p1p1/2Pp4/3P2b1/2P1BN2/P3QPPP/R4RK1 w - - 0 1");
     let mirror = engine.board("r4rk1/p3qppp/2p1bn2/3p2B1/2pP4/2N1P1P1/PP3P1P/R4RK1 b - - 0 1");
     assert_eq!(
-        evaluator.evaluate_position(&position, &engine.move_gen),
-        evaluator.evaluate_position(&mirror, &engine.move_gen)
+        evaluator.eval(position.pieces, position.turn, position.late_game_phase),
+        evaluator.eval(mirror.pieces, mirror.turn, mirror.late_game_phase)
     );
 }
 
 #[test]
-fn bishop_and_knight_evaluation_drives_king_to_matching_corner() {
+fn bishop_and_knight_evaluation_scores_defending_king_by_square() {
     let engine = TestEngine::new();
     let evaluator = Evaluator::default();
-    let correct_corner = engine.board("7k/8/8/8/3K4/2N5/8/2B5 w - - 0 1");
-    let wrong_corner = engine.board("k7/8/8/8/3K4/2N5/8/2B5 w - - 0 1");
-    assert!(
-        evaluator.evaluate_position(&correct_corner, &engine.move_gen)
-            > evaluator.evaluate_position(&wrong_corner, &engine.move_gen)
+    let h8 = engine.board("7k/8/8/8/3K4/2N5/8/2B5 w - - 0 1");
+    let a8 = engine.board("k7/8/8/8/3K4/2N5/8/2B5 w - - 0 1");
+    let opening = load_table("king_e.txt");
+    let endgame = load_table("king_l.txt");
+    let king_value = |square| tapered_value(opening[square], endgame[square], (0.12, 0.88));
+    assert_eq!(
+        evaluator.eval(h8.pieces, h8.turn, h8.late_game_phase)
+            - evaluator.eval(a8.pieces, a8.turn, a8.late_game_phase),
+        king_value(0) - king_value(7)
     );
 }
 
 #[test]
-fn king_and_pawn_bitbase_distinguishes_wins_from_rook_pawn_draws() {
+fn blocked_rook_pawn_retains_legacy_pawn_and_king_square_scores() {
     let engine = TestEngine::new();
     let evaluator = Evaluator::default();
-    let winning = engine.board("8/k1P5/2K5/8/8/8/8/8 w - - 0 1");
-    let defender_turn = engine.board("8/k1P5/2K5/8/8/8/8/8 b - - 0 1");
-    let reflected = engine.board("8/8/8/8/8/5k2/5p1K/8 b - - 0 1");
     let blocked = engine.board("k7/P7/2K5/8/8/8/8/8 w - - 0 1");
-    let stalemate = engine.board("k7/P7/1K6/8/8/8/8/8 b - - 0 1");
-    let evaluate = |board| evaluator.evaluate_position(board, &engine.move_gen);
+    let pawn_open = load_table("pawn_e.txt");
+    let pawn_end = load_table("pawn_l.txt");
+    let king_open = load_table("king_e.txt");
+    let king_end = load_table("king_l.txt");
+    let coefficients = (0.04, 0.96);
+    let expected = PIECE_MATERIAL_VALUE[W_PAWN_U]
+        + tapered_value(pawn_open[48], pawn_end[48], coefficients)
+        + 130
+        + tapered_value(king_open[42], king_end[42], coefficients)
+        - tapered_value(king_open[0], king_end[0], coefficients);
+    assert_eq!(
+        evaluator.eval(blocked.pieces, blocked.turn, blocked.late_game_phase),
+        expected
+    );
+}
 
-    assert!(evaluate(&winning) > 400);
-    assert!(evaluate(&defender_turn) < -400);
-    assert_eq!(evaluate(&winning), evaluate(&reflected));
-    assert_eq!(evaluate(&blocked), 0);
-    assert_eq!(evaluate(&stalemate), 0);
+#[test]
+fn synthetic_position_with_many_passers_and_promoted_queens_scores_without_overflow() {
+    let board = TestEngine::new().board("k7/PpPPPPPP/2QQQQ2/2QQQQ2/2QQQQ2/8/8/6K1 w - - 0 1");
+    assert_eq!(
+        Evaluator::default().eval(board.pieces, board.turn, board.late_game_phase),
+        12_748
+    );
 }
 
 fn reference_passers(friendly: u64, enemy: u64, white: bool) -> u64 {
